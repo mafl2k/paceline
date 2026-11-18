@@ -1,0 +1,571 @@
+/* Colors come from the active Sauce theme (app setting or this window's override), which Sauce
+   exposes as --theme-<name>-hue/-sat/-light. The fallbacks are Sauce's default theme, used only
+   in the plain-browser preview. */
+html.paceline {
+    --pl-h-bg: var(--theme-bg-hue, 0) var(--theme-bg-sat, 100%) var(--theme-bg-light, 36%);
+    --pl-h-bg2: var(--theme-bg2-hue, 233) var(--theme-bg2-sat, 96%) var(--theme-bg2-light, 15%);
+    --pl-h-fg: var(--theme-fg-hue, 0) var(--theme-fg-sat, 0%) var(--theme-fg-light, 100%);
+    --pl-h-neg: var(--theme-negative-hue, 0) var(--theme-negative-sat, 85%) var(--theme-negative-light, 46%);
+    --pl-h-pos: var(--theme-positive-hue, 130) var(--theme-positive-sat, 60%) var(--theme-positive-light, 50%);
+
+    /* Only for the plain-browser preview; inside Sauce, Sauce paints the window background. */
+    --pl-bg: linear-gradient(135deg, hsl(var(--pl-h-bg)), hsl(var(--pl-h-bg2)));
+    --pl-fg: hsl(var(--pl-h-fg));
+    --pl-dim: hsl(var(--pl-h-fg) / 0.68);
+    --pl-line: hsl(var(--pl-h-fg) / 0.18);
+    --pl-ok: hsl(var(--pl-h-pos));
+    --pl-bad: hsl(var(--pl-h-neg));
+    --pl-btn: hsl(var(--pl-h-fg) / 0.14);
+    --pl-btn-hover: hsl(var(--pl-h-fg) / 0.26);
+    --pl-me: hsl(var(--pl-h-fg) / 0.22);
+    --pl-amber: #f5a623;    /* fixed warning colour: Sauce themes have no yellow */
+    font-family: Saira, system-ui, sans-serif;
+    color: var(--pl-fg);
+    /* No html background here: Sauce keeps a 0.2 % alpha on <html> on purpose (Windows). */
+}
+
+html.paceline, html.paceline body { height: 100%; }
+
+/* Outside Sauce there is no common.css: hide the titlebar, paint the page, hide Sauce-only bits. */
+html.standalone #titlebar { display: none; }
+html.standalone body { margin: 0; background: var(--pl-bg); }
+html.standalone .sauce-only { display: none !important; }
+
+html.settings-page #pl-root {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 0 6px 12px;
+    font-size: 1rem;
+}
+
+#pl-root section { margin-bottom: 14px; }
+
+.pl-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.pl-head strong { font-size: 1.1em; text-transform: uppercase; letter-spacing: 0.06em; }
+/* Settings: the window's own part on top, then this band before what applies to both windows. */
+.pl-scope {
+    margin: 18px 0 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--pl-line);
+    color: var(--pl-dim);
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+html.pl-for-action .pl-info-only, html.pl-for-rest .pl-info-only { display: none !important; }
+html:not(.pl-for-action) .pl-action-only { display: none !important; }
+.pl-opacity { display: flex; align-items: center; gap: 8px; }
+.pl-opacity input[type="range"] { flex: 1; min-width: 0; }
+.pl-opacity input[type="number"] { width: 4.5em; }
+.pl-head button { margin-left: auto; }
+
+#pl-root h4 {
+    margin: 12px 0 2px;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pl-dim);
+}
+#pl-appearance-form label { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+#pl-appearance-form select { flex: 1; min-width: 0; }
+
+/* ---------- plan import ---------- */
+
+#pl-plan { position: relative; }
+
+.pl-drop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border: 2px dashed var(--pl-line);
+    border-radius: 8px;
+}
+.pl-help { flex: 1 1 100%; color: var(--pl-dim); font-size: 0.9em; }
+.pl-drop-hint { display: none; font-weight: 700; }
+#pl-plan.dragging .pl-drop { border-color: var(--pl-fg); background: var(--pl-btn); }
+#pl-plan.dragging .pl-drop-hint { display: block; }
+#pl-plan.dragging .pl-pick { display: none; }
+
+.pl-pick input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+}
+.pl-pick:focus-within .pl-btn { outline: 2px solid var(--pl-fg); }
+
+.pl-btn, #pl-root button {
+    display: inline-block;
+    padding: 4px 10px;
+    border: none;
+    border-radius: 6px;
+    background: var(--pl-btn);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.pl-btn:hover, #pl-root button:hover:not(:disabled) { background: var(--pl-btn-hover); }
+#pl-root button:disabled { opacity: 0.4; cursor: default; }
+
+#pl-paste { margin-top: 8px; }
+#pl-paste summary { cursor: pointer; color: var(--pl-dim); }
+#pl-paste textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 6px 0;
+    padding: 6px;
+    border: 1px solid var(--pl-line);
+    border-radius: 6px;
+    background: hsl(var(--pl-h-fg) / 0.08);
+    color: inherit;
+    font: 0.8rem ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* Plan server */
+.pl-check { display: flex; align-items: center; gap: 6px; margin: 4px 0; cursor: pointer; }
+.pl-check.pl-sub { margin-left: 1.6em; }    /* an option within the one above */
+.pl-check:has(input:disabled) { opacity: 0.5; cursor: default; }
+.pl-field { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.pl-field > span { flex: none; min-width: 6em; }
+.pl-field input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--pl-line);
+    border-radius: 6px;
+    background: hsl(var(--pl-h-fg) / 0.08);
+    color: inherit;
+    font: inherit;
+}
+#pl-server-status { font-weight: 600; color: inherit; }
+
+#pl-msg, .pl-error {
+    margin: 8px 0;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border-left: 4px solid var(--pl-bad);
+    background: hsl(var(--pl-h-neg) / 0.25);
+}
+[hidden] { display: none !important; }
+
+.pl-note { color: var(--pl-dim); font-size: 0.9em; margin: 6px 0; }
+.pl-note a { color: inherit; text-decoration: underline; }
+
+/* ---------- plan view ---------- */
+
+.pl-team { margin-top: 12px; font-size: 1.1em; font-weight: 600; }
+.pl-code {
+    font: 700 2.4rem ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+}
+/* Pull target unit (W | W/kg) */
+.pl-unit { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.pl-unit label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+.pl-you { margin: 6px 0; font-weight: 600; }
+.pl-you.pl-you-in { color: var(--pl-ok); }
+.pl-warnings { margin: 6px 0; padding-left: 1.2em; color: var(--pl-dim); font-size: 0.9em; }
+
+#pl-riders { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.95em; }
+#pl-riders th {
+    text-align: left;
+    padding: 3px 6px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pl-dim);
+    border-bottom: 1px solid var(--pl-line);
+}
+#pl-riders td { padding: 5px 6px; border-bottom: 1px solid var(--pl-line); vertical-align: middle; }
+#pl-riders tr.pl-me td { background: var(--pl-me); font-weight: 700; }
+#pl-riders .pl-num { text-align: right; font-variant-numeric: tabular-nums; }
+#pl-riders th:nth-child(1), #pl-riders th:nth-child(4), #pl-riders th:nth-child(5) { text-align: right; }
+
+/* Kit swatch with the double ring (white inside, black outside) so any colour shows on any theme. */
+.pl-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin: 0 10px 0 4px;
+    vertical-align: middle;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #000;
+}
+
+/* ---------- recordings ---------- */
+
+#pl-rec-list { list-style: none; margin: 0; padding: 0; }
+.pl-recrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--pl-line);
+}
+.pl-recinfo { flex: 1; min-width: 0; }
+.pl-recwhen { font-weight: 600; }
+.pl-recsub { color: var(--pl-dim); font-size: 0.9em; font-variant-numeric: tabular-nums; }
+.pl-reclive { color: var(--pl-bad); font-weight: 700; font-size: 0.9em; }
+.pl-recactions { display: flex; gap: 6px; }
+
+/* ---------- overlay window ---------- */
+
+/* The window background is Sauce's own, as in its built-in windows: Sauce paints the body with the
+   theme gradient at the theme's opacity (transparent themes make it see-through, and it shows
+   again on hover), the background texture, the outline and the rounded corners. No own box
+   background and no transparent-bg body class, or the theme's transparency would not apply. */
+html.pl-overlay body {
+    margin: 0;
+    overflow: hidden;
+}
+/* Plain-browser preview (no Sauce CSS): the theme gradient with Sauce's corners. */
+html.standalone.pl-overlay body { border-radius: 2mm; }
+
+/* Sauce's per-window "Solid background" (Common.setBackground sets the class and the colour with
+   its opacity), painted the way Sauce's windows do it. */
+html.solid-background:not(.pl-vanish) { background: var(--background-color); }
+html.solid-background body { background: transparent; }
+/* The Rest window during my pull (user, 13 Nov 2026): nothing to show, so the window disappears,
+   background, outline and texture too (paceline.mjs sets body.transparent-bg, which Sauce's
+   common.css paints fully transparent, and html.pl-vanish, which drops a solid background). */
+html.standalone.pl-vanish body { background: transparent !important; }
+
+html.pl-overlay #pl-root {
+    height: 100%;
+    box-sizing: border-box;
+    padding: 6px;
+}
+
+#pl-box {
+    box-sizing: border-box;
+    height: 100%;
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.pl-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+.pl-line-plan { font-weight: 600; }
+/* Fixed slots: a hidden line keeps its place, so nothing moves when a line comes or goes. The
+   live part (front, next, recorder) stands apart from my plan facts above it. The captain's Next
+   line only exists with its option on. */
+html.pl-info #pl-box > .pl-line[hidden] { display: block !important; visibility: hidden; }
+html.pl-info #pl-grid > .pl-line[hidden] { display: grid !important; visibility: hidden; }
+html.pl-info #pl-box > .pl-line, html.pl-info #pl-grid > .pl-line { min-height: 1lh; }    /* an empty line keeps its height too */
+html.pl-info #pl-line-front { margin-top: 0.5em; }
+html.pl-info:not(.pl-show-next) #pl-grid > #pl-line-next { display: none !important; }
+/* Captain mode with the table: Front and Next are its first rows instead. */
+html.pl-info.pl-table-front #pl-grid > #pl-line-front,
+html.pl-info.pl-table-front #pl-grid > #pl-line-next { display: none !important; }
+.pl-rot .pl-rot-name.pl-dim { color: var(--pl-dim); font-weight: 400; }
+.pl-rot .pl-rot-name.pl-warn { color: var(--pl-amber); }
+/* Captain's Next line when it is the plan's guess (before the start, climb, alone, no data). */
+.pl-rot.pl-planned .pl-rot-name, .pl-rot.pl-planned .pl-rot-num, .pl-rot.pl-planned .pl-rot-secs,
+.pl-rot.pl-planned .pl-rot-at, .pl-rot.pl-planned .pl-rot-target { color: var(--pl-dim); font-weight: 400; }
+.pl-line-you.pl-you-in { color: var(--pl-ok); }
+.pl-line-you .pl-rot-name { font-variant-numeric: tabular-nums; }
+.pl-line-rec { font-size: 0.9em; color: var(--pl-dim); font-variant-numeric: tabular-nums; }
+/* Outside a TTT event the Info window shows only one quiet line. */
+html.pl-info:not(.pl-muted) #pl-box > #pl-line-muted { display: none !important; }
+html.pl-info.pl-muted #pl-box > :not(#pl-line-muted) { display: none !important; }
+.pl-line-muted { color: var(--pl-dim); }
+/* The rotation table: one row per plan rider from the rider pulling; me highlighted, the rider
+   pulling in bold, riders not with the group dim. In captain mode with the table its first rows
+   are Front and Next, set apart from the rest. */
+.pl-table { margin-top: 0.4em; padding-top: 0.3em; border-top: 1px solid hsl(var(--pl-h-fg) / 0.25); }
+.pl-trow .pl-rot-name { font-weight: 400; }
+.pl-trow .pl-rot-num { color: var(--pl-dim); }
+.pl-trow.pl-pulling { font-weight: 700; }
+.pl-trow.pl-pulling .pl-rot-name { font-weight: 700; }
+.pl-trow.pl-pulling .pl-rot-num { color: inherit; }
+.pl-trow.pl-me, .pl-trow.pl-me .pl-rot-num { color: var(--pl-ok); }
+.pl-trow.pl-absent, .pl-trow.pl-absent .pl-rot-num { color: var(--pl-dim); }
+.pl-trow.pl-gap-after { margin-bottom: 0.45em; }
+/* Riders dropped from the group: last, below a thin dashed line (user, 14 Nov 2026). */
+.pl-trow.pl-dropped-first { margin-top: 0.3em; padding-top: 0.25em; border-top: 1px dashed hsl(var(--pl-h-fg) / 0.3); }
+/* Captain table: the rider pulling and the next one, the two to call out, 15 % larger. Their own
+   columns (not the table's), so the larger text never widens the columns of the rows below and
+   both blocks stay lined up on their "@" and flush right; the number column is fixed, so their
+   names start at the same place. */
+.pl-line.pl-rot.pl-trow.pl-top {
+    font-size: 1.035em;
+    grid-template-columns: minmax(1.5em, auto) auto minmax(0, 1fr) auto auto auto;
+}
+.pl-line-rec.pl-rec-on { color: var(--pl-fg); font-weight: 700; }
+.pl-line-rec.pl-demo-on { color: var(--pl-amber); font-weight: 700; }
+
+/* ---------- info window: rotation lines ---------- */
+
+/* Sauce's common.css sizes the root font by width only (7vw), which makes five lines too tall
+   and the names too wide. The info box follows both width and height instead, so all five lines
+   fit at 340x190 and stay readable (smaller) in a 0.1.0-sized 320x110 window. Lines never shrink
+   below their line height. */
+html.pl-info #pl-box { font-size: min(4.6vw, 9.5vh); }
+html.pl-info.pl-show-next #pl-box { font-size: min(4.6vw, 8vh); }    /* six lines */
+html.pl-info #pl-box > * { flex: none; }
+
+/* One column grid for every rider line and table row (user, 13 Nov 2026): label, plan number,
+   swatch, name, then the value lined up on the "@": seconds (or the front's clock) right-aligned,
+   "@", target. Every cell has its own column, so a hidden cell never shifts the others. When space
+   runs out the name gives way. */
+.pl-grid {
+    display: grid;
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto auto;
+    row-gap: 2px;
+}
+.pl-grid > .pl-line, .pl-table > .pl-line {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    align-items: center;
+}
+/* The table starts at the left edge (user, 13 Nov 2026: use the room under the labels): its own
+   columns, number, swatch, name, seconds, "@", target, its rows lined up among themselves. */
+.pl-grid > .pl-table {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+    grid-column: 1 / -1;
+}
+.pl-table .pl-rot .pl-rot-label { display: none; }
+.pl-table .pl-rot .pl-rot-num { grid-column: 1; }
+.pl-table .pl-rot .pl-swatch { grid-column: 2; }
+.pl-table .pl-rot .pl-rot-name { grid-column: 3; }
+.pl-table .pl-rot .pl-rot-secs { grid-column: 4; }
+.pl-table .pl-rot .pl-rot-at { grid-column: 5; }
+.pl-table .pl-rot .pl-rot-target { grid-column: 6; }
+.pl-table .pl-rot .pl-rot-secs.pl-clock { grid-column: 4 / -1; }
+.pl-line.pl-rot { font-size: 0.9em; line-height: 1.35; }
+.pl-rot > span { white-space: nowrap; }
+.pl-rot .pl-rot-label { grid-column: 1; color: var(--pl-dim); padding-right: 0.35em; }
+.pl-rot .pl-rot-num { grid-column: 2; padding-right: 0.15em; font-variant-numeric: tabular-nums; }
+/* Double ring in em, so swatch and rings fit the line at any size (0.75 + 2 * 0.24 < 1.35). */
+.pl-rot .pl-swatch {
+    grid-column: 3;
+    width: 0.75em;
+    height: 0.75em;
+    margin: 0 0.5em 0 0.3em;
+    box-shadow: 0 0 0 0.12em #fff, 0 0 0 0.24em #000;
+}
+.pl-rot .pl-rot-name { grid-column: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pl-rot .pl-rot-secs { grid-column: 5; justify-self: end; padding-left: 0.6em; font-variant-numeric: tabular-nums; }
+.pl-rot .pl-rot-at { grid-column: 6; padding: 0 0.05em; }
+.pl-rot .pl-rot-target { grid-column: 7; justify-self: end; font-variant-numeric: tabular-nums; }
+.pl-rot .pl-rot-secs.pl-over { color: var(--pl-amber); }
+/* The front's clock: right-aligned at the line's end (user, 13 Nov 2026), over "@" and target. */
+.pl-rot .pl-rot-secs.pl-clock { grid-column: 5 / -1; }
+.pl-rot .pl-rot-secs.pl-clock ~ .pl-rot-at, .pl-rot .pl-rot-secs.pl-clock ~ .pl-rot-target { display: none; }
+.pl-rot:not(.pl-trow) .pl-rot-secs, .pl-rot:not(.pl-trow) .pl-rot-target { font-weight: 400; }
+/* A text instead of a rider ("–", "Climb – rotation paused"): over the rider cells. */
+.pl-rot.pl-text .pl-rot-num, .pl-rot.pl-text .pl-swatch, .pl-rot.pl-text .pl-rot-secs,
+.pl-rot.pl-text .pl-rot-at, .pl-rot.pl-text .pl-rot-target { display: none; }
+.pl-rot.pl-text .pl-rot-name { grid-column: 2 / -1; }
+.pl-rot.pl-text-full .pl-rot-label { display: none; }
+.pl-rot.pl-text-full .pl-rot-name { grid-column: 1 / -1; font-weight: 400; }
+/* Fit probes (paceline.mjs fitInfo): they widen the columns but take no height. */
+.pl-rot.pl-probe { visibility: hidden; height: 0; min-height: 0 !important; overflow: hidden; margin: 0 0 -2px 0; }
+
+/* ---------- action window ---------- */
+
+/* Nothing in here is smaller than 18 px except the W unit (user decision 11 Nov 2026). Sizes
+   follow the window, so a larger window gives larger digits. */
+html.pl-action {
+    --pl-clock: max(18px, min(17vw, 44vh));    /* the rest countdown */
+    /* Target and time (READY too, the same size; user, 13 Nov 2026): the row is about 8 of them
+       wide plus the small middle (the time column always as wide as READY), so they fit any window
+       width. */
+    --pl-big: max(18px, min(calc((100vw - 60px) / 7.2), 36vh));
+    --pl-now: max(18px, calc(var(--pl-big) * 0.54));    /* my power now, about half */
+    --pl-mid: max(18px, min(12vw, 30vh));
+    --pl-unit: max(10px, min(4vw, 10vh));
+    --pl-bar-h: max(12px, 13vh);
+}
+html.pl-action #pl-box { padding: 6px 14px; position: relative; }
+/* The Rest window: the Action window's element without the bar, so the clock can be bigger. */
+html.pl-rest #pl-act-bar { display: none; }
+html.pl-rest { --pl-clock: max(18px, min(17vw, 50vh)); }    /* room for the "+12" line */
+
+/* Demo button in settings: a small label in the corner, so a made-up ride is never mistaken. */
+.pl-demo-badge {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--pl-amber);
+}
+
+#pl-act {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: max(8px, 6vh);
+}
+
+.pl-act-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.35em;
+    height: calc(var(--pl-clock) * 1.1);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.pl-act-big, .pl-act-dash { font-size: var(--pl-clock); }
+.pl-act-cunit { font-size: 0.5em; margin-left: 0.05em; }    /* the "s" of the countdown, half size */
+/* The standing clock: the number dimmed (with "≥"), and under it the puller's overrun, small and
+   neutral (amber stays READY's). The line keeps its height while empty. */
+#pl-act-clock.pl-standing { opacity: 0.62; }
+.pl-act-over {
+    min-height: 1lh;
+    text-align: center;
+    font-family: Saira, system-ui, sans-serif;
+    font-size: max(18px, calc(var(--pl-clock) * 0.42));
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--pl-dim);
+    font-variant-numeric: tabular-nums;
+}
+.pl-act-dash { color: var(--pl-dim); }
+.pl-act-over.pl-gap-warn { color: var(--pl-amber); }    /* I lost the wheel, or the team needs them */
+/* The wheel to drop in behind (user, 14 Nov 2026): "Wheel ■ DANA", the name bright, amber when it
+   is not the plan's wheel. */
+.pl-act-over .pl-over-lbl { font-weight: 400; margin-right: 0.15em; }
+.pl-act-over .pl-swatch { width: 0.7em; height: 0.7em; margin: 0 0.4em 0 0.3em; vertical-align: 0; }
+.pl-act-over.pl-cue #pl-act-overtxt { color: var(--pl-fg); font-weight: 700; }
+.pl-act-over.pl-cue-swap #pl-act-overtxt { color: var(--pl-amber); }
+/* A gap in the line during my pull, in the bar's place (user, 13 Nov 2026): red with white text and a
+   white edge when the team needs the riders cut off (the edge keeps it apart from the red default
+   theme), amber for riders it can spare. */
+.pl-gap-band {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--pl-bar-h);
+    border-radius: 999px;
+    font-family: Saira, system-ui, sans-serif;
+    font-weight: 700;
+    font-size: max(13px, calc(var(--pl-bar-h) * 0.8));
+    line-height: 1;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    background: var(--pl-amber);
+    color: hsl(0 0% 7%);
+}
+.pl-gap-band[data-critical="1"] { background: hsl(0 85% 46%); color: #fff; box-shadow: 0 0 0 2px #fff; }
+.pl-act-time { font-size: var(--pl-mid); margin-left: 0.3em; }
+.pl-act-row .pl-warn { color: var(--pl-amber); }
+
+/* READY and the pull: three fixed points, target left, my power now in the middle (small), the
+   time right; each with its unit under it (W/kg, "now", s), dim and small like Zwift's HUD. The
+   side columns share the width equally, so the middle stays centred whatever their digits. */
+.pl-act-tri {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: end;
+    column-gap: 0.4em;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.pl-tri-cell { display: flex; flex-direction: column; line-height: 1.05; min-width: 0; }
+.pl-tri-target { align-items: flex-start; }
+.pl-tri-now { align-items: center; }
+.pl-tri-time { align-items: flex-end; }
+.pl-tri-num { font-size: var(--pl-big); }
+.pl-tri-now .pl-tri-num { font-size: var(--pl-now); font-weight: 600; }
+/* The time column is always as wide as READY, so READY and the seconds take the same place and
+   the middle never moves. */
+.pl-tri-time .pl-tri-num { min-width: 5ch; text-align: right; }
+.pl-tri-unit {
+    font-family: Saira, system-ui, sans-serif;
+    font-size: var(--pl-unit);
+    font-weight: 600;
+    color: var(--pl-dim);
+    min-height: 1lh;    /* the unit line keeps its height when empty (READY) */
+}
+.pl-act-tri .pl-warn { color: var(--pl-amber); }
+.pl-act-tri .pl-dim { color: var(--pl-dim); }
+#pl-act-now[data-zone="green"] { color: var(--pl-ok); }
+#pl-act-now[data-zone="amber"] { color: var(--pl-amber); }
+#pl-act-now[data-zone="red"] { color: var(--pl-bad); }
+/* The dash: amber "?" when alone or without data (the dim dash and triangle keep --pl-dim). */
+.pl-act-row .pl-act-dash.pl-warn { color: var(--pl-amber); }
+
+/* Power bar: target in the middle, BAR_RANGE_PCT of it either side; zone edges come from the
+   engine constants via --pl-z-amber / --pl-z-green (set by paceline.mjs). */
+.pl-bar {
+    --pl-z-amber: 20%;
+    --pl-z-green: 40%;
+    position: relative;
+    height: var(--pl-bar-h);
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px hsl(0 0% 0% / 0.55);
+    background: linear-gradient(to right,
+        var(--pl-bad) 0 var(--pl-z-amber),
+        var(--pl-amber) var(--pl-z-amber) var(--pl-z-green),
+        var(--pl-ok) var(--pl-z-green) calc(100% - var(--pl-z-green)),
+        var(--pl-amber) calc(100% - var(--pl-z-green)) calc(100% - var(--pl-z-amber)),
+        var(--pl-bad) calc(100% - var(--pl-z-amber)) 100%);
+}
+.pl-bar.pl-off { visibility: hidden; }    /* keeps its height, so the window never jumps */
+.pl-bar.pl-gapped { display: none; }    /* the gap band takes its place, same height */
+.pl-bar.pl-gap-early { box-shadow: 0 0 0 2px hsl(0 0% 0% / 0.55), 0 0 0 5px var(--pl-amber); }    /* the gap's early stage, outside the dark edge */
+.pl-tri-unit.pl-gap-warn { color: var(--pl-amber); }
+/* A pull without target watts: a neutral grey track, no zones, no marker. */
+.pl-bar.pl-neutral { background: hsl(0 0% 60% / 0.55); }
+.pl-bar.pl-neutral .pl-bar-tick { display: none; }
+.pl-bar-tick {
+    position: absolute;
+    left: calc(50% - 1px);
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    background: hsl(0 0% 0% / 0.75);
+}
+.pl-bar-marker {
+    --pos: 0.5;
+    --w: 12px;
+    position: absolute;
+    top: -5px;
+    bottom: -5px;
+    left: calc(var(--pos) * (100% - var(--w)));
+    width: var(--w);
+    box-sizing: border-box;
+    border: 3px solid #111;
+    border-radius: 4px;
+    background: #fff;
+    transition: left 0.4s linear, background-color 0.3s;
+}
+/* The marker's colour: the zone of the filtered power (median, smoothing, 2 % deadband), white at
+   the start of a pull. The dark border keeps it visible on the bar's zone of the same colour. */
+.pl-bar-marker[data-zone="green"] { background: var(--pl-ok); }
+.pl-bar-marker[data-zone="amber"] { background: var(--pl-amber); }
+.pl-bar-marker[data-zone="red"] { background: var(--pl-bad); }

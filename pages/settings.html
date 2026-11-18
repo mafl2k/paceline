@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html class="settings-page paceline" tabindex="0" data-settings-key="paceline-settings-v1">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';"/>
+
+        <title>Paceline - Settings - Sauce for Zwift™</title>
+
+        <script src="/pages/src/preloads.js"></script>
+        <link rel="stylesheet" href="/pages/css/common.css"/>
+        <link rel="stylesheet" href="css/paceline.css"/>
+
+        <script type="module">
+            import {settingsMain} from './src/settings.mjs';
+            settingsMain();
+        </script>
+    </head>
+    <body>
+        <div id="titlebar">
+            <header>
+                <div class="title" data-s="windowTitle"></div>
+                <div class="filler"></div>
+                <div class="buttons">
+                    <div id="pl-close" class="button close electron-only" data-s-title="close"><ms>close</ms></div>
+                </div>
+            </header>
+        </div>
+
+        <div id="pl-root">
+            <!-- What belongs to the window that opened these settings (Sauce keeps appearance per
+                 window; ?for=info|action|rest says which). Everything after it applies to all. -->
+            <section id="pl-this">
+                <div class="pl-head">
+                    <strong id="pl-this-head" data-s="thisWindowInfo"></strong>
+                    <button id="pl-done" type="button" data-s="done" data-s-title="close"></button>
+                </div>
+                <div class="pl-action-only">
+                    <label class="pl-check"><input id="pl-rest-in-action" type="checkbox"/> <span data-s="restInActionLabel"></span></label>
+                    <div class="pl-note" data-s="restInActionHelp"></div>
+                </div>
+                <div class="pl-info-only">
+                    <label class="pl-check"><input id="pl-show-next" type="checkbox"/> <span data-s="showNextLabel"></span></label>
+                    <label class="pl-check pl-sub"><input id="pl-show-rotation" type="checkbox"/> <span data-s="showRotationLabel"></span></label>
+                    <div class="pl-note" data-s="showNextHelp"></div>
+                </div>
+                <!-- Sauce's own per-window appearance overrides; absent in the plain-browser preview. -->
+                <div class="sauce-only">
+                    <h4 data-s="appearance"></h4>
+                    <form id="pl-appearance-form">
+                        <label><span data-s="theme"></span> <select is="sauce-theme" override></select></label>
+                        <label><span data-s="background"></span> <select is="sauce-background-texture" override></select></label>
+                        <!-- Sauce's own per-window background fields (same names as its windows and
+                             other mods use; the overlay applies them with Common.setBackground). -->
+                        <label><span data-s="solidBackground"></span> <input type="checkbox" name="solidBackground"/></label>
+                        <label><span data-s="backgroundColor"></span>
+                            <input type="color" name="backgroundColor" value="#000000" data-depends-on="solidBackground"/>
+                            <input type="text" name="backgroundColor" value="#000000" size="7" data-depends-on="solidBackground"/></label>
+                        <!-- Slider and number with the same name, as in Sauce's own settings: Sauce keeps them in step. -->
+                        <label class="pl-opacity"><span data-s="opacity"></span>
+                            <input type="range" name="backgroundAlpha" min="0" max="100" step="5" value="100" data-depends-on="solidBackground"/>
+                            <input type="number" name="backgroundAlpha" min="0" max="100" value="100" data-depends-on="solidBackground"/> %</label>
+                        <div class="pl-note" data-s="solidBackgroundHelp"></div>
+                    </form>
+                </div>
+            </section>
+
+            <div class="pl-scope" data-s="bothWindows"></div>
+
+            <section id="pl-event">
+                <label class="pl-check"><input id="pl-ttt-only" type="checkbox"/> <span data-s="tttOnlyLabel"></span></label>
+                <div class="pl-note" data-s="tttOnlyHelp"></div>
+                <label class="pl-check pl-sub"><input id="pl-rec-no-plan" type="checkbox"/> <span data-s="recNoPlanLabel"></span></label>
+                <div class="pl-note" data-s="recNoPlanHelp"></div>
+            </section>
+
+            <section id="pl-plan">
+                <div class="pl-head"><strong data-s="planHeading"></strong></div>
+                <div class="pl-note"><span data-s="planCredit"></span>
+                    <a href="https://zwiftgopher.com/TTT/" target="_blank" rel="noopener">zwiftgopher.com/TTT</a></div>
+
+                <div id="pl-drop" class="pl-drop">
+                    <div class="pl-help" data-s="planHelp"></div>
+                    <label class="pl-pick">
+                        <input id="pl-file" type="file" multiple accept=".json,.txt,.csv"/>
+                        <span class="pl-btn" data-s="pickFiles"></span>
+                    </label>
+                    <div class="pl-drop-hint" data-s="dropHint"></div>
+                </div>
+
+                <details id="pl-paste">
+                    <summary data-s="pasteSummary"></summary>
+                    <textarea id="pl-paste-text" rows="5" spellcheck="false" data-s-placeholder="pastePlaceholder"></textarea>
+                    <button id="pl-paste-go" type="button" data-s="pasteImport"></button>
+                </details>
+
+                <div id="pl-msg" role="alert" hidden></div>
+
+                <div id="pl-result" hidden>
+                    <div id="pl-team" class="pl-team"></div>
+                    <div id="pl-code" class="pl-code"></div>
+                    <div id="pl-code-note" class="pl-note"></div>
+                    <div id="pl-you" class="pl-you"></div>
+                    <ul id="pl-warnings" class="pl-warnings"></ul>
+                    <table id="pl-riders">
+                        <thead><tr id="pl-riders-head"></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div id="pl-noplan" class="pl-note"></div>
+
+                <div class="pl-unit" role="radiogroup" aria-labelledby="pl-unit-label">
+                    <span id="pl-unit-label" data-s="targetUnitLabel"></span>
+                    <label><input type="radio" name="pl-unit" value="W"/> <span data-s="unitW"></span></label>
+                    <label><input type="radio" name="pl-unit" value="Wkg"/> <span data-s="unitWkg"></span></label>
+                </div>
+            </section>
+
+            <section id="pl-server">
+                <div class="pl-head"><strong data-s="serverHeading"></strong></div>
+                <label class="pl-check"><input id="pl-server-on" type="checkbox"/> <span data-s="serverOnLabel"></span></label>
+                <label class="pl-field"><span data-s="serverTeamLabel"></span>
+                    <input id="pl-server-team" type="text" maxlength="80" spellcheck="false" autocomplete="off" data-s-placeholder="serverTeamPlaceholder"/></label>
+                <div class="pl-note" data-s="serverTeamHelp"></div>
+                <label class="pl-field"><span data-s="serverUrlLabel"></span>
+                    <input id="pl-server-url" type="url" spellcheck="false" autocomplete="off"/></label>
+                <div id="pl-server-status" class="pl-note"></div>
+                <div id="pl-server-err" class="pl-error" hidden></div>
+                <label class="pl-check"><input id="pl-log-upload" type="checkbox"/> <span data-s="logUploadLabel"></span></label>
+                <div class="pl-note" data-s="logUploadHelp"></div>
+            </section>
+
+            <section id="pl-demo">
+                <div class="pl-head"><strong data-s="demoHeading"></strong>
+                    <button id="pl-demo-btn" type="button"></button></div>
+                <div id="pl-demo-status" class="pl-note"></div>
+            </section>
+
+            <section id="pl-rec">
+                <div class="pl-head"><strong data-s="recHeading"></strong></div>
+                <div id="pl-rec-err" class="pl-error" hidden></div>
+                <ul id="pl-rec-list"></ul>
+            </section>
+
+        </div>
+    </body>
+</html>

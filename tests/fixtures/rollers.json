@@ -1,0 +1,261 @@
+{
+    "roster": {
+        "510007": {
+            "name": "Greta Wendt-Pohl (Kettenfett RC)",
+            "alt_name": "",
+            "weight": 67,
+            "height": 170,
+            "ftp": 236,
+            "wkg300": 268,
+            "pull_duration": 45,
+            "adjustment": 100,
+            "cat": "C",
+            "training_level": "recreational",
+            "power_profile": {
+                "source": "zr",
+                "cp": null,
+                "awc_j": null,
+                "points": {
+                    "5": 760,
+                    "15": 702,
+                    "30": 598,
+                    "60": 468,
+                    "120": 371,
+                    "300": 268,
+                    "1200": 233
+                },
+                "phenotype": {
+                    "sprinter": 618.5,
+                    "puncheur": 611.02,
+                    "pursuiter": 489,
+                    "climber": 512,
+                    "tt": 588
+                }
+            },
+            "zr": true,
+            "order": 4,
+            "sIndex": 50,
+            "color": "#ff6600"
+        }
+    },
+    "riders": {
+        "5100005": {
+            "name": "Arvid Lindqvist [KFR]",
+            "alt_name": "",
+            "weight": 72,
+            "height": 181,
+            "ftp": 271,
+            "wkg300": 309,
+            "pull_duration": 120,
+            "adjustment": 104,
+            "cat": "B",
+            "training_level": "competitive",
+            "power_profile": {
+                "source": "zr",
+                "cp": null,
+                "awc_j": null,
+                "points": {
+                    "5": 905,
+                    "15": 702,
+                    "30": 566,
+                    "60": 447,
+                    "120": 362,
+                    "300": 309,
+                    "1200": 280
+                },
+                "phenotype": {
+                    "sprinter": 702.5,
+                    "puncheur": 664.18,
+                    "pursuiter": 588,
+                    "climber": 640.5,
+                    "tt": 671
+                }
+            },
+            "zr": true,
+            "order": 0,
+            "sIndex": 61,
+            "color": "#ffffff"
+        },
+        "5100004": {
+            "name": "Bodo Hartwig",
+            "alt_name": "",
+            "weight": 88,
+            "height": 187,
+            "ftp": 305,
+            "wkg300": 362,
+            "pull_duration": 60,
+            "adjustment": 100,
+            "cat": "B",
+            "training_level": "competitive",
+            "power_profile": {
+                "source": "zr",
+                "cp": 301.27,
+                "awc_j": 16904.52,
+                "points": {
+                    "5": 1012,
+                    "15": 846,
+                    "30": 688,
+                    "60": 512,
+                    "120": 431,
+                    "300": 362,
+                    "1200": 318
+                },
+                "phenotype": null
+            },
+            "zr": true,
+            "order": 1,
+            "sIndex": 58,
+            "color": "#0000ff"
+        },
+        "5100003": {
+            "name": "Kim S &#9733; [KFR]",
+            "alt_name": "",
+            "weight": 61.5,
+            "height": 166,
+            "ftp": 219,
+            "wkg300": 251,
+            "pull_duration": 60,
+            "adjustment": 100,
+            "cat": "B",
+            "training_level": "competitive",
+            "power_profile": {
+                "source": "zr",
+                "cp": 214.66,
+                "awc_j": 13877.05,
+                "points": {
+                    "5": 702,
+                    "15": 598,
+                    "30": 489,
+                    "60": 377,
+                    "120": 301,
+                    "300": 251,
+                    "1200": 228
+                },
+                "phenotype": null
+            },
+            "zr": true,
+            "order": 2,
+            "sIndex": 54,
+            "color": "#fff000"
+        },
+        "5100002": {
+            "name": "Dario Brandl [KFR] ",
+            "alt_name": "",
+            "weight": 64.2,
+            "height": 176,
+            "ftp": 241,
+            "wkg300": 283,
+            "pull_duration": 60,
+            "adjustment": 100,
+            "cat": "B",
+            "training_level": "competitive",
+            "power_profile": {
+                "source": "zr",
+                "cp": null,
+                "awc_j": null,
+                "points": {
+                    "5": 788,
+                    "15": 640,
+                    "30": 541,
+                    "60": 402,
+                    "120": 344,
+                    "300": 283,
+                    "1200": 252
+                },
+                "phenotype": {
+                    "sprinter": 640.25,
+                    "puncheur": 671.4,
+                    "pursuiter": 602,
+                    "climber": 694,
+                    "tt": 655
+                }
+            },
+            "zr": true,
+            "order": 3,
+            "sIndex": 57,
+            "color": "#000000"
+        },
+        "5100001": {
+            "name": "Edda Voss",
+            "alt_name": "",
+            "weight": 76.6,
+            "height": 172,
+            "ftp": 248,
+            "wkg300": 297,
+            "pull_duration": 15,
+            "adjustment": 98,
+            "cat": "C",
+            "training_level": "recreational",
+            "power_profile": {
+                "source": "zr",
+                "cp": null,
+                "awc_j": null,
+                "points": {
+                    "5": 1043,
+                    "15": 876,
+                    "30": 702,
+                    "60": 523,
+                    "120": 398,
+                    "300": 297,
+                    "1200": 262
+                },
+                "phenotype": {
+                    "sprinter": 858.25,
+                    "puncheur": 760.9,
+                    "pursuiter": 515,
+                    "climber": 552.5,
+                    "tt": 540
+                }
+            },
+            "zr": true,
+            "order": 4,
+            "sIndex": 49,
+            "color": "#cc0000"
+        },
+        "51006": {
+            "name": "Fritz  Ohlsen",
+            "alt_name": "",
+            "weight": 91,
+            "height": 189,
+            "ftp": 270,
+            "wkg300": 301,
+            "pull_duration": 15,
+            "adjustment": 98,
+            "cat": "C",
+            "training_level": "recreational",
+            "power_profile": {
+                "source": "zr",
+                "cp": 262.48,
+                "awc_j": 15102.7,
+                "points": {
+                    "5": 640,
+                    "15": 551,
+                    "30": 472,
+                    "60": 401,
+                    "120": 338,
+                    "300": 301,
+                    "1200": 268
+                },
+                "phenotype": {
+                    "sprinter": 41,
+                    "puncheur": 47.6,
+                    "pursuiter": 58.5,
+                    "climber": 36,
+                    "tt": 63.2
+                }
+            },
+            "zr": true,
+            "order": 5,
+            "sIndex": 45,
+            "color": "#00cc00"
+        }
+    },
+    "target_speed": "42.6",
+    "team": {
+        "name": "Rollers"
+    },
+    "intensity": -1,
+    "efficiency": 0,
+    "efficiency_manual": false,
+    "minimum_finishers": 0
+}

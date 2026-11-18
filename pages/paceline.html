@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html class="paceline pl-overlay pl-info" tabindex="0" data-settings-key="paceline-settings-v1">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';"/>
+
+        <title>Paceline Info - Sauce for Zwift™</title>
+
+        <script src="/pages/src/preloads.js"></script>
+        <link rel="stylesheet" href="/pages/css/common.css"/>
+        <link rel="stylesheet" href="css/paceline.css"/>
+
+        <script type="module">
+            import {main} from './src/paceline.mjs';
+            main('info');
+        </script>
+    </head>
+    <body>
+        <div id="titlebar">
+            <header>
+                <div class="title" data-s="overlayName"></div>
+                <div class="filler"></div>
+                <div class="buttons">
+                    <!-- Sauce opens this as its own child window with this size, independent of
+                         the overlay's size (same mechanism as Sauce's built-in settings). -->
+                    <a class="button open-settings" data-s-title="openSettings"
+                       href="settings.html?width=460&height=640&for=info&child-window"
+                       target="paceline-settings"><ms>tune</ms></a>
+                    <div class="button close electron-only" data-s-title="close"><ms>close</ms></div>
+                </div>
+            </header>
+        </div>
+
+        <div id="pl-root">
+            <section id="pl-box" data-s-title="overlayHint">
+                <!-- Outside a TTT event (TTT-only option): only this quiet line. -->
+                <div id="pl-line-muted" class="pl-line pl-line-muted"></div>
+                <div id="pl-line-plan" class="pl-line pl-line-plan"></div>
+                <!-- Fixed slots (a hidden line keeps its place). On top what does not change during the
+                     ride: the wheel I follow, then me (in the order we ride). Below, set apart, the
+                     live part. -->
+                <!-- One column grid for every rider line and the table rows (user, 13 Nov 2026):
+                     label, plan number, kit swatch, name, and the value in three columns lined up on
+                     the "@" (seconds right-aligned, "@", target). -->
+                <div id="pl-grid" class="pl-grid">
+                <div id="pl-line-wheel" class="pl-line pl-rot" hidden>
+                    <span class="pl-rot-label" data-s="wheelLabel"></span>
+                    <span class="pl-rot-num"></span>
+                    <span class="pl-swatch"></span>
+                    <span class="pl-rot-name"></span>
+                    <span class="pl-rot-secs"></span><span class="pl-rot-at"></span><span class="pl-rot-target"></span>
+                </div>
+                <div id="pl-line-you" class="pl-line pl-rot pl-line-you">
+                    <span class="pl-rot-label" data-s="pullLabel"></span>
+                    <span class="pl-rot-num"></span>
+                    <span class="pl-swatch"></span>
+                    <span class="pl-rot-name"></span>
+                    <span class="pl-rot-secs"></span><span class="pl-rot-at"></span><span class="pl-rot-target"></span>
+                </div>
+                <div id="pl-line-front" class="pl-line pl-rot pl-live-first" hidden>
+                    <span class="pl-rot-label" data-s="frontLabel"></span>
+                    <span class="pl-rot-num"></span>
+                    <span class="pl-swatch"></span>
+                    <span class="pl-rot-name"></span>
+                    <span class="pl-rot-secs"></span><span class="pl-rot-at"></span><span class="pl-rot-target"></span>
+                </div>
+                <!-- Captain option (settings): the next rider with their full pull line. -->
+                <div id="pl-line-next" class="pl-line pl-rot" hidden>
+                    <span class="pl-rot-label" data-s="nextLabel"></span>
+                    <span class="pl-rot-num"></span>
+                    <span class="pl-swatch"></span>
+                    <span class="pl-rot-name"></span>
+                    <span class="pl-rot-secs"></span><span class="pl-rot-at"></span><span class="pl-rot-target"></span>
+                </div>
+                <!-- The whole rotation (before the start, or always with its option): one row per plan
+                     rider, from the rider pulling. Rows are made when the plan changes. In captain
+                     mode with the table on, its first rows are Front and Next (the lines above go). -->
+                <div id="pl-table" class="pl-table" hidden></div>
+                </div>
+                <div id="pl-line-rec" class="pl-line pl-line-rec"></div>
+            </section>
+        </div>
+    </body>
+</html>

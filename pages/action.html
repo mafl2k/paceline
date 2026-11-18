@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html class="paceline pl-overlay pl-action" tabindex="0" data-settings-key="paceline-settings-v1">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';"/>
+
+        <title>Paceline Action - Sauce for Zwift™</title>
+
+        <script src="/pages/src/preloads.js"></script>
+        <link rel="stylesheet" href="/pages/css/common.css"/>
+        <link rel="stylesheet" href="css/paceline.css"/>
+
+        <script type="module">
+            import {main} from './src/paceline.mjs';
+            main('action');
+        </script>
+    </head>
+    <body>
+        <div id="titlebar">
+            <header>
+                <div class="title" data-s="actionName"></div>
+                <div class="filler"></div>
+                <div class="buttons">
+                    <!-- Its own settings child window: the appearance settings there are this
+                         window's (Sauce keeps them per window); plan and prefs are shared. -->
+                    <a class="button open-settings" data-s-title="openSettings"
+                       href="settings.html?width=460&height=640&for=action&child-window"
+                       target="paceline-settings-action"><ms>tune</ms></a>
+                    <div class="button close electron-only" data-s-title="close"><ms>close</ms></div>
+                </div>
+            </header>
+        </div>
+
+        <div id="pl-root">
+            <section id="pl-box" data-s-title="overlayHint">
+                <span id="pl-demo-badge" class="pl-demo-badge" data-s="demoBadge" hidden></span>
+                <!-- One element, fixed in place and size: the row holds the rest clock, or the
+                     pull's target watts and time left; the bar row keeps its height when hidden. -->
+                <div id="pl-act">
+                    <!-- Rest: the countdown (or the dash) and my place. READY and the pull: three fixed
+                         points, the target left, my power now in the middle (small), the time right,
+                         each with its unit under it (expert panel, 13 Nov 2026). -->
+                    <div class="pl-act-top">
+                        <div id="pl-act-row" class="pl-act-row">
+                            <span id="pl-act-dash" class="pl-act-dash" data-s="noRotation"></span>
+                            <span id="pl-act-clock" class="pl-act-big" hidden><span id="pl-act-cnum"></span><span id="pl-act-cunit" class="pl-act-cunit"></span></span>
+                            <span id="pl-act-place" class="pl-act-time" hidden></span>
+                        </div>
+                        <!-- The standing clock: how long the puller is over his plan ("+12"); the
+                             line is always there while resting, so nothing moves. -->
+                        <div id="pl-act-over" class="pl-act-over"><span id="pl-act-overlbl" class="pl-over-lbl" data-s="wheelCueLabel" hidden></span><span id="pl-act-oversw" class="pl-swatch" hidden></span><span id="pl-act-overtxt"></span></div>
+                        <div id="pl-act-tri" class="pl-act-tri" hidden>
+                            <div class="pl-tri-cell pl-tri-target"><span id="pl-act-wnum" class="pl-tri-num"></span><span id="pl-act-wunit" class="pl-tri-unit"></span></div>
+                            <div class="pl-tri-cell pl-tri-now"><span id="pl-act-now" class="pl-tri-num"></span><span id="pl-act-nowlbl" class="pl-tri-unit" data-s="nowLabel"></span></div>
+                            <div class="pl-tri-cell pl-tri-time"><span id="pl-act-time" class="pl-tri-num"></span><span id="pl-act-tunit" class="pl-tri-unit"></span></div>
+                        </div>
+                    </div>
+                    <div id="pl-act-bar" class="pl-bar pl-off">
+                        <div class="pl-bar-tick"></div>
+                        <div id="pl-bar-marker" class="pl-bar-marker" hidden></div>
+                    </div>
+                    <!-- A gap in the line during my pull: takes the bar's place, same height. -->
+                    <div id="pl-act-gap" class="pl-gap-band" hidden></div>
+                </div>
+            </section>
+        </div>
+    </body>
+</html>

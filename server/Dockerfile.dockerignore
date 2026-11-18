@@ -1,0 +1,5 @@
+# The build context is the whole repo (worktrees, node_modules, ...): send only what the image needs.
+*
+!server/server.mjs
+!pages/src/engine/plan.mjs
+!pages/src/engine/colors.mjs

@@ -1,0 +1,35 @@
+# Plan server behind Traefik. Copy .env.example to .env and set UPLOAD_PASS first.
+# Names that depend on your Traefik setup are variables with defaults (see README.md).
+name: paceline
+
+services:
+  paceline-server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: paceline-server:local
+    restart: unless-stopped
+    environment:
+      UPLOAD_USER: ${UPLOAD_USER:?set UPLOAD_USER in server/.env}
+      UPLOAD_PASS: ${UPLOAD_PASS:?set UPLOAD_PASS in server/.env}
+      DATA_DIR: /data
+      PORT: "8080"
+      LOG_MAX_FILE_MB: ${LOG_MAX_FILE_MB:-20}
+      LOG_MAX_TOTAL_MB: ${LOG_MAX_TOTAL_MB:-2000}
+    volumes:
+      - ./data:/data
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
+      - traefik.http.routers.paceline.rule=Host(`${PACELINE_HOST:-ttt.mafl.net}`)
+      - traefik.http.routers.paceline.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.paceline.tls=true
+      - traefik.http.routers.paceline.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.services.paceline.loadbalancer.server.port=8080
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
