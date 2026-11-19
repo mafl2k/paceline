@@ -307,8 +307,34 @@ function eventIdOrNull(v) {
 }
 
 
+// ZwiftGopher's share link of a plan (the export's plan.share_link). Its #t= value is the whole plan
+// encoded (base64url, about 3 KB: riders with FTP, height and power profiles), so it is captain-only
+// data (user, 19 Nov 2026): kept only when the link is exactly https://zwiftgopher.com/TTT/#t=<value>
+// with <value> of base64url characters and the link at most ZG_LINK_MAX long; of it only <value>, as
+// zgShare on the inbox entry and the stored version, never inside the plan's json or text. The rider
+// answers (api.mjs planRecord) never carry it, the archive beside recordings never keeps it (logs.mjs
+// ARCHIVED), and Remove a rider deletes it from every version and entry that lists the rider (the
+// encoded plan cannot be edited). "Plan on ZwiftGopher" and "Edit on ZwiftGopher" append #t=<value>,
+// so the planner opens with that plan loaded. Anything else is dropped without a word.
+export const ZG_LINK_PREFIX = 'https://zwiftgopher.com/TTT/#t=';
+export const ZG_LINK_MAX = 16384;
+const SHARE_RE = /^[A-Za-z0-9_-]+$/;
+
+export const isShare = v => typeof v === 'string' && v.length > 0 && v.length <= ZG_LINK_MAX - ZG_LINK_PREFIX.length && SHARE_RE.test(v);
+
+export function shareOf(json) {
+    const link = json?.plan?.share_link;
+    if (typeof link !== 'string' || link.length > ZG_LINK_MAX || !link.startsWith(ZG_LINK_PREFIX)) {
+        return null;
+    }
+    const value = link.slice(ZG_LINK_PREFIX.length);
+    return isShare(value) ? value : null;
+}
+
+
 // The content checks of an arriving plan (json and text as importFiles gives them), in a fixed order
-// so the page shows the first problem: {json, text} stripped by stripSheet, and the normalized plan.
+// so the page shows the first problem: {json, text} stripped by stripSheet, the normalized plan, and
+// the share value (shareOf, or null), read before the strip drops it.
 export function checkPlan(json, text) {
     // stripSheet drops entries under keys that are no Zwift ID; refuse such a plan instead.
     for (const list of [json?.riders, json?.roster]) {
@@ -346,7 +372,7 @@ export function checkPlan(json, text) {
     if (Buffer.byteLength(JSON.stringify(stripped)) > MAX_SHEET_BYTES) {
         throw new ClubError('cap-bytes', {max: MAX_SHEET_BYTES / 1024});
     }
-    return {json: stripped.json, text: stripped.text, plan};
+    return {json: stripped.json, text: stripped.text, plan, zgShare: shareOf(json)};
 }
 
 
@@ -464,7 +490,9 @@ export function uploadSheet(club, input, {now, newId}) {
     const {slug, base} = input;
     const team = teamOf(club, slug);
     const pinnedEventId = eventIdOrNull(input.pinnedEventId);
-    const {json, text, plan} = checkPlan(input.json, input.text ?? null);
+    const {json, text, plan, zgShare: own} = checkPlan(input.json, input.text ?? null);
+    // an entry's json is stripped already: its share value comes with it (input.zgShare)
+    const zgShare = isShare(input.zgShare) ? input.zgShare : own;
 
     const as = input.as === '' ? null : input.as ?? null;
     const live = input.live === true;
@@ -569,6 +597,7 @@ export function uploadSheet(club, input, {now, newId}) {
         uploadedAt: iso(now), via: VIAS.includes(input.via) ? input.via : 'file',
         eventId, boundAt, pinnedEventId: pin,
         plan: planId, n, at: iso(now), copyOf: null, jsonName: nameKey(input.json?.team?.name), type, recSig: plan.sig,
+        ...(zgShare === null ? {} : {zgShare}),
     };
     if (live === true) {
         team.live = id;
@@ -670,6 +699,7 @@ export function backTo(club, slug, {plan, n, version}, {now, newId}) {
         uploadedAt: old.uploadedAt, via: 'back',
         eventId, boundAt, pinnedEventId: pin,
         plan: p.id, n: k, at: iso(now), copyOf: from, jsonName: old.jsonName ?? null, type, recSig: old.sig,
+        ...(isShare(old.zgShare) ? {zgShare: old.zgShare} : {}),
     };
     if (p.live !== null) {
         team.live = id;
@@ -759,7 +789,9 @@ export function removeRider(club, athleteId, now, {before = Infinity} = {}) {
         const {plan} = normalizePlan(stripped.json, stripped.text);
         // pastSigs: every earlier sig, so a recording made in between still finds the version
         const pastSigs = [...(Array.isArray(sheet.pastSigs) ? sheet.pastSigs : []), sheet.sig];
-        club.sheets[id] = {...sheet, json: stripped.json, text: stripped.text, sig: plan.sig, pastSigs};
+        // its ZwiftGopher link encodes the whole plan, the rider included, and cannot be edited: it goes
+        const {zgShare: gone, ...rest} = sheet;
+        club.sheets[id] = {...rest, json: stripped.json, text: stripped.text, sig: plan.sig, pastSigs};
     }
     // The inbox too: his row goes from every entry that lists him, an entry left without riders is
     // dropped, and a touched entry loses all its warnings (they may name him).
@@ -777,7 +809,8 @@ export function removeRider(club, athleteId, now, {before = Infinity} = {}) {
             return [];
         }
         const stripped = stripSheet(json, entry.text);
-        return [{...entry, json: stripped.json, text: stripped.text, warnings: [], warningsMore: 0}];
+        const {zgShare: gone, ...rest} = entry;
+        return [{...rest, json: stripped.json, text: stripped.text, warnings: [], warningsMore: 0}];
     });
     pruneRaceStarts(club);
     for (const [slug, team] of Object.entries(club.teams)) {
@@ -836,7 +869,8 @@ export function sweepClub(club, now) {
 // warnings, warningsMore}, `json` and `text` as checkPlan stripped them. Not part of any team's state: no version
 // bump, no log (but discard), and an entry nobody stores goes after keepOf (24 h, a received one 7 days).
 
-const entryBytes = e => Buffer.byteLength(JSON.stringify({json: e.json, text: e.text, warnings: e.warnings}));
+// the share value counts too (up to 16 KB)
+const entryBytes = e => Buffer.byteLength(JSON.stringify({json: e.json, text: e.text, warnings: e.warnings, zgShare: e.zgShare}));
 
 
 // Keeps the warnings an import gave: {warnings: [{code, name}], more}, at most WARNINGS_MAX of them
@@ -864,7 +898,7 @@ const SOURCES = ['upload', 'import', 'receive'];
 // refused (cap-bytes; a checked plan is at most MAX_SHEET_BYTES plus its warnings, far below).
 // Then the oldest entries go until at most INBOX_MAX are left and they fit INBOX_BYTES (the new one
 // stays).
-export function addEntry(club, {source, team = null, forPlan = null, via = null, json, text, warnings = []}, {now, newId}) {
+export function addEntry(club, {source, team = null, forPlan = null, via = null, json, text, warnings = [], zgShare = null}, {now, newId}) {
     if (!SOURCES.includes(source)) {
         throw new Error(`unknown entry source ${source}`);
     }
@@ -873,6 +907,7 @@ export function addEntry(club, {source, team = null, forPlan = null, via = null,
     const entry = {
         id: null, at: iso(now), source, team: slug, forPlan: null, via: VIAS.includes(via) ? via : null,
         json, text, warnings: kept.warnings, warningsMore: kept.more,
+        ...(isShare(zgShare) ? {zgShare} : {}),
     };
     if (entryBytes(entry) > ENTRY_BYTES) {
         throw new ClubError('cap-bytes', {max: ENTRY_BYTES / 1024});
@@ -936,6 +971,7 @@ export function storeEntry(club, id, {slug, as, live, date, start, type, pinnedE
     }
     const result = uploadSheet(club, {
         slug, json: entry.json, text: entry.text, via: entry.via ?? entry.source, as, live, date, start, type, pinnedEventId, base,
+        zgShare: entry.zgShare ?? null,
     }, {now, newId});
     club.inbox = club.inbox.filter(e => e.id !== id);
     return {...result, entry};
@@ -946,16 +982,16 @@ export function storeEntry(club, id, {slug, as, live, date, start, type, pinnedE
 // go first (sweepInbox), then, unlike an upload, nothing is pushed out to make room: an inbox with
 // INBOX_MAX entries, or one the new entry would take over INBOX_BYTES, refuses it (inbox-full), so a
 // link holder cannot flush out what the captain has not stored yet. Else addEntry's id.
-export function receiveEntry(club, {team, via, json, text, warnings = []}, {now, newId}) {
+export function receiveEntry(club, {team, via, json, text, warnings = [], zgShare = null}, {now, newId}) {
     // the team may have gone since its token was checked (deleted while the body came in)
     teamOf(club, team);
     sweepInbox(club, now);
-    const add = entryBytes({json, text, warnings: cleanWarnings(warnings).warnings});
+    const add = entryBytes({json, text, warnings: cleanWarnings(warnings).warnings, zgShare: isShare(zgShare) ? zgShare : undefined});
     const bytes = club.inbox.reduce((n, e) => n + entryBytes(e), 0);
     if (club.inbox.length >= INBOX_MAX || bytes + add > INBOX_BYTES) {
         throw new ClubError('inbox-full', {max: INBOX_MAX});
     }
-    return addEntry(club, {source: 'receive', team, via, json, text, warnings}, {now, newId});
+    return addEntry(club, {source: 'receive', team, via, json, text, warnings, zgShare}, {now, newId});
 }
 
 

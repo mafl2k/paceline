@@ -151,7 +151,7 @@ function guardedReload() {
     const every = Number(body.dataset.refresh) * 1000;
     // a value the browser put back after Back counts as typed
     let dirty = restoredInput(document.querySelectorAll('form input, form textarea'));
-    // 'change' too: a chosen file must never be reloaded away (the upload page reloads itself). And a
+    // 'change' too: a chosen file or a picked option counts as a changed form. And a
     // click on a file input: Safari and Firefox on macOS don't focus it while the chooser is open, so
     // without this a reload could cancel a choice still being made.
     for (const type of ['input', 'change']) {

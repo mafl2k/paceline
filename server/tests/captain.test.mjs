@@ -319,7 +319,8 @@ test('team page: no plan', async t => {
     assert.ok(!/class="sevline [a-z]+ big"/.test(body), body);
     assert.match(body, /<span class="sw-icon err">/);
     assert.ok(text.includes('No plan for Sprockets yet'));
-    assert.ok(text.includes('Export the team\'s plan from the planner (JSON, which has the pull watts as pull power; else add the text export for them) and upload it here.'), text);
+    // the short copy (user, 19 Nov 2026): what riders get, then the button
+    assert.ok(text.includes('No plan for Sprockets yet Riders get it from 19:10 , 30 min before the start. Upload a plan'), text);
     assert.ok(body.includes('Riders get it from <time>19:10</time>, 30 min before the start.'));
     assert.match(body, /<a class="btn primary block" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a plan<\/a>/);
     assert.ok(!body.includes('class="actionbar"'));
@@ -2376,7 +2377,7 @@ test('team page: a special team without a race', async t => {
     assert.ok(body.includes('<a class="trow neutral" href="/manage/team/cogs" aria-current="page">'), body);
     assert.ok(textOf(element(body, '<details class="switch"')).includes('Cogs No race planned'), textOf(element(body, '<details class="switch"')));
     // the empty card asks for the plan with its date; no "from ," without a gate
-    assert.ok(textOf(body).includes('and upload it here with its date and start time. Riders get it 30 min before the start.'), textOf(body));
+    assert.ok(textOf(body).includes('No plan for Cogs yet A plan brings its date and start time; riders get it 30 min before the start.'), textOf(body));
     assert.ok(!body.includes('<time></time>'));
     // a weekly team has its day
     assert.ok(textOf(await teamBody(srv, 'rollers')).includes('Thu 19 Nov · 19:30'));
@@ -2435,7 +2436,8 @@ test('team page: one row per plan, no … menu, no status card, no fixed upload 
     assert.match(body, /<a class="uplink" href="\/manage\/upload\?team=rollers">[\s\S]*?Upload a plan<\/a>/);
     assert.ok(body.indexOf('class="uplink"') > body.indexOf('class="card riders-card"'));
     assert.ok(body.indexOf('class="card riders-card"') > body.indexOf('class="card plans-card"'));
-    assert.match(body, /<div class="col-c"><a class="uplink" [^>]*>[\s\S]*?<\/a><\/div>/);
+    // (in .uplinks, where "Plan on ZwiftGopher" joins it when the server has PUBLIC_URL: not here)
+    assert.match(body, /<div class="col-c"><div class="uplinks"><a class="uplink" [^>]*>[\s\S]*?<\/a><\/div><\/div>/);
     // one row per plan, each linking to its plan page
     const rows = planRows(body);
     assert.deepEqual(rows.map(rowLabel), ['Rollers · fast', 'Rollers · slow']);

@@ -111,7 +111,8 @@ export function makePush({secret, store, cfg}) {
 // CORS for the push: the planner's origins read the answers; any other origin gets no allow header.
 function corsOf(req) {
     const origin = req.headers.origin;
-    return PUSH_ORIGINS.includes(origin) ? {'Access-Control-Allow-Origin': origin, Vary: 'Origin'} : {Vary: 'Origin'};
+    // Retry-After exposed: the planner's page reads it on a 429 or 503 (ZwiftGopher, 19 Nov 2026)
+    return PUSH_ORIGINS.includes(origin) ? {'Access-Control-Allow-Origin': origin, 'Access-Control-Expose-Headers': 'Retry-After', Vary: 'Origin'} : {Vary: 'Origin'};
 }
 
 
@@ -218,7 +219,7 @@ async function push(req, res, {store, cfg, now, push: state}, query, method, ans
         try {
             const checked = checkPlan(imported.json, imported.text);
             store.change(cid, c => receiveEntry(c, {
-                team: slug, via: 'zwiftgopher', json: checked.json, text: checked.text, warnings: imported.warnings,
+                team: slug, via: 'zwiftgopher', json: checked.json, text: checked.text, warnings: imported.warnings, zgShare: checked.zgShare,
             }, {now, newId: () => randomId(6)}));
         } catch (e) {
             if (!(e instanceof ClubError)) {

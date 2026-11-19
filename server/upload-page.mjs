@@ -2,15 +2,15 @@
 // GET /manage/upload?team=<slug>[&plan=<id>[&from=plan]]), and the answer to Store on the assign page
 // (uploadResultPage). The pieces the assign page (assign-page.mjs) shares with the result page live
 // here too: the warnings, the move and hole lines, the dropped line, the riders table and the link to
-// a team's upload page. Only the upload page reloads itself, guarded (a chosen file is never lost);
-// the result page never does (its warnings would be wiped). Pure: the clock is passed in. Every value from a club, rider or file goes through esc().
+// a team's upload page. None of the pages reloads itself (a form or the result's warnings would be
+// wiped). Pure: the clock is passed in. Every value from a club, rider or file goes through esc().
 import {esc, t, T} from './pages.mjs';
 import {plannedStart, usedUp, PLAN_OPEN_MS} from './select.mjs';
 import {planOfId, racePlans, previousVersion} from './plans.mjs';
 import {localLabel, localHHMM} from './time.mjs';
 import {captainPage, flashBlock, hidden, postForm, sevLine, backBar} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {nameOf, atLabel, pullTarget, liveWords, backAsk, dateDay, andList, quote, WAITING_REFRESH_S} from './team-view.mjs';
+import {nameOf, atLabel, pullTarget, liveWords, backAsk, dateDay, andList, quote} from './team-view.mjs';
 import {receivedFor} from './club.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
 
@@ -65,14 +65,10 @@ export function uploadHref(club, slug, date, now) {
 // sets `plan` too, from the team or the result page). The form's action keeps `plan` and `from`, so
 // a refused upload (also one refused before its body is read) draws the same page again. `flash` (a
 // refused upload's text, kind 'err') at the top. Never reloads itself. `seen`, `others`:
-// captainPage's, as on the result page. `planner` (push.mjs href: the planner with a fresh token, or
-// null without PUBLIC_URL) puts "Plan on ZwiftGopher" above the file input, the second way in: the
-// plan made there comes back to this team's inbox.
-// The page reloads itself every WAITING_REFRESH_S through the script's guarded reload (never while
-// a field was changed, has focus or a fold is open, so a chosen file stays; no <noscript> refresh),
-// so plans from ZwiftGopher waiting for the team show up: a line with the way to the team page.
-// `refresh` false (a refused upload, the answer to a POST) keeps it from reloading.
-export function uploadPage(club, slug, {now, seen, others, plan = null, from = null, flash = null, planner = null, refresh = true}) {
+// captainPage's, as on the result page. Plans from ZwiftGopher waiting for the team show as a line
+// with the way to the team page; "Plan on ZwiftGopher" itself sits on the team page, beside "Upload a
+// plan" (user, 19 Nov 2026), not here: this page is for the file.
+export function uploadPage(club, slug, {now, seen, others, plan = null, from = null, flash = null}) {
     const name = club.teams[slug].name;
     const p = racePlanOf(club, slug, plan, now);
     const toPlan = p !== null && from === 'plan';
@@ -81,11 +77,7 @@ export function uploadPage(club, slug, {now, seen, others, plan = null, from = n
     const as = p === null ? '' : `\n    <p class="sub">${esc(t('upload-as-version', {label: p.label}))}</p>`;
     const main = `<main class="page" id="main">
   <header class="pagehead"><p class="kicker desk">${esc(name)}</p><h1>${esc(t('upload-heading-for', {team: name}))}</h1>${as}</header>
-  ${flashBlock(flash)}${waitingLine(club, slug, now)}${planner === null ? '' : `
-  <section class="card stack planner">
-    <a class="btn secondary block" href="${esc(planner)}" target="_blank" rel="noopener noreferrer">${ic('link')}${esc(t('upload-planner'))}</a>
-    <p class="hint">${esc(t('upload-planner-hint'))}</p>
-  </section>`}
+  ${flashBlock(flash)}${waitingLine(club, slug, now)}
   <form class="stack" method="post" action="${esc(action)}" enctype="multipart/form-data" data-upload>${hidden({team: slug, forPlan: p === null ? '' : p.id})}
     <section class="card stack">
       <label class="field">${esc(t('upload-json'))}<input id="json-in" type="file" name="json" accept=".json,application/json"></label>
@@ -95,8 +87,7 @@ export function uploadPage(club, slug, {now, seen, others, plan = null, from = n
     <button class="btn primary block" type="submit">${esc(t('upload-continue'))}</button>
   </form>
 </main>`;
-    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: up, main, cls: 'formpage upload',
-        refresh: refresh ? action : null, refreshS: WAITING_REFRESH_S, noscript: false});
+    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: up, main, cls: 'formpage upload'});
 }
 
 

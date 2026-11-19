@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {channelProblem} from '../scripts/check-channel.mjs';
+import {channelProblem, serverProblem} from '../scripts/check-channel.mjs';
 import {VERSION, CHANNEL} from '../pages/src/version.mjs';
 import {DEFAULT_SERVER_URL, RELEASE_SERVER_URL, BETA_SERVER_URL} from '../pages/src/engine/planserver.mjs';
 
@@ -48,6 +48,8 @@ function betaTree() {
     copyFileSync(join(repoRoot, 'scripts/check-channel.mjs'), join(root, 'scripts/check-channel.mjs'));
     writeFileSync(join(root, 'pages/src/version.mjs'), "export const VERSION = '0.3.0-beta.1';\nexport const CHANNEL = 'beta';\n");
     writeFileSync(join(root, 'manifest.json'), JSON.stringify({version: '0.3.0-beta.1'}));
+    mkdirSync(join(root, 'server'));
+    writeFileSync(join(root, 'server/VERSION'), '0.3.0-beta.1\n');
     return root;
 }
 
@@ -59,7 +61,7 @@ test('CLI: main with a beta version exits 1 with the suffix message', () => {
         assert.match(r.stdout + r.stderr, /suffix/);
         const n = spawnSync(process.execPath, [join(root, 'scripts/check-channel.mjs'), 'next'], {encoding: 'utf8'});
         assert.equal(n.status, 0);
-        assert.match(n.stdout, /channel ok: next 0\.3\.0-beta\.1 beta/);
+        assert.match(n.stdout, /channel ok: next mod 0\.3\.0-beta\.1 beta, server 0\.3\.0-beta\.1/);
         const m = spawnSync(process.execPath, [join(root, 'scripts/check-channel.mjs'), ''], {encoding: 'utf8'});
         assert.equal(m.status, 0);
         assert.match(m.stdout, /channel ok: \(no branch\) /);
@@ -142,4 +144,15 @@ test('CLI: CI_DEFAULT_BRANCH decides which branch is the release branch', () => 
 test('channelProblem: defaultBranch can be something other than main', () => {
     assert.match(channelProblem({branch: 'trunk', defaultBranch: 'trunk', version: '0.3.0-beta.1', channel: 'release'}), /^trunk needs a plain version/);
     assert.equal(channelProblem({branch: 'main', defaultBranch: 'trunk', version: '0.3.0-beta.1', channel: 'release'}), null);
+});
+
+
+test('serverProblem: server/VERSION is a version, plain on main', () => {
+    assert.equal(serverProblem({branch: 'main', version: '0.3.4'}), null);
+    assert.match(serverProblem({branch: 'main', version: '0.3.4-beta.1'}), /plain server version/);
+    assert.equal(serverProblem({branch: 'next', version: '0.3.4-beta.1'}), null);
+    assert.equal(serverProblem({branch: 'next', version: '0.3.4'}), null);
+    for (const bad of ['', '0.3', 'v0.3.4', '0.3.4-rc1', ' 0.3.4', undefined]) {
+        assert.match(serverProblem({branch: 'next', version: bad}), /not a version/, String(bad));
+    }
 });

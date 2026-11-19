@@ -467,7 +467,7 @@ const registerDonePage = () => publicPage(card(t('register-heading'), sevLine('n
 const registerClosedPage = () => publicPage(card(t('register-heading'), sevLine('neutral', 'info', t('register-closed'))));
 
 
-const PRIVACY_ROWS = ['club', 'address', 'sheets', 'inbox', 'code', 'delivery', 'recordings', 'deleted', 'backups', 'limits'];
+const PRIVACY_ROWS = ['club', 'address', 'sheets', 'inbox', 'zglink', 'code', 'delivery', 'recordings', 'deleted', 'backups', 'limits'];
 
 // The heading and its intro on top, then a card per section.
 // Without an operator address for the notices of removals (or without mail) a full restore relies on

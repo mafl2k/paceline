@@ -156,7 +156,7 @@ function uploadFormPage(req, res, ctx, cid) {
         html(res, 404, teamGonePage(club, frameOf(ctx, cid)));
         return;
     }
-    html(res, 200, uploadPage(club, slug, {...frameOf(ctx, cid), plan: params.get('plan'), from: params.get('from'), planner: plannerHref(ctx, club, slug)}));
+    html(res, 200, uploadPage(club, slug, {...frameOf(ctx, cid), plan: params.get('plan'), from: params.get('from')}));
 }
 
 
@@ -180,7 +180,7 @@ function teamPageOf(req, res, ctx, cid, raw, {settings = false} = {}) {
         html(res, 200, teamSettingsPage(club, slug, {...frameOf(ctx, cid), flash, push: ctx.push?.on === true}));
     } else {
         const flash = takeFlash(req, res, ctx, cid, `/manage/team/${slug}`);
-        html(res, 200, teamPage(club, slug, {...frameOf(ctx, cid), flash}));
+        html(res, 200, teamPage(club, slug, {...frameOf(ctx, cid), flash, planner: plannerHref(ctx, club, slug)}));
     }
 }
 
@@ -272,7 +272,7 @@ function queryTeam(req, club) {
 function refusedPage(res, ctx, cid, slug, status, text, plan = null, from = null) {
     const club = ctx.store.get(cid);
     const flash = {kind: 'err', text};
-    html(res, status, slug !== null && Object.hasOwn(club.teams, slug) ? uploadPage(club, slug, {...frameOf(ctx, cid), plan, from, flash, planner: plannerHref(ctx, club, slug), refresh: false})
+    html(res, status, slug !== null && Object.hasOwn(club.teams, slug) ? uploadPage(club, slug, {...frameOf(ctx, cid), plan, from, flash})
         : teamGonePage(club, {...frameOf(ctx, cid), flash}));
 }
 
@@ -312,7 +312,7 @@ async function upload(req, res, ctx, cid) {
         try {
             const checked = checkPlan(imported.json, imported.text);
             id = store.change(cid, c => addEntry(c, {
-                source: 'upload', team: slug, forPlan, via, json: checked.json, text: checked.text, warnings: imported.warnings,
+                source: 'upload', team: slug, forPlan, via, json: checked.json, text: checked.text, warnings: imported.warnings, zgShare: checked.zgShare,
             }, {now, newId: () => randomId(6)}));
         } catch (e) {
             if (e instanceof ClubError) {
@@ -349,7 +349,7 @@ function versionsPageOf(req, res, ctx, cid, rawSlug, rawId) {
         return;
     }
     const flash = takeFlash(req, res, ctx, cid, `/manage/team/${slug}/plan/${id}`);
-    html(res, 200, versionsPage(club, slug, id, {...frameOf(ctx, cid), flash}));
+    html(res, 200, versionsPage(club, slug, id, {...frameOf(ctx, cid), flash, planner: plannerHref(ctx, club, slug)}));
 }
 
 

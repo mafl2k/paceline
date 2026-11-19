@@ -14,7 +14,7 @@ import {
     servable, datePicks, effects, outdated, plannedStart, startOf, raceStart, raceStartAt, planOpen, nextRaceDate, stillToRace,
     PLAN_OPEN_MS, USED_UP_MS,
 } from './select.mjs';
-import {isUsed, backTo, ClubError, receivedFor, plannerName} from './club.mjs';
+import {isUsed, backTo, ClubError, receivedFor, plannerName, isShare} from './club.mjs';
 import {planOfId, racePlans, previousVersion} from './plans.mjs';
 import {localHHMM, localLabel, localDate, localDay, zonedToUtc, isDate, addDays} from './time.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
@@ -24,8 +24,8 @@ const HOUR_MS = 60 * MIN_MS;
 const DAY_MIN = 24 * 60;
 const FOLD_DAYS = 14;    // a special team with nothing in this many days folds on the picker
 // The team pages reload themselves every 30 s from 90 min before to 60 min after any live plan's
-// S (spec §5). Outside that window a team page with plans from ZwiftGopher waiting, and every upload
-// page, reloads every WAITING_REFRESH_S (coordinator, 19 Nov 2026), so a new plan shows by itself.
+// S (spec §5). Outside that window a team page with plans from ZwiftGopher waiting reloads every
+// WAITING_REFRESH_S (coordinator, 19 Nov 2026), so a new plan shows by itself.
 export const WAITING_REFRESH_S = 60;
 export const REFRESH_BEFORE_MS = 90 * MIN_MS;
 export const REFRESH_AFTER_MS = 60 * MIN_MS;
@@ -157,7 +157,7 @@ export function foldedTeams(club, now) {
 
 
 // True from 90 min before to 60 min after any live plan's S: the team pages reload every 30 s.
-// (The upload page reloads every WAITING_REFRESH_S, guarded; the result page never does.)
+// The upload pages never do (a form or the result's warnings would be wiped).
 export function refreshDue(club, now) {
     return servable(club, now).some(c => now >= c.S - REFRESH_BEFORE_MS && now <= c.S + REFRESH_AFTER_MS);
 }
@@ -455,6 +455,28 @@ export function teamView(club, slug, {now, seen = {}}) {
         riders, has, count, plans, received: receivedOf(club, slug, now),
         trap: noStart && live ? trapOf(club, slug, sheet, plan.riders, now) : [],
     };
+}
+
+
+// "Plan on ZwiftGopher" (`planner`, push.mjs href, or null) with #t=<share value> (club.mjs shareOf)
+// when there is one, so the planner opens with that plan loaded; null stays null. Captain pages only.
+export function plannerHref(planner, share) {
+    return planner === null ? null : isShare(share) ? `${planner}#t=${share}` : planner;
+}
+
+
+// The share value the team page's planner link carries: the live version's (one not raced yet), else
+// that of the newest version among the plans of the team's next race, else null.
+export function teamShare(club, slug, now) {
+    const id = club.teams[slug]?.live;
+    const live = typeof id === 'string' && Object.hasOwn(club.sheets, id) ? club.sheets[id] : null;
+    if (live !== null && !isUsed(club, live, now) && isShare(live.zgShare)) {
+        return live.zgShare;
+    }
+    const date = nextRaceDate(club, slug, now);
+    const newest = racePlans(club, slug, now).filter(p => p.date === date).flatMap(p => p.versions.map(([, v]) => v))
+        .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0];
+    return isShare(newest?.zgShare) ? newest.zgShare : null;
 }
 
 

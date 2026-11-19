@@ -19,9 +19,11 @@
 //        sidebar's (1280) offer Spokesmen CC, "Log out of Kettenfett RC" and "Log out of all clubs";
 //        the button switches to that club, whose footer offers Kettenfett RC, which switches back;
 //        Log out of the open club lands on the other club's overview;
-//   1d.  the upload page's "Plan on ZwiftGopher" opens the planner in a new tab with the team's token;
-//        two plans pushed with it (POST /api/v3/push) are listed on the team page, newest first, and
-//        counted in the switcher and the sidebar; with --shots captain-upload-planner-{390,1280}-light.png,
+//   1d.  the team page's "Plan on ZwiftGopher" (beside "Upload a plan"; in an empty team's card the
+//        second button) opens the planner in a new tab with the team's token, and the upload page
+//        has none; two plans pushed with it (POST /api/v3/push) are listed on the team page, newest
+//        first, and counted in the switcher and the sidebar; with --shots
+//        captain-team-{empty,plans}-{390,1280}-light.png (Cogs, Rollers before the pushes),
 //        captain-team-received-{390,1280}-light.png, captain-team-received-390-dark.png and
 //        captain-teams-received-390-light.png;
 //   3.   the upload page shows the text export as a plain field and stays when the file is chosen
@@ -473,13 +475,28 @@ try {
     await open('/manage');
     report(await signedIn(), 'one club again');
 
-    // ---- 1d: the ZwiftGopher push: the upload page's link; two plans pushed with it are listed on the
+    // ---- 1d: the ZwiftGopher push: the team page's link; two plans pushed with it are listed on the
     // team page (newest first) and counted in the rows; they are discarded again afterwards ----
     {
-        await open('/manage/upload?team=rollers');
-        const link = JSON.parse(await tab.evaluate('JSON.stringify((a => a && {href: a.href, target: a.target, rel: a.rel})(document.querySelector(".planner a.btn")))'));
+        const planner = sel => `JSON.stringify((a => a && {href: a.href, target: a.target, rel: a.rel})(document.querySelector('${sel} a[href^="https://zwiftgopher.com/"]')))`;
+        await open('/manage/team/rollers');
+        const link = JSON.parse(await tab.evaluate(planner('.uplinks')));
         report(link !== null && link.href.startsWith('https://zwiftgopher.com/TTT/?paceline=') && link.href.endsWith('&plhost=paceline.example.org')
-            && link.target === '_blank' && link.rel === 'noopener noreferrer', 'the upload page links to ZwiftGopher in a new tab', JSON.stringify(link));
+            && link.target === '_blank' && link.rel === 'noopener noreferrer', 'the team page links to ZwiftGopher in a new tab, beside Upload a plan', JSON.stringify(link));
+        await open('/manage/team/cogs');
+        const empty = JSON.parse(await tab.evaluate(planner('.card.empty')));
+        await open('/manage/upload?team=rollers');
+        const onUpload = await tab.evaluate('document.querySelectorAll(\'a[href^="https://zwiftgopher.com/"]\').length');
+        report(empty !== null && empty.href.includes('?paceline=') && onUpload === 0, 'an empty team\'s card has it as its second button; the upload page has none',
+            JSON.stringify({empty, onUpload}));
+        if (shotsDir) {
+            for (const w of [390, 1280]) {
+                await open('/manage/team/cogs', {w});
+                await shootNow(`captain-team-empty-${w}-light.png`, w);
+                await open('/manage/team/rollers', {w});
+                await shootNow(`captain-team-plans-${w}-light.png`, w);
+            }
+        }
         const token = new URL(link.href).searchParams.get('paceline');
         const statuses = [];
         for (const [name, riders] of [['Rollers fast', ['1001', '1002', '1003', '1004', '1005', '1006']], ['Rollers slow', ['1001', '1002', '1003', '1004']]]) {
@@ -496,8 +513,6 @@ try {
             'two pushed plans: listed newest first, counted in the switcher and sidebar', JSON.stringify({statuses, rows, marks}));
         if (shotsDir) {
             for (const w of [390, 1280]) {
-                await open('/manage/upload?team=rollers', {w});
-                await shootNow(`captain-upload-planner-${w}-light.png`, w);
                 await open('/manage/team/rollers', {w});
                 await shootNow(`captain-team-received-${w}-light.png`, w);
             }

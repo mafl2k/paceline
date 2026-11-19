@@ -101,10 +101,10 @@ export function renderPlace(ctx, cid, place, {flash = null, typed = null} = {}) 
             return teamGonePage(club, {...frame, flash});
         }
         if (place.page === 'versions') {
-            return planOf(club, place.slug, place.plan) ? versionsPage(club, place.slug, place.plan, {...frame, flash})
+            return planOf(club, place.slug, place.plan) ? versionsPage(club, place.slug, place.plan, {...frame, flash, planner: ctx.push?.href(club, place.slug, ctx.now) ?? null})
                 : planGonePage(club, place.slug, {...frame, flash});
         }
-        return place.page === 'team' ? teamPage(club, place.slug, {...frame, flash, refresh: false})
+        return place.page === 'team' ? teamPage(club, place.slug, {...frame, flash, refresh: false, planner: ctx.push?.href(club, place.slug, ctx.now) ?? null})
             : teamSettingsPage(club, place.slug, {...frame, flash, typed, push: ctx.push?.on === true});
     }
     if (place.page === 'new-team') {

@@ -1210,7 +1210,8 @@ test('privacy page', async () => {
         assert.match(text, /from 30 minutes before the start/);
         assert.match(text, /smtp\.example\.org/, 'the mail provider');
         assert.match(text, /W\/kg/);
-        assert.match(text, /no height, no FTP/i);
+        // the claim is about what riders get (user, 19 Nov 2026: the captain's ZwiftGopher link holds both)
+        assert.match(text, /The plans riders get carry no height and no FTP\./);
         assert.match(text, /only its hash is stored/i);
         assert.match(text, /only of riders the club lists/);
         assert.match(text, /listed by your club/);
@@ -1310,7 +1311,7 @@ test('privacy: plans with versions, the inbox, plan codes in recordings', async 
             assert.ok(text.includes(s), s);
         }
         // the inbox row comes right after the plans' row
-        assert.match(body, /should never hold rider names\.<\/td><\/tr>\n<tr><td>Plans waiting to be stored \(inbox\), uploaded or sent from ZwiftGopher: the same plan data and the import warnings<\/td><td>People with the club link<\/td><td>until stored or discarded, an upload at most 24 hours, a plan from ZwiftGopher at most 7 days<\/td><\/tr>\n<tr><td>The rider code of a private club/);
+        assert.match(body, /should never hold rider names\.<\/td><\/tr>\n<tr><td>Plans waiting to be stored \(inbox\), uploaded or sent from ZwiftGopher: the same plan data and the import warnings<\/td><td>People with the club link<\/td><td>until stored or discarded, an upload at most 24 hours, a plan from ZwiftGopher at most 7 days<\/td><\/tr>\n<tr><td>A plan&#39;s ZwiftGopher link, when its export has one/);
         assert.match(text, /sees the label, team and start time of the plans that list it/);
         for (const gone of [/an undo copy/i, /last two/i, /\bsheets?\b/i]) {
             assert.doesNotMatch(text, gone);

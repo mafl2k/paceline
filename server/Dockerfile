@@ -8,6 +8,9 @@ ENV NODE_ENV=production \
 
 # The repo layout, so the server modules import the engine as ../pages/src/engine/ here too.
 WORKDIR /app/server
+# the server's version (server/VERSION, passed by CI and build-push.sh); shown in the start log line
+ARG PACELINE_VERSION=dev
+ENV PACELINE_VERSION=$PACELINE_VERSION
 COPY server/*.mjs ./
 COPY pages/src/engine/plan.mjs pages/src/engine/colors.mjs /app/pages/src/engine/
 

@@ -180,6 +180,7 @@ details>summary::-webkit-details-marker{display:none}
 .rowlink{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:var(--text);padding-block:.75rem}
 .rowlink>span{display:grid;flex:1}
 .rowlink .chev{color:var(--muted)}
+.uplinks{display:flex;flex-wrap:wrap;gap:0 1.5rem}
 .uplink{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--tap);font-weight:600;color:var(--accent);justify-self:start}
 .pp-state{font-weight:650}
 .pp-state.live{color:var(--ok-fg)}

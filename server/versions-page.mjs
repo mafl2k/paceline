@@ -12,7 +12,8 @@
 import {esc, t} from './pages.mjs';
 import {captainPage, th, flashBlock, postForm, hidden, backBar} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {atLabel, dateDay, backAsk, liveWords, linkedPlan, andList, nameOf} from './team-view.mjs';
+import {atLabel, dateDay, backAsk, liveWords, linkedPlan, andList, nameOf, plannerHref} from './team-view.mjs';
+import {isShare} from './club.mjs';
 import {makeLiveHtml} from './team-page.mjs';
 import {ridersTable} from './upload-page.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
@@ -143,12 +144,18 @@ function ridersHtml(p) {
 // The items of the former "…" menu: New version (the upload page for this plan, back to this page), the race date,
 // Remove event link for a linked plan (back to this page), Delete plan behind its confirm (back to
 // the team page). A used-up plan keeps only the race date.
-function actionsHtml(club, slug, p, {used}) {
+function actionsHtml(club, slug, p, {used, planner}) {
     const team = club.teams[slug];
     const [id] = p.newest;
     const items = [];
     if (!used) {
         items.push(`<a class="rowlink" href="${esc(`/manage/upload?team=${slug}&plan=${p.id}&from=plan`)}">${ic('upload')}<span><strong>${esc(t('pp-new-version'))}</strong></span>${ic('right', 'chev')}</a>`);
+    }
+    // "Edit on ZwiftGopher": the plan's own version (the live one, else the newest) opened in the
+    // planner by its share value; only when that version has one (else the planner would open empty)
+    const share = (p.live !== null ? club.sheets[p.live] : p.newest[1])?.zgShare;
+    if (!used && planner !== null && isShare(share)) {
+        items.push(`<a class="rowlink" href="${esc(plannerHref(planner, share))}" target="_blank" rel="noopener noreferrer">${ic('link')}<span><strong>${esc(t('pp-edit-planner'))}</strong></span>${ic('right', 'chev')}</a>`);
     }
     // a special team's start time comes with each upload (the newest for the date sets it)
     const hint = team.kind === 'special' ? 'tp-race-time-hint' : 'tp-race-date-hint';
@@ -174,7 +181,8 @@ function actionsHtml(club, slug, p, {used}) {
 
 // The plan page of plan `planId` (any of its ids; the caller has checked that the team and the plan
 // exist), with an optional flash. A used-up plan lists its versions without buttons.
-export function versionsPage(club, slug, planId, {now, seen, others, flash = null}) {
+// `planner` (push.mjs href with a fresh token for the team, or null) gives "Edit on ZwiftGopher".
+export function versionsPage(club, slug, planId, {now, seen, others, flash = null, planner = null}) {
     const team = club.teams[slug];
     const p = planOfId(club, slug, planId);
     const S = plannedStart(club, p.newest[1]);
@@ -192,7 +200,7 @@ export function versionsPage(club, slug, planId, {now, seen, others, flash = nul
         ${rows.join('\n        ')}
     </ul>
   </section>
-  ${actionsHtml(club, slug, p, {used})}
+  ${actionsHtml(club, slug, p, {used, planner})}
 </main>`;
     return captainPage(club, {now, seen, others, here: teamPath(slug), bar: backBar(teamPath(slug), team.name, club.name), main, cls: 'formpage'});
 }

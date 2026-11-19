@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// CI guard: the default branch ships plain release versions, `next` ships betas.
+// CI guard: the default branch ships plain release versions, `next` ships betas. The mod's version
+// (manifest.json = VERSION) and the server's (server/VERSION) are separate (user, 19 Nov 2026): a
+// server-only release leaves the mod's version as it is, so no empty mod release goes out.
 // Usage: node scripts/check-channel.mjs [branch]
 import {readFileSync, realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -20,6 +22,19 @@ export function channelProblem({branch, defaultBranch = 'main', version, channel
     return null;
 }
 
+const SERVER_VERSION_RE = /^\d+\.\d+\.\d+(-beta\.\d+)?$/;
+
+// The server's version (server/VERSION): a version, plain on the default branch.
+export function serverProblem({branch, defaultBranch = 'main', version}) {
+    if (typeof version !== 'string' || !SERVER_VERSION_RE.test(version)) {
+        return `server/VERSION is not a version like 0.3.4 or 0.3.4-beta.1, got '${version}'`;
+    }
+    if (branch && branch === defaultBranch && version.includes('-')) {
+        return `${defaultBranch} needs a plain server version without a suffix, got ${version}`;
+    }
+    return null;
+}
+
 async function main() {
     const branch = process.argv[2] ?? process.env.CI_COMMIT_BRANCH ?? '';
     const defaultBranch = process.env.CI_DEFAULT_BRANCH || 'main';
@@ -29,11 +44,13 @@ async function main() {
     if (!problem && manifest.version !== VERSION) {
         problem = `manifest.json version ${manifest.version} differs from VERSION ${VERSION}`;
     }
+    const server = readFileSync(new URL('../server/VERSION', import.meta.url), 'utf8').trim();
+    problem ??= serverProblem({branch, defaultBranch, version: server});
     if (problem) {
         console.error(problem);
         process.exit(1);
     }
-    console.log(`channel ok: ${branch || '(no branch)'} ${VERSION} ${CHANNEL}`);
+    console.log(`channel ok: ${branch || '(no branch)'} mod ${VERSION} ${CHANNEL}, server ${server}`);
 }
 
 // Run main() only when this file is the entry point. Both sides go through realpath: import.meta.url

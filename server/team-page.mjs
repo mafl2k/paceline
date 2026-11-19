@@ -20,7 +20,7 @@
 import {esc, t} from './pages.mjs';
 import {captainPage, teamRows, rowsHtml, th, flashBlock, hidden, postForm, freshLine, backBar, dstBanner} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {teamView, teamRow, refreshDue, nextRace, worst, andList, quote, liveWords, linkedPlan, WAITING_REFRESH_S} from './team-view.mjs';
+import {teamView, teamRow, refreshDue, nextRace, worst, andList, quote, liveWords, linkedPlan, WAITING_REFRESH_S, plannerHref, teamShare} from './team-view.mjs';
 import {uploadHref} from './upload-page.mjs';
 import {plansOf, racePlans, planOfId} from './plans.mjs';
 import {localHHMM, dstChangedRecently} from './time.mjs';
@@ -165,7 +165,15 @@ function noStartHtml(club, view, now) {
 }
 
 
-function emptyHtml(view) {
+// "Plan on ZwiftGopher" beside the upload (push.mjs href: a fresh token for this team), or '' without
+// one (no PUBLIC_URL). `cls` the link's class: the plain .uplink under the plans, a block button in
+// the empty card.
+function plannerLink(planner, cls) {
+    return planner === null ? '' : `<a class="${cls}" href="${esc(planner)}" target="_blank" rel="noopener noreferrer">${ic('link')}${esc(t('upload-planner'))}</a>`;
+}
+
+
+function emptyHtml(view, planner = null) {
     if (view.live) {
         return '';
     }
@@ -183,7 +191,8 @@ function emptyHtml(view) {
       ${ic('noPlan', 'big')}
       <h2 id="empty-h">${esc(t('tp-empty-title', {team: view.name}))}</h2>
       <p>${body}</p>
-      <a class="btn primary block" href="${esc(uploadPath(view.slug))}">${ic('upload')}${esc(t('tp-upload-plan'))}</a>
+      <a class="btn primary block" href="${esc(uploadPath(view.slug))}">${ic('upload')}${esc(t('tp-upload-plan'))}</a>${planner === null ? '' : `
+      ${plannerLink(planner, 'btn secondary block')}`}
     </section>`;
 }
 
@@ -354,13 +363,17 @@ function linkedPlans(club, slug, now) {
 // `refresh` false keeps it from reloading itself (a refusal answers a POST: its URL must not be
 // reloaded). The team name is the h1 twice: in the bar on phones, in the page from 1024 px (.desk),
 // each hidden where the other shows.
-export function teamPage(club, slug, {now, seen = {}, others = [], flash = null, refresh = true}) {
+// `planner` (push.mjs href with a fresh token, or null) gets the share id of the team's plan
+// (teamShare: the planner opens with it loaded).
+export function teamPage(club, slug, {now, seen = {}, others = [], flash = null, refresh = true, planner: base = null}) {
     const view = teamView(club, slug, {now, seen});
+    const planner = plannerHref(base, teamShare(club, slug, now));
     const rows = teamRows(club, {now, seen}, view);
     const path = teamPath(slug);
     const updated = localHHMM(now, club.tz);
     // the upload link is plain, under the plans; a team without plans has the empty card's button
-    const upload = view.live || view.plans.length ? `<a class="uplink" href="${esc(uploadPath(slug))}">${ic('upload')}${esc(t('tp-upload-link'))}</a>` : '';
+    // and beside it the other way to a plan, "Plan on ZwiftGopher" (user, 19 Nov 2026: one step before the upload page)
+    const upload = view.live || view.plans.length ? `<div class="uplinks"><a class="uplink" href="${esc(uploadPath(slug))}">${ic('upload')}${esc(t('tp-upload-link'))}</a>${plannerLink(planner, 'uplink')}</div>` : '';
     const main = `<main class="page wide" id="main">
   <header class="pagehead">
     <div class="teamhead"><p class="kicker">${esc(club.name)}</p><h1 class="desk">${esc(view.name)}</h1><a class="btn quiet small" href="${esc(settingsPath(slug))}">${ic('settings')}${esc(t('tp-settings'))}</a></div>
@@ -370,7 +383,7 @@ export function teamPage(club, slug, {now, seen = {}, others = [], flash = null,
   ${dstChangedRecently(club.tz, now) ? dstBanner() : ''}
   ${flashBlock(flash)}
   <div class="cols">
-    <div class="col-a">${receivedHtml(view)}${notesHtml(club, view, now)}${noStartHtml(club, view, now)}${emptyHtml(view)}${plansHtml(club, view, now)}</div>
+    <div class="col-a">${receivedHtml(view)}${notesHtml(club, view, now)}${noStartHtml(club, view, now)}${emptyHtml(view, planner)}${plansHtml(club, view, now)}</div>
     <div class="col-b">${ridersHtml(view)}</div>
     <div class="col-c">${upload}</div>
   </div>

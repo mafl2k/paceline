@@ -383,7 +383,7 @@ async function main() {
         console.error(`paceline-server: ${e.message}`);
         process.exit(1);
     }
-    server.listen(server.cfg.port, () => console.log(`paceline-server listening on :${server.cfg.port}`));
+    server.listen(server.cfg.port, () => console.log(`paceline-server ${process.env.PACELINE_VERSION || 'dev'} listening on :${server.cfg.port}`));
     const stop = () => {
         try {
             server.flushSync();
