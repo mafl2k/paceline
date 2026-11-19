@@ -1190,7 +1190,7 @@ test('team settings page: name, start time, event links, delete; never reloads',
     // delete behind an in-page confirm, with the plan count
     const confirm = element(body, '<details class="confirm">');
     assert.ok(textOf(body).includes('Delete Rollers Delete team…'), 'the danger zone');
-    assert.ok(textOf(confirm).includes('Deletes Rollers and its 2 plans. Riders get nothing from it any more. This cannot be undone. Recordings stay until they expire. '
+    assert.ok(textOf(confirm).includes('Deletes Rollers and its 2 plans. Riders get nothing from it any more. Plans waiting from ZwiftGopher go too. This cannot be undone. Recordings stay until they expire. '
         + 'Versions used in a ride recording stay with it for analysis (90 days by default).'), confirm);
     const del = teamForm(confirm, 'delete');
     assert.ok(del.includes('<input type="hidden" name="team" value="rollers">'), del);
@@ -1205,7 +1205,7 @@ test('team settings page: name, start time, event links, delete; never reloads',
     await followPost(srv, c.cookie, '/manage/team', {action: 'add', name: 'Cogs', start: ''});
     const cogs = await pageBody(srv, '/manage/team/cogs/settings');
     assert.ok(cogs.includes('<input type="time" name="start" value="">'));
-    assert.ok(textOf(cogs).includes('Deletes Cogs. It has no plans. This cannot be undone.'), textOf(cogs));
+    assert.ok(textOf(cogs).includes('Deletes Cogs. It has no plans; plans waiting from ZwiftGopher go too. This cannot be undone.'), textOf(cogs));
 
     // a team that does not exist: the team-gone page
     for (const p of ['/manage/team/gone/settings', '/manage/team/__proto__/settings', '/manage/team//settings', '/manage/team/%E0%A4%A/settings']) {

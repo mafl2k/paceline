@@ -129,8 +129,9 @@ export function assignChoices(club, entry, params, now) {
     // one date for the plan choice and the page (I-1)
     const date = own !== null ? own.date : race;
     const def = liveDefault(club, team, {as, date}, now);
-    // no plan chosen: the box is off, whatever was sent (spec §6.3)
-    const live = as === null ? false : keep('live') ? params.get('live') === 'on' : def.on;
+    // no plan chosen: the box is off, whatever was sent (spec §6.3); a received plan (ZwiftGopher)
+    // starts off in every case (plan versions spec §5.5): it is never live before the captain says so
+    const live = as === null ? false : keep('live') ? params.get('live') === 'on' : entry.source === 'receive' ? false : def.on;
     const type = keep('type') ? params.get('type') ?? '' : own !== null ? own.type ?? '' : '';
 
     const {riders} = entryPlan(entry);

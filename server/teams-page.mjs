@@ -26,7 +26,7 @@ function clubHead(club, kicker) {
 
 function tile(row) {
     return `<li><a class="tile edge-${esc(row.sev)}" href="/manage/team/${esc(row.slug)}">
-      <span class="tile-top"><span class="tile-name">${esc(row.name)}</span><span class="tile-time">${esc(row.timeLine)}</span>${ic('right', 'chev')}</span>
+      <span class="tile-top"><span class="tile-name">${esc(row.name)}</span><span class="tile-time">${esc(row.timeLine)}</span>${row.received ? `<span class="newplans">${esc(row.received)}</span>` : ''}${ic('right', 'chev')}</span>
       ${sevLine(row.sev, row.icon, row.main, '', 'span')}
       <span class="tile-quiet">${esc(row.quiet)}</span>
     </a></li>`;

@@ -1305,12 +1305,12 @@ test('privacy: plans with versions, the inbox, plan codes in recordings', async 
     try {
         const body = await (await get(srv.base, '/privacy')).text();
         const text = textOf(body).replaceAll('&#39;', "'");
-        for (const s of ['Plans and their versions', 'every version of the team\'s plans of this race', 'until stored or discarded, at most 24 hours',
+        for (const s of ['Plans and their versions', 'every version of the team\'s plans of this race', 'until stored or discarded, an upload at most 24 hours, a plan from ZwiftGopher at most 7 days',
             'with the plan codes found in them', 'should never hold rider names']) {
             assert.ok(text.includes(s), s);
         }
         // the inbox row comes right after the plans' row
-        assert.match(body, /should never hold rider names\.<\/td><\/tr>\n<tr><td>Uploads waiting to be stored \(inbox\): the same plan data and the import warnings<\/td><td>People with the club link<\/td><td>until stored or discarded, at most 24 hours<\/td><\/tr>\n<tr><td>The rider code of a private club/);
+        assert.match(body, /should never hold rider names\.<\/td><\/tr>\n<tr><td>Plans waiting to be stored \(inbox\), uploaded or sent from ZwiftGopher: the same plan data and the import warnings<\/td><td>People with the club link<\/td><td>until stored or discarded, an upload at most 24 hours, a plan from ZwiftGopher at most 7 days<\/td><\/tr>\n<tr><td>The rider code of a private club/);
         assert.match(text, /sees the label, team and start time of the plans that list it/);
         for (const gone of [/an undo copy/i, /last two/i, /\bsheets?\b/i]) {
             assert.doesNotMatch(text, gone);

@@ -98,6 +98,12 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 .callout.err{background:var(--err-bg);border-color:var(--err-bd);color:var(--err-fg)}
 .callout>h2{display:flex;align-items:center;gap:.5rem;font-size:1.0625rem;font-weight:750}
 .callout.warn>h2 .i{color:var(--warn-icon)}.callout.err>h2 .i{color:var(--err-icon)}
+/* plans received from ZwiftGopher: neutral blue, news rather than a problem */
+.callout.info{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-soft-fg)}
+.callout.info>h2 .i{color:var(--info-icon)}
+.note.info{border-left-color:var(--info-icon)}.note.info .note-title .i{color:var(--info-icon)}
+.note-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.newplans{display:inline-block;font-size:.8125rem;font-weight:700;line-height:1.3;padding:.05rem .45rem;border-radius:999px;background:var(--accent-soft);color:var(--accent-soft-fg);border:1px solid var(--accent);white-space:nowrap;vertical-align:.1em}
 .callout ol{margin-top:.75rem;display:grid;gap:.75rem}
 .note{display:grid;gap:.625rem;padding:.875rem;border-radius:var(--r2);background:var(--surface);color:var(--text);border:1px solid var(--border);border-left:4px solid}
 .note.err{border-left-color:var(--err-icon)}.note.warn{border-left-color:var(--warn-icon)}

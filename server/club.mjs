@@ -8,7 +8,7 @@ import {t} from './pages.mjs';
 import {
     isUsed, SHARED_SHARE, plansOf, planOfId, planLabel, typeKey, rememberType, previousVersion, freeVersionId,
 } from './plans.mjs';
-import {normalizePlan, stripSheet, PlanError, RAW_NAME_MAX} from '../pages/src/engine/plan.mjs';
+import {normalizePlan, stripSheet, PlanError, RAW_NAME_MAX, decodeEntities} from '../pages/src/engine/plan.mjs';
 
 export const MAX_TEAMS = 10;
 export const MAX_PLANS = 8;               // per team
@@ -22,9 +22,13 @@ export const KEEP_DAYS = 7;               // a used-up plan goes this many days 
 export const TEAM_NAME_MAX = 40;
 export const TYPE_MAX = 30;               // a plan's type; its label is the team name plus the type
 export const RIDER_NAME_MAX = 100;
-export const INBOX_MAX = 10;              // entries per club
-export const INBOX_BYTES = 327680;        // 320 KB: the sum of the entries' {json, text, warnings}
-export const INBOX_KEEP_MS = 86400000;    // an entry nobody stored goes after 24 h
+// The inbox (coordinator, 19 Nov 2026: received plans wait in a list, so 10 became 20 entries and
+// the bytes grew with them; one entry still at most ENTRY_BYTES)
+export const INBOX_MAX = 20;              // entries per club
+export const INBOX_BYTES = 655360;        // 640 KB: the sum of the entries' {json, text, warnings}
+export const ENTRY_BYTES = 327680;        // 320 KB: one entry's {json, text, warnings}
+export const INBOX_KEEP_MS = 86400000;    // an uploaded entry nobody stored goes after 24 h
+export const RECEIVE_KEEP_MS = 7 * 86400000;   // a received one (ZwiftGopher) after 7 days, as its link
 const WARNINGS_MAX = 21;                  // import warnings kept with an entry
 const WARNING_CODE_MAX = 40;              // a warning's code (the import's codes are short words)
 
@@ -241,12 +245,15 @@ export function setKind(club, slug, {kind, weekday}, now) {
 }
 
 
-// Removes the team and its sheets. Returns the slug, for the store to retire.
+// Removes the team, its sheets and the inbox entries waiting for it (uploads and received plans
+// alike: no page would show them again, the slug is retired, and received ones would fill the inbox
+// for 7 days). Returns the slug, for the store to retire.
 export function deleteTeam(club, slug, now) {
     const team = teamOf(club, slug);
     for (const [id] of teamSheets(club, slug)) {
         delete club.sheets[id];
     }
+    club.inbox = club.inbox.filter(e => e.team !== slug);
     delete club.teams[slug];
     addLog(club, {at: iso(now), what: 'team-delete', team: slug, label: team.name});
     return slug;
@@ -371,7 +378,7 @@ export function typeFor(club, slug, {as, type, date}, now) {
 }
 
 
-const VIAS = ['file', 'paste', 'import', 'receive'];
+const VIAS = ['file', 'paste', 'import', 'receive', 'zwiftgopher'];
 
 
 // The cap of versions per plan for a new version of `plan` (labelled `label`): with MAX_VERSIONS
@@ -827,7 +834,7 @@ export function sweepClub(club, now) {
 // ---- the inbox (plan versions spec §4.1, §5) ----
 // A plan that came in and waits on the assign page: {id, at, source, team, forPlan, via, json, text,
 // warnings, warningsMore}, `json` and `text` as checkPlan stripped them. Not part of any team's state: no version
-// bump, no log (but discard), and an entry nobody stores goes after INBOX_KEEP_MS.
+// bump, no log (but discard), and an entry nobody stores goes after keepOf (24 h, a received one 7 days).
 
 const entryBytes = e => Buffer.byteLength(JSON.stringify({json: e.json, text: e.text, warnings: e.warnings}));
 
@@ -847,13 +854,13 @@ function cleanWarnings(warnings) {
 }
 
 
-// Where an entry came from: an upload now; /import and receive (circles §14) later.
+// Where an entry came from: an upload, a push from ZwiftGopher (receive, push.mjs); /import later.
 const SOURCES = ['upload', 'import', 'receive'];
 
 
 // Adds an entry and returns its id. `source` must be one of SOURCES (else an Error: a caller's bug).
 // `team` is kept only when it is a team of the club, `via` only when it is one of VIAS, `forPlan`
-// only when it names a plan of `team`; else each is null. An entry that alone is over INBOX_BYTES is
+// only when it names a plan of `team`; else each is null. An entry that alone is over ENTRY_BYTES is
 // refused (cap-bytes; a checked plan is at most MAX_SHEET_BYTES plus its warnings, far below).
 // Then the oldest entries go until at most INBOX_MAX are left and they fit INBOX_BYTES (the new one
 // stays).
@@ -867,8 +874,8 @@ export function addEntry(club, {source, team = null, forPlan = null, via = null,
         id: null, at: iso(now), source, team: slug, forPlan: null, via: VIAS.includes(via) ? via : null,
         json, text, warnings: kept.warnings, warningsMore: kept.more,
     };
-    if (entryBytes(entry) > INBOX_BYTES) {
-        throw new ClubError('cap-bytes', {max: INBOX_BYTES / 1024});
+    if (entryBytes(entry) > ENTRY_BYTES) {
+        throw new ClubError('cap-bytes', {max: ENTRY_BYTES / 1024});
     }
     let id = null;
     for (let i = 0; i < 20 && id === null; i++) {
@@ -890,13 +897,16 @@ export function addEntry(club, {source, team = null, forPlan = null, via = null,
 }
 
 
+// How long an entry waits: a received one RECEIVE_KEEP_MS, any other INBOX_KEEP_MS.
+export const keepOf = entry => (entry.source === 'receive' ? RECEIVE_KEEP_MS : INBOX_KEEP_MS);
+
 const expired = (entry, now) => {
     const at = Date.parse(entry.at);
-    return !Number.isFinite(at) || now - at > INBOX_KEEP_MS;
+    return !Number.isFinite(at) || now - at > keepOf(entry);
 };
 
 
-// The entry `id`, or null. With `now`, an entry older than INBOX_KEEP_MS is gone too (the sweep has
+// The entry `id`, or null. With `now`, an entry older than keepOf allows is gone too (the sweep has
 // not removed it yet).
 export function entryOf(club, id, now = null) {
     const entry = typeof id === 'string' ? club.inbox.find(e => e.id === id) ?? null : null;
@@ -932,13 +942,73 @@ export function storeEntry(club, id, {slug, as, live, date, start, type, pinnedE
 }
 
 
+// A plan pushed from outside (POST /api/v3/push, push.mjs) as an entry of `team`: the stale entries
+// go first (sweepInbox), then, unlike an upload, nothing is pushed out to make room: an inbox with
+// INBOX_MAX entries, or one the new entry would take over INBOX_BYTES, refuses it (inbox-full), so a
+// link holder cannot flush out what the captain has not stored yet. Else addEntry's id.
+export function receiveEntry(club, {team, via, json, text, warnings = []}, {now, newId}) {
+    // the team may have gone since its token was checked (deleted while the body came in)
+    teamOf(club, team);
+    sweepInbox(club, now);
+    const add = entryBytes({json, text, warnings: cleanWarnings(warnings).warnings});
+    const bytes = club.inbox.reduce((n, e) => n + entryBytes(e), 0);
+    if (club.inbox.length >= INBOX_MAX || bytes + add > INBOX_BYTES) {
+        throw new ClubError('inbox-full', {max: INBOX_MAX});
+    }
+    return addEntry(club, {source: 'receive', team, via, json, text, warnings}, {now, newId});
+}
+
+
+// The received entries waiting for team `slug`, newest first (the team page's list, the rows' count).
+export function receivedFor(club, slug, now) {
+    // the inbox is in arrival order, so the newest first is that order turned round (also for two of
+    // the same millisecond)
+    return club.inbox.filter(e => e.source === 'receive' && e.team === slug && !expired(e, now)).reverse();
+}
+
+
+// The generation of a team's push link (push.mjs): team.pushGen, absent (a club stored by 0.3.1)
+// or anything but a whole number from 0 counts as 0.
+export function pushGenOf(team) {
+    const gen = team?.pushGen;
+    return Number.isSafeInteger(gen) && gen >= 0 ? gen : 0;
+}
+
+
+// The planner's team name of an entry as the team page shows it (a hint, never stored): entities
+// decoded as the riders' names are, control and format characters (bidi overrides among them) out,
+// white space collapsed, at most PLANNER_NAME_MAX code points with "…". Null when nothing is left.
+export const PLANNER_NAME_MAX = 60;
+
+export function plannerName(entry) {
+    const raw = entry?.json?.team?.name;
+    if (typeof raw !== 'string') {
+        return null;
+    }
+    const clean = [...decodeEntities(raw).replace(/\s+/g, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/ +/g, ' ').trim()];
+    if (!clean.length) {
+        return null;
+    }
+    return clean.length > PLANNER_NAME_MAX ? `${clean.slice(0, PLANNER_NAME_MAX - 1).join('').trimEnd()}…` : clean.join('');
+}
+
+
+// "New ZwiftGopher link": the team's push link gets its next generation, so the old link stops
+// working. No version bump (riders get nothing new); the log names the step, never a token.
+export function newPushLink(club, slug, now) {
+    const team = teamOf(club, slug);
+    team.pushGen = pushGenOf(team) + 1;
+    addLog(club, {at: iso(now), what: 'push-link', team: slug, label: team.name});
+}
+
+
 // How many entries sweepInbox would remove (only reads, for the sweep's dry check).
 export function staleEntries(club, now) {
     return club.inbox.filter(e => expired(e, now)).length;
 }
 
 
-// Drops the entries older than INBOX_KEEP_MS, or with an `at` that does not parse. No version bump
+// Drops the entries older than keepOf allows, or with an `at` that does not parse. No version bump
 // and no log: nobody sees an entry on a team page. Returns how many went.
 export function sweepInbox(club, now) {
     const before = club.inbox.length;

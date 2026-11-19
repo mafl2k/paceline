@@ -21,6 +21,9 @@ text on what the server keeps; this README only describes it.
 - Answers the **plan check** `GET /api/v3/rider/<zwiftId>`: which clubs list this rider, which plan
   he rides, and, from 30 minutes before the start, the plan itself.
 - Keeps **private clubs** hidden from everyone who does not hold the club's rider code.
+- Takes plans **pushed from ZwiftGopher** (`POST /api/v3/push`, proof of concept): the team's upload
+  page links to the planner with a short-lived token, the planner posts the plan back, and it waits
+  in the team's inbox until the captain stores it (see "ZwiftGopher push").
 - Tells old 0.2.x mods to update (**notice**): there is no compat mode (hard cut, 17 Nov 2026).
 - Accepts **recordings** per club, refuses heart rate and cadence, drops riders outside the team's
   plans, and enforces quotas and a retention time.
@@ -74,7 +77,7 @@ no-referrer` and a neutral title.
 | `/manage/team/<slug>/plan/<id>` | the plan page: head, Make live, rider order, versions with what changed and Back to vN, New version, race date, Remove event link, Delete |
 | `/manage/team/<slug>/settings` | rename, start time, race rhythm, event links, delete the team; never reloads |
 | `/manage/new-team` | add a team |
-| `/manage/upload?team=<slug>[&plan=<id>]` | the upload page: the JSON file (or pasted, folded) and the optional text export; Continue goes on to the assign page |
+| `/manage/upload?team=<slug>[&plan=<id>]` | the upload page: "Plan on ZwiftGopher" (with `PUBLIC_URL`), the JSON file (or pasted, folded) and the optional text export; Continue goes on to the assign page |
 | `/manage/inbox/<id>` | the assign page: team, plan, type, Make live, date, event link and the preview; Store or Discard |
 | `/manage/settings` | club settings: name and zone, race day of weekly teams, address, private club, remove a rider, recordings, activity, delete the club |
 | `/static/app.css`, `/static/app.js` | the captain pages' stylesheet and script; each has an ETag of its content, and a link with the matching `?v=` is cached for a year |
@@ -169,11 +172,19 @@ and the team picker two.
   page shows the lists without buttons.
 - **Plans have no name.** A plan is its team plus an optional **type** ("Rollers · fast"; "Rollers"
   without one), within one race. Types are unique within a race, and at most one plan of a race has
-  none. The type field suggests the team's earlier types. The planner's team name in the JSON is
-  never shown; it only helps to preselect the plan on the next upload.
-- **Received plans.** "New plan received" lines for plans sent from a planner come with `/import`
-  and receive (not built yet). Until then nothing waits in the inbox but an upload left on the assign
-  page, which is shown nowhere and goes after 24 hours.
+  none. The type field suggests the team's earlier types. The planner's team name in the JSON helps
+  to preselect the plan on the next upload; it is shown only as the hint of a received plan (below),
+  cleaned of control and bidi characters and cut at 60 characters.
+- **Received plans.** A plan pushed from ZwiftGopher (below) waits in the inbox for its team. The
+  team page lists every one, newest first ("2 new plans from ZwiftGopher": the time it came, the
+  planner's team name as a hint, the rider count, "Review and store" to its assign page, Discard);
+  the team's row in the sidebar, the switcher and the picker's tile say "1 new plan" / "2 new plans"
+  (neutral blue, not a problem). The assign page says "From ZwiftGopher, 19:42" and starts with Make
+  live off. A received plan goes after 7 days, an upload left on the assign page (shown nowhere)
+  after 24 hours; deleting a team deletes the plans waiting for it. A new plan comes in by itself:
+  a team page with received plans waiting reloads every 60 seconds (every 30 around a race, as
+  always), and the upload page, where the captain usually left off before the planner, reloads every
+  60 seconds and says "2 plans from ZwiftGopher are waiting" with the way to the team page.
 - **Team status** has one line per team, and its colour shows the worst state: red when riders get
   nothing (no plan, no start time, riders in another event than the event link), amber for "check"
   (a hole, riders on an older plan code), grey before the gate ("Opens 19:00 ..."), green when all
@@ -190,11 +201,14 @@ and the team picker two.
   rider-code page, the result page of Store, the Make live and Back confirm pages (the no-script
   path of Make live) and refusals are direct answers.
 - **Reload.** The picker and the team pages reload themselves every 30 seconds from 90 minutes
-  before to 60 minutes after a live plan's start; pages with forms to type into never do. With the
+  before to 60 minutes after a live plan's start; outside that window a team page with plans from
+  ZwiftGopher waiting reloads every 60 seconds, and so does every upload page. The other pages with
+  forms to type into never do, nor does an upload page that answers a refused upload. With the
   script the reload is guarded: not while the tab is hidden, a field has focus, a menu is open or a
-  form was changed, and only after a HEAD request of the page answered; otherwise the page says
-  "Not updated since ..." with a Try again link. Without the script a `<noscript>` meta refresh
-  does the reload.
+  form was changed (typed into or a file chosen), and only after a HEAD request of the page answered;
+  otherwise the page says "Not updated since ..." with a Try again link. Without the script a
+  `<noscript>` meta refresh does the reload, except on the upload page (it would lose a chosen
+  file).
 - **The script** (`/static/app.js`, `server/client.mjs`) is the captain pages' interface: the
   assign page redraws itself (a GET of itself with the form's fields) when the team, the plan or the
   live box change, and when the race date is left or a second after its last digit, keeping the
@@ -359,7 +373,8 @@ data (plans, the inbox, plan codes) are constants too.
 | recordings | 4 new files per day per rider and team; one body at a time |
 | plan uploads and assign-page draws | one upload body per club at a time, 8 on the server in all (503, `Retry-After: 5`); uploads and draws together 60 per club per 10 minutes (429, `Retry-After: 600`) |
 | plans | 8 per team (a full team drops its oldest raced plan, else the upload is refused), 5 per race, 20 versions per plan: the oldest version that is not live goes, and the assign page says so first |
-| inbox | 10 entries and 320 KB per club; a new entry drops the oldest; each goes after 24 hours |
+| inbox | 20 entries and 640 KB per club, one entry at most 320 KB; an upload drops the oldest, a push is refused (409); an upload goes after 24 hours, a received plan after 7 days |
+| ZwiftGopher push | 30 per team per hour (429, `Retry-After: 3600`); 60 per public client address per hour, unknown tokens included; one body per club and 2 on the server at a time, apart from the uploads (503, `Retry-After: 5`); the body at most 256 KB (413) within 10 seconds (408) |
 | plan codes per recording | 10; the rest are ignored |
 | recordings | 5 000 per club |
 | archived plan versions | 1 000 per team (the oldest no recording uses goes first, then the oldest) |
@@ -417,7 +432,7 @@ DATA_DIR/
 
 `<cid>` is the club's public id, 10 random characters (Crockford base32). Limits per club: 10 teams,
 8 plans per team, 5 per race, 20 versions per plan, 40 riders (the planner's roster included) and 64 KB per
-version, 10 inbox entries and 320 KB, 2 MB for the club's JSON (versions plus inbox). At start the
+version, 20 inbox entries and 640 KB (320 KB per entry), 2 MB for the club's JSON (versions plus inbox). At start the
 server reads every club from `paceline.db`, checks it (a club that fails the checks stops the start,
 naming it) and keeps all of them in memory; registration limits active clubs to `MAX_CIRCLES`. Each
 change of a club, and each operation that touches more than one table (trash, restore, purge,
@@ -524,6 +539,92 @@ A code that matches no private club counts as a failure for the client's address
 within an hour, checks from that address that carry codes get `429 {"error":"busy"}` with
 `Retry-After: 3600`; checks without codes go on. Private and loopback addresses are never counted
 (see `TRUSTED_PROXY_HOPS`).
+
+## ZwiftGopher push
+
+Proof of concept (19 Nov 2026). With `PUBLIC_URL` (or `PACELINE_HOST`) set, the upload page of every
+team has **"Plan on ZwiftGopher"**: a link to `https://zwiftgopher.com/TTT/?paceline=<token>&plhost=<host>`
+in a new tab. The captain makes the plan there, ZwiftGopher posts it to this server, and it waits in
+the team's inbox (`source: "receive"`, `via: "zwiftgopher"`) until the captain stores it on the
+assign page, as an upload. It is never live before that Store, and Make live starts off.
+
+**Token.** Stateless: nothing is stored per token. 40 lower-case hex characters: 8 of the expiry
+(unix seconds, the link's draw plus 7 days) and 32 of HMAC-SHA256(secret,
+`push:<cid>:<slug>:<gen>:<expiry>`) cut to 128 bit. Every draw of the upload page mints a fresh one.
+The secret is made at the first start and kept in `paceline.db` (meta `push_secret`): tokens survive
+restarts, and a dump or backup restores it. It is shown nowhere. `<gen>` is the team's `pushGen`
+(absent in clubs stored by 0.3.1: 0). A push finds the team by checking the MAC against every team
+of the active clubs (memory only), then the expiry: a forged or unknown token answers 404, an expired
+one 410. **New ZwiftGopher link** in the team settings bumps `pushGen` and so ends every link of the
+team handed out so far (logged as "New ZwiftGopher link"). Deleting the team or the club ends its
+links too; a rename keeps them (the slug stays). A token names one team only: it never reaches
+another.
+
+**Route.** `POST /api/v3/push?paceline=<token>` (or header `X-Paceline-Token`; the query wins), body
+the planner's JSON export as `application/json` or `text/plain`, checked like an upload (the same
+shape, size and content checks). The answers are in the contract below.
+
+**CORS.** `OPTIONS /api/v3/push` allows `https://zwiftgopher.com` and `https://www.zwiftgopher.com`
+only: `POST, OPTIONS`, headers `Content-Type, X-Paceline-Token`, no credentials, `Vary: Origin`.
+Another origin gets no allow headers, and the answers carry `Access-Control-Allow-Origin` only for
+those two origins. Posting needs no origin: the token is the permission.
+
+**Limits.** 30 pushes per team per hour; 60 per public client address per hour (counted before the
+token is checked); one body per club and 2 on the server at a time, in slots of their own (a push
+never takes a captain's upload slot); 256 KB per body, within 10 seconds; the inbox caps (20
+entries, 640 KB; a full inbox refuses the push instead of dropping a waiting plan). A token whose
+expiry lies more than 7 days and 5 minutes ahead was never handed out by this server and counts as
+unknown (404). A team deleted while a push's body comes in: 404, nothing stored. Every answer of the
+route, a 500 too, carries the CORS headers for an allowed origin.
+
+**`plhost`** is the host of `PUBLIC_URL` (with its port, if any). ZwiftGopher posts to
+`https://<plhost>/api/v3/push`, so the server must be reached over https at the root of that host:
+a `PUBLIC_URL` with `http:` or a path prefix sends the planner to the wrong place.
+
+### For ZwiftGopher
+
+The contract, to forward as it is:
+
+> **Paceline → ZwiftGopher.** A captain on Paceline clicks "Plan on ZwiftGopher" and lands on
+> `https://zwiftgopher.com/TTT/?paceline=<token>&plhost=<host>`.
+> - `paceline`: the team's token, 40 lower-case hex characters. It works for 7 days from that click;
+>   the captain can end it earlier. Treat it like a password: it lets anyone who holds it send a plan
+>   into that team's inbox. Do not log it or put it in links you share.
+> - `plhost`: the host name of the Paceline server (with a port if it has one), e.g.
+>   `paceline.example.org`. Post to `https://<plhost>/api/v3/push`: always https, never a path
+>   prefix (Paceline answers at the root of that host).
+>
+> **ZwiftGopher → Paceline.** `POST https://<plhost>/api/v3/push` with the token in the header
+> `X-Paceline-Token: <token>` (recommended: it keeps the token out of access logs), or as
+> `?paceline=<token>` in the query (the query wins if both are sent).
+> Body: the planner's JSON export, exactly as the "Export JSON" file, with `Content-Type:
+> application/json` (`text/plain` is accepted too, so a browser can send it without a preflight).
+> At most 256 KB. CORS allows `https://zwiftgopher.com` and `https://www.zwiftgopher.com`, methods
+> `POST, OPTIONS`, headers `Content-Type, X-Paceline-Token`, no credentials.
+>
+> Answers (JSON):
+> - `201 {"ok": true, "club": "<club name>", "team": "<team name>", "review": "<URL of the team's page on Paceline>"}`
+>   — the plan waits there for the captain to review and store it; it is not live yet. Show the
+>   `review` link.
+> - `400 {"error": "<code>", "message": "<text to show>"}` — the plan was refused: `bad-json` (no
+>   JSON object), `too-complex`, `not-a-plan` (no riders), `bad-plan`, `long-name`, `cap-riders`
+>   (over 40 riders, roster included), `cap-bytes` (over 64 KB as stored), `too-big` (the club is
+>   full).
+> - `404 {"error": "unknown-token"}` — no such link (mistyped, or ended by the captain).
+> - `410 {"error": "expired"}` — the link is older than 7 days: the captain clicks "Plan on
+>   ZwiftGopher" again.
+> - `409 {"error": "inbox-full", "message": "…"}` — 20 plans already wait; the captain stores or
+>   discards some first.
+> - `413 {"error": "too-large"}`, `408 {"error": "too-slow"}`, `415 {"error": "content-type"}`,
+>   `405` for any method but POST.
+> - `429 {"error": "rate-limit"}` (`Retry-After` in seconds): 30 plans per team per hour, and 60
+>   pushes per hour from one network address, counted before the token is checked (so if
+>   ZwiftGopher posts from its own server rather than the captain's browser, all pushes share those
+>   60). `503 {"error": "busy"}`: try again after `Retry-After`, 5 seconds.
+> - The body must arrive within 10 seconds. Every answer carries the CORS headers for the two
+>   origins above, errors (and a `500 {"error": "internal"}`) included.
+>
+> Nothing about riders goes from Paceline to ZwiftGopher: the link carries the token and the host only.
 
 ## Old endpoints (0.2.x mods)
 
@@ -952,7 +1053,7 @@ password.
 | --- | --- | --- |
 | `DATA_DIR` | `/data` | data folder |
 | `PORT` | 8080 | listening port |
-| `PUBLIC_URL` | `https://<PACELINE_HOST>` | base of mailed links, and the host in the notice record |
+| `PUBLIC_URL` | `https://<PACELINE_HOST>` | base of mailed links, the host in the notice record, and the host (`plhost`) of "Plan on ZwiftGopher"; unset: no such link |
 | `PACELINE_HOST` | – | host name; only the default for `PUBLIC_URL` (the Traefik router uses it too) |
 | `SMTP_HOST` | – | the mail server. Mail is on only with `SMTP_HOST`, `MAIL_FROM` and `PUBLIC_URL` all set; otherwise no mail, no registration |
 | `SMTP_PORT` | 587; 465 with `tls` | |

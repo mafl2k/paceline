@@ -6,7 +6,7 @@ import {
     ClubError, newClub, addTeam, renameTeam, setStart, setKind, deleteTeam, uploadSheet, makeLive,
     deleteSheet, unpin, backTo, learnEvent, clubLists, removeRider, sweepClub, sweptSheets, clubBytes, addLog,
     isPrivate, setRiderCode, clearRiderCode, teamHint, isUsed,
-    INBOX_MAX, INBOX_BYTES, INBOX_KEEP_MS, addEntry, entryOf, discardEntry, storeEntry, staleEntries, sweepInbox,
+    INBOX_MAX, INBOX_BYTES, ENTRY_BYTES, INBOX_KEEP_MS, RECEIVE_KEEP_MS, addEntry, entryOf, discardEntry, storeEntry, staleEntries, sweepInbox,
 } from '../club.mjs';
 import {plansOf, planOfId, freeVersionId, teamTypes, previousVersion} from '../plans.mjs';
 import {plannedStart} from '../select.mjs';
@@ -1136,7 +1136,9 @@ const entryArgs = (json, extra = {}) => ({source: 'upload', team: 'rollers', jso
 
 
 test('inbox: the spec values, a new club has an empty inbox', () => {
-    assert.deepEqual([INBOX_MAX, INBOX_BYTES, INBOX_KEEP_MS], [10, 327680, 86400000]);
+    // 10 entries and 320 KB until the received plans' list (coordinator, 19 Nov 2026): 20 and 640 KB,
+    // one entry still at most 320 KB; a received entry waits 7 days
+    assert.deepEqual([INBOX_MAX, INBOX_BYTES, ENTRY_BYTES, INBOX_KEEP_MS, RECEIVE_KEEP_MS], [20, 655360, 327680, 86400000, 604800000]);
     assert.deepEqual(club().inbox, []);
 });
 
@@ -1157,10 +1159,10 @@ test('inbox: an entry, the caps drop the oldest', () => {
     assert.equal(c.teams[slug].version, version);
 
     const ids = [id];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 20; i++) {
         ids.push(addEntry(c, entryArgs(planJson('Rollers', ['1001']), {team: slug}), {now: NOW + i, newId}));
     }
-    assert.equal(c.inbox.length, 10);
+    assert.equal(c.inbox.length, 20);
     assert.equal(entryOf(c, ids[0]), null, 'the first is gone');
     assert.deepEqual(c.inbox.map(e => e.id), ids.slice(1));
     assert.equal(c.teams[slug].version, version, 'no bump');
@@ -1169,7 +1171,7 @@ test('inbox: an entry, the caps drop the oldest', () => {
     // by size: about 60 KB each, the newest stays, the oldest go
     const d = setup();
     const made = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
         made.push(addEntry(d.c, entryArgs(bulky(`r${i}`).json, {team: d.slugs[0], text: bulky(`r${i}`).text}), {now: NOW + i, newId: d.newId}));
     }
     const one = Buffer.byteLength(JSON.stringify({json: d.c.inbox.at(-1).json, text: d.c.inbox.at(-1).text, warnings: []}));
@@ -1177,7 +1179,7 @@ test('inbox: an entry, the caps drop the oldest', () => {
     const sum = d.c.inbox.reduce((n, e) => n + Buffer.byteLength(JSON.stringify({json: e.json, text: e.text, warnings: e.warnings})), 0);
     assert.ok(sum <= INBOX_BYTES, `${sum}`);
     assert.equal(d.c.inbox.length, Math.floor(INBOX_BYTES / one), 'as many as fit, and fewer than were added');
-    assert.ok(d.c.inbox.length < 8);
+    assert.ok(d.c.inbox.length < 16);
     assert.equal(d.c.inbox.at(-1).id, made.at(-1), 'the newest is kept');
     assert.equal(entryOf(d.c, made[0]), null, 'the oldest went');
     assert.deepEqual(d.c.inbox.map(e => e.id), made.slice(-d.c.inbox.length), 'oldest first, the newest ones stay');
@@ -1311,10 +1313,10 @@ test('addEntry: team, via, source and warning codes from known values only; a lo
     // a warning code is at most 40 characters; a longer one or none drops the warning
     const kept = add({warnings: [{code: 'x'.repeat(40), name: 'A'}, {code: 'x'.repeat(41), name: 'B'}, {code: '', name: 'C'}, {name: 'D'}]}).warnings;
     assert.deepEqual(kept, [{code: 'x'.repeat(40), name: 'A'}]);
-    // an entry that alone is over the inbox's bytes is refused, and nothing is dropped for it
+    // an entry that alone is over ENTRY_BYTES is refused, and nothing is dropped for it
     const n = c.inbox.length;
     const huge = planJson('Rollers', ['1001']);
-    huge.riders['1001'].note = 'x'.repeat(INBOX_BYTES);
+    huge.riders['1001'].note = 'x'.repeat(ENTRY_BYTES);
     assert.throws(() => addEntry(c, {source: 'upload', team: slug, json: huge, text: null}, {now: NOW, newId}), clubError('cap-bytes'));
     assert.equal(c.inbox.length, n);
 });

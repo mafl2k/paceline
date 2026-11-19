@@ -14,7 +14,7 @@ import {
     servable, datePicks, effects, outdated, plannedStart, startOf, raceStart, raceStartAt, planOpen, nextRaceDate, stillToRace,
     PLAN_OPEN_MS, USED_UP_MS,
 } from './select.mjs';
-import {isUsed, backTo, ClubError} from './club.mjs';
+import {isUsed, backTo, ClubError, receivedFor, plannerName} from './club.mjs';
 import {planOfId, racePlans, previousVersion} from './plans.mjs';
 import {localHHMM, localLabel, localDate, localDay, zonedToUtc, isDate, addDays} from './time.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
@@ -24,7 +24,9 @@ const HOUR_MS = 60 * MIN_MS;
 const DAY_MIN = 24 * 60;
 const FOLD_DAYS = 14;    // a special team with nothing in this many days folds on the picker
 // The team pages reload themselves every 30 s from 90 min before to 60 min after any live plan's
-// S (spec §5).
+// S (spec §5). Outside that window a team page with plans from ZwiftGopher waiting, and every upload
+// page, reloads every WAITING_REFRESH_S (coordinator, 19 Nov 2026), so a new plan shows by itself.
+export const WAITING_REFRESH_S = 60;
 export const REFRESH_BEFORE_MS = 90 * MIN_MS;
 export const REFRESH_AFTER_MS = 60 * MIN_MS;
 // A check inside an event counts for this race from S - 2 h on ("in pen"); the server records
@@ -155,7 +157,7 @@ export function foldedTeams(club, now) {
 
 
 // True from 90 min before to 60 min after any live plan's S: the team pages reload every 30 s.
-// The upload pages never do (a form or the result's warnings would be wiped).
+// (The upload page reloads every WAITING_REFRESH_S, guarded; the result page never does.)
 export function refreshDue(club, now) {
     return servable(club, now).some(c => now >= c.S - REFRESH_BEFORE_MS && now <= c.S + REFRESH_AFTER_MS);
 }
@@ -450,9 +452,26 @@ export function teamView(club, slug, {now, seen = {}}) {
     return {
         slug, name: team.name, start: team.start ?? null, special, noStart, raceDate, S, gateAt, opens, open, when, live, status, notes, sev,
         icon: sev === status.sev ? status.icon : SEV_ICON[sev],
-        riders, has, count, plans,
+        riders, has, count, plans, received: receivedOf(club, slug, now),
         trap: noStart && live ? trapOf(club, slug, sheet, plan.riders, now) : [],
     };
+}
+
+
+// The plans received from ZwiftGopher waiting for the team (club.mjs receivedFor), newest first:
+// {id, at ('19:42', or the day before it), name (the planner's team name in the JSON, or null),
+// riders (the count, riders without the bench)}.
+function receivedOf(club, slug, now) {
+    return receivedFor(club, slug, now).map(e => {
+        const at = Date.parse(e.at);
+        let riders = 0;
+        try {
+            riders = normalizePlan(e.json, e.text).plan.riders.length;
+        } catch {
+            // an entry the engine cannot read: its row still offers Review and Discard
+        }
+        return {id: e.id, at: Number.isFinite(at) ? atLabel(at, now, club.tz) : '–', name: plannerName(e), riders};
+    });
 }
 
 
@@ -516,7 +535,10 @@ export function teamRow(view) {
         quiet = t('tv-row-live', {label: live.label});
         short = view.open ? t('tv-short-count', {has: view.has, n: view.count}) : t('tv-short-opens', {opens: view.opens});
     }
-    return {slug: view.slug, name: view.name, sev: view.sev, icon: view.icon, timeLine, main, quiet, short};
+    // plans received from ZwiftGopher: a neutral mark of their own, the status stays as it is
+    const n = view.received?.length ?? 0;
+    const received = n === 0 ? null : n === 1 ? t('tv-received-one') : t('tv-received', {n});
+    return {slug: view.slug, name: view.name, sev: view.sev, icon: view.icon, timeLine, main, quiet, short, ...(received ? {received} : {})};
 }
 
 

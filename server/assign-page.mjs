@@ -201,7 +201,8 @@ export function assignPage(club, entry, {now, seen, others, choices, preview, fl
     const {riders} = normalizePlan(entry.json, entry.text).plan;
     const title = ridersLine(entry);
     const at = Date.parse(entry.at);
-    const source = t('as-source-upload', {at: Number.isFinite(at) ? atLabel(at, now, tz) : '–'})
+    const source = t(entry.source === 'receive' && entry.via === 'zwiftgopher' ? 'as-source-zwiftgopher' : 'as-source-upload',
+        {at: Number.isFinite(at) ? atLabel(at, now, tz) : '–'})
         + (entry.text != null ? t('as-with-text') : '');
     const base = team === null ? '' : club.teams[team].version;
     // a new plan without a default date (a special team with nothing ahead) asks for it above the

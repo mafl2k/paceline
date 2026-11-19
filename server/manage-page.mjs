@@ -105,7 +105,7 @@ export function renderPlace(ctx, cid, place, {flash = null, typed = null} = {}) 
                 : planGonePage(club, place.slug, {...frame, flash});
         }
         return place.page === 'team' ? teamPage(club, place.slug, {...frame, flash, refresh: false})
-            : teamSettingsPage(club, place.slug, {...frame, flash, typed});
+            : teamSettingsPage(club, place.slug, {...frame, flash, typed, push: ctx.push?.on === true});
     }
     if (place.page === 'new-team') {
         return newTeamPage(club, {...frame, flash, typed});

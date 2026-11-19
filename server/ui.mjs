@@ -15,13 +15,15 @@ import {teamView, teamRow, teamOrder} from './team-view.mjs';
 export {andList, quote} from './team-view.mjs';
 
 
-// `refresh` is the page's own GET path when it should reload, `updated` its 'HH:MM'.
+// `refresh` is the page's own GET path when it should reload, every `refreshS` seconds (30 by
+// default); `noscript` false leaves out the <noscript> meta refresh, which would reload without the
+// script's guard (the upload page: a chosen file would be lost). `updated` is the page's 'HH:MM'.
 // `needsScript` false leaves out the note that the page needs the script: pages that work without it
 // (the Make live and Back confirm pages, the rider code, the gone and signed-out pages).
 // `script` false leaves out the script itself: the public pages (publicPage) carry none.
 // `cid` (a captain page: the club it shows) names the club in every form that posts to /manage
 // (withClub).
-export function appPage({body, cls = '', refresh = null, updated = null, needsScript = true, script = true, cid = null}) {
+export function appPage({body, cls = '', refresh = null, refreshS = 30, noscript = true, updated = null, needsScript = true, script = true, cid = null}) {
     if (cid !== null) {
         body = withClub(body, cid);
     }
@@ -35,8 +37,8 @@ export function appPage({body, cls = '', refresh = null, updated = null, needsSc
 <meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
 <title>Paceline</title>
 <link rel="stylesheet" href="${cssHref}">
-${script ? `<script type="module" src="${jsHref}"></script>\n` : ''}${refresh ? `<noscript><meta http-equiv="refresh" content="30;url=${esc(refresh)}"></noscript>\n` : ''}</head>
-<body class="${esc(cls)}"${refresh ? ' data-refresh="30"' : ''}${updated ? ` data-updated="${esc(updated)}"` : ''}>
+${script ? `<script type="module" src="${jsHref}"></script>\n` : ''}${refresh && noscript ? `<noscript><meta http-equiv="refresh" content="${refreshS};url=${esc(refresh)}"></noscript>\n` : ''}</head>
+<body class="${esc(cls)}"${refresh ? ` data-refresh="${refreshS}"` : ''}${updated ? ` data-updated="${esc(updated)}"` : ''}>
 <a class="skip" href="#main">Skip to content</a>
 ${needsScript ? `<noscript><div class="nojs"><p class="banner warn" role="note">${ic('alert')}<span>${esc(t('ui-needs-js'))}</span></p></div></noscript>\n` : ''}${body}
 </body>
@@ -80,7 +82,7 @@ export function teamRows(club, {now, seen = {}}, view = null) {
 // The team rows as links, the one of team `current` (a slug) marked as the page.
 export function rowsHtml(rows, current) {
     return rows.map(r => `<li><a class="trow ${esc(r.sev)}" href="/manage/team/${esc(r.slug)}"${r.slug === current ? ' aria-current="page"' : ''}>`
-        + `${ic(r.icon)}<span class="trow-name">${esc(r.name)}</span><span class="trow-time">${esc(r.timeLine)}</span>`
+        + `${ic(r.icon)}<span class="trow-name">${esc(r.name)}${r.received ? ` <span class="newplans">${esc(r.received)}</span>` : ''}</span><span class="trow-time">${esc(r.timeLine)}</span>`
         + `<span class="trow-main">${esc(r.main)}</span></a></li>`).join('\n');
 }
 

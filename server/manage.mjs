@@ -84,7 +84,7 @@ function tooComplex(text) {
 
 
 // The upload's size before the plan engine sees it: riders plus bench of a JSON, rows of a text
-// export, for the sources as readSource gives them. A refusal text, or null. Linear, so a large
+// export, for the sources as readSource gives them. A refusal {code, error}, or null. Linear, so a large
 // body of names cannot hold the server up (the cap-riders check in uploadSheet comes only after
 // the matching).
 function oversized(sources) {
@@ -95,7 +95,7 @@ function oversized(sources) {
             const riders = new Set(keys(v.riders));
             const count = riders.size + keys(v.roster).filter(id => !riders.has(id)).length;
             if (count > MAX_RIDERS) {
-                return clubErrorText(new ClubError('cap-riders', {max: MAX_RIDERS, count}));
+                return {code: 'cap-riders', error: clubErrorText(new ClubError('cap-riders', {max: MAX_RIDERS, count}))};
             }
         } else {
             let rows = 0;
@@ -103,12 +103,46 @@ function oversized(sources) {
                 rows += line.trim() ? 1 : 0;
             }
             if (rows > MAX_TEXT_ROWS + 1) {  // + the header row
-                return t('upload-text-rows', {max: MAX_TEXT_ROWS});
+                return {code: 'text-rows', error: t('upload-text-rows', {max: MAX_TEXT_ROWS})};
             }
         }
     }
     return null;
 }
+
+
+// The checks of the arriving files' texts before they become an entry, shared by the upload and the
+// ZwiftGopher push (push.mjs), in this order: the shape of each text before any parse (too-complex),
+// one parse each, with `json` the one text must be a JSON object (bad-json), their size (cap-riders,
+// text-rows) and the import (its PlanError code: not-a-plan, no-json, unreadable). {ok: true,
+// sources, imported}, or {ok: false, code, error} with the text the upload page shows.
+export function checkTexts(texts, {json = false} = {}) {
+    if (texts.some(tooComplex)) {
+        return {ok: false, code: 'too-complex', error: t('upload-shape')};
+    }
+    // the one parse of each file: the checks, the import and the entry share its object
+    const sources = texts.map(readSource);
+    if (json && sources.some(x => x.json === null)) {
+        return {ok: false, code: 'bad-json', error: t('push-bad-json')};
+    }
+    const tooBig = oversized(sources);
+    if (tooBig !== null) {
+        return {ok: false, ...tooBig};
+    }
+    try {
+        return {ok: true, sources, imported: importSources(sources)};
+    } catch (e) {
+        if (e instanceof PlanError) {
+            const known = Object.hasOwn(T, `import-${e.code}`);
+            return {ok: false, code: known ? e.code : 'unreadable', error: t(known ? `import-${e.code}` : 'import-unreadable')};
+        }
+        throw e;
+    }
+}
+
+
+// "Plan on ZwiftGopher" of team `slug` (push.mjs), or null (no PUBLIC_URL, or no push in this ctx).
+const plannerHref = (ctx, club, slug) => ctx.push?.href(club, slug, ctx.now) ?? null;
 
 
 // GET /manage/upload?team=<slug>[&plan=<id>[&from=plan]]: the team's upload page, for a new version
@@ -122,7 +156,7 @@ function uploadFormPage(req, res, ctx, cid) {
         html(res, 404, teamGonePage(club, frameOf(ctx, cid)));
         return;
     }
-    html(res, 200, uploadPage(club, slug, {...frameOf(ctx, cid), plan: params.get('plan'), from: params.get('from')}));
+    html(res, 200, uploadPage(club, slug, {...frameOf(ctx, cid), plan: params.get('plan'), from: params.get('from'), planner: plannerHref(ctx, club, slug)}));
 }
 
 
@@ -143,7 +177,7 @@ function teamPageOf(req, res, ctx, cid, raw, {settings = false} = {}) {
     }
     if (settings) {
         const flash = takeFlash(req, res, ctx, cid, `/manage/team/${slug}/settings`);
-        html(res, 200, teamSettingsPage(club, slug, {...frameOf(ctx, cid), flash}));
+        html(res, 200, teamSettingsPage(club, slug, {...frameOf(ctx, cid), flash, push: ctx.push?.on === true}));
     } else {
         const flash = takeFlash(req, res, ctx, cid, `/manage/team/${slug}`);
         html(res, 200, teamPage(club, slug, {...frameOf(ctx, cid), flash}));
@@ -218,25 +252,11 @@ async function readUpload(req, ctx, cid) {
     const jsonText = file('json') ?? paste;
     const via = file('json') === null && paste !== null ? 'paste' : 'file';
     const texts = [jsonText, file('text')].filter(x => x !== null);
-    if (texts.some(tooComplex)) {
-        return refused(t('upload-shape'));
+    const read = checkTexts(texts);
+    if (!read.ok) {
+        return refused(read.error);
     }
-    // the one parse of each file: the checks, the import and the entry share its object
-    const sources = texts.map(readSource);
-    const tooBig = oversized(sources);
-    if (tooBig !== null) {
-        return refused(tooBig);
-    }
-    let imported;
-    try {
-        imported = importSources(sources);
-    } catch (e) {
-        if (e instanceof PlanError) {
-            return refused(Object.hasOwn(T, `import-${e.code}`) ? t(`import-${e.code}`) : t('import-unreadable'));
-        }
-        throw e;
-    }
-    return {ok: true, slug, forPlan, via, sources, imported};
+    return {ok: true, slug, forPlan, via, sources: read.sources, imported: read.imported};
 }
 
 
@@ -252,7 +272,7 @@ function queryTeam(req, club) {
 function refusedPage(res, ctx, cid, slug, status, text, plan = null, from = null) {
     const club = ctx.store.get(cid);
     const flash = {kind: 'err', text};
-    html(res, status, slug !== null && Object.hasOwn(club.teams, slug) ? uploadPage(club, slug, {...frameOf(ctx, cid), plan, from, flash})
+    html(res, status, slug !== null && Object.hasOwn(club.teams, slug) ? uploadPage(club, slug, {...frameOf(ctx, cid), plan, from, flash, planner: plannerHref(ctx, club, slug), refresh: false})
         : teamGonePage(club, {...frameOf(ctx, cid), flash}));
 }
 

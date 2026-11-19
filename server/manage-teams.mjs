@@ -5,7 +5,7 @@
 // with a flash (done, manage-page.mjs), a refusal on that page, or a page of its own.
 import {html} from './http.mjs';
 import {t} from './pages.mjs';
-import {makeLive, backTo, deleteSheet, unpin, addTeam, renameTeam, setStart, setKind, deleteTeam} from './club.mjs';
+import {makeLive, backTo, deleteSheet, unpin, addTeam, renameTeam, setStart, setKind, deleteTeam, newPushLink} from './club.mjs';
 import {effects, outdated, teamWeekday} from './select.mjs';
 import {randomId} from './ids.mjs';
 import {clubErrorText, field, teamOf, sheetOf, done, refuse, attempt, frameOf} from './manage-page.mjs';
@@ -129,7 +129,8 @@ function postedWeekday(form) {
 }
 
 
-// POST /manage/team (action = add | rename | start | kind | delete, team, name, start, kind, weekday).
+// POST /manage/team (action = add | rename | start | kind | push-link | delete, team, name, start, kind,
+// weekday).
 // A blank start clears the start time (F8); a blank weekday is the club's. Add takes the race rhythm
 // too (user, 19 Nov 2026): without `kind` (a page from before) it is weekly on the club's day, and a
 // special team ignores the start. Add goes to the new team's page, rename, start and kind to the
@@ -176,6 +177,11 @@ function teamAction(req, res, ctx, cid, form) {
             const what = !plans || kind === was ? null : kind === 'special' ? t('team-kind-special-keep')
                 : own != null ? t('team-kind-weekly-start', {start: own}) : t('team-kind-weekly-none');
             done(res, ctx, cid, settings, [t('team-kind-set', {team: name, rhythm}), what].filter(Boolean).join(' '));
+        }
+    } else if (action === 'push-link') {
+        // "New ZwiftGopher link": every link of the team handed out so far stops working
+        if (attempt(res, ctx, cid, c => newPushLink(c, slug, now), {place: settings})) {
+            done(res, ctx, cid, settings, t('team-push-new', {team: store.get(cid).teams[slug].name}));
         }
     } else if (action === 'delete') {
         if (!team) {

@@ -16,6 +16,18 @@ export function shouldReload({hidden, focused, openDetails, dirty}) {
 // Does one of these <details> hold the reload? An open one does, unless it is marked
 // data-keep-refresh: a fold that holds no form input (the picker's "Other teams", the riders' help)
 // would otherwise freeze the page for as long as it is left open.
+// A field of a form whose value the browser put back (Back, a restored tab): holds the reload like a
+// typed one. Text fields and text areas only; their defaultValue is what the page was drawn with.
+export function restoredInput(fields) {
+    for (const f of fields) {
+        if ((f.type === 'textarea' || f.type === 'text' || f.type === 'search') && f.value !== f.defaultValue) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
 export function holdsReload(details) {
     for (const d of details) {
         if (d.open && !('keepRefresh' in d.dataset)) {
@@ -137,12 +149,23 @@ const HEAD_TIMEOUT_MS = 10000;
 function guardedReload() {
     const body = document.body;
     const every = Number(body.dataset.refresh) * 1000;
-    let dirty = false;
-    document.addEventListener('input', e => {
-        if (e.target instanceof Element && e.target.closest('form')) {
+    // a value the browser put back after Back counts as typed
+    let dirty = restoredInput(document.querySelectorAll('form input, form textarea'));
+    // 'change' too: a chosen file must never be reloaded away (the upload page reloads itself). And a
+    // click on a file input: Safari and Firefox on macOS don't focus it while the chooser is open, so
+    // without this a reload could cancel a choice still being made.
+    for (const type of ['input', 'change']) {
+        document.addEventListener(type, e => {
+            if (e.target instanceof Element && e.target.closest('form')) {
+                dirty = true;
+            }
+        });
+    }
+    document.addEventListener('click', e => {
+        if (e.target instanceof Element && e.target.closest('form input[type="file"], form label:has(input[type="file"])')) {
             dirty = true;
         }
-    });
+    }, true);
     for (const a of document.querySelectorAll('[data-reload]')) {
         a.addEventListener('click', e => {
             e.preventDefault();

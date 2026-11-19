@@ -20,7 +20,7 @@
 import {esc, t} from './pages.mjs';
 import {captainPage, teamRows, rowsHtml, th, flashBlock, hidden, postForm, freshLine, backBar, dstBanner} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {teamView, teamRow, refreshDue, nextRace, worst, andList, quote, liveWords, linkedPlan} from './team-view.mjs';
+import {teamView, teamRow, refreshDue, nextRace, worst, andList, quote, liveWords, linkedPlan, WAITING_REFRESH_S} from './team-view.mjs';
 import {uploadHref} from './upload-page.mjs';
 import {plansOf, racePlans, planOfId} from './plans.mjs';
 import {localHHMM, dstChangedRecently} from './time.mjs';
@@ -94,6 +94,35 @@ function noteHtml(club, view, n, now) {
     return `<li class="note ${esc(n.sev)}">
         ${parts.join('\n        ')}
       </li>`;
+}
+
+
+// The plans received from ZwiftGopher (teamView.received, newest first), above everything else: one
+// row each with its time, the planner's team name as a hint, the rider count, "Review and store" (its
+// assign page, where Make live starts off) and Discard (back to this page).
+function receivedHtml(view) {
+    if (!view.received.length) {
+        return '';
+    }
+    const rows = view.received.map(r => {
+        const what = [r.riders === 1 ? t('tp-riders-one') : t('tp-riders-n', {n: r.riders})];
+        if (r.name !== null) {
+            what.unshift(t('tp-received-name', {name: r.name}));
+        }
+        return `<li class="note info">
+        <p class="note-title">${ic('file')}<strong>${esc(t('tp-received-at', {at: r.at}))}</strong></p>
+        <p>${esc(what.join(' · '))}</p>
+        <div class="note-acts"><a class="btn primary small" href="/manage/inbox/${esc(r.id)}">${esc(t('tp-received-review'))}</a>`
+            + `${postForm(`/manage/inbox/${r.id}/discard`, {back: teamPath(view.slug)}, t('tp-received-discard'), {cls: 'btn quiet small', icon: 'trash'})}</div>
+      </li>`;
+    });
+    const n = view.received.length;
+    return `<section class="callout info" aria-labelledby="recv-h">
+      <h2 id="recv-h">${ic('info')}${esc(n === 1 ? t('tp-received-one') : t('tp-received', {n}))}</h2>
+      <ol>
+      ${rows.join('\n      ')}
+      </ol>
+    </section>`;
 }
 
 
@@ -341,13 +370,17 @@ export function teamPage(club, slug, {now, seen = {}, others = [], flash = null,
   ${dstChangedRecently(club.tz, now) ? dstBanner() : ''}
   ${flashBlock(flash)}
   <div class="cols">
-    <div class="col-a">${notesHtml(club, view, now)}${noStartHtml(club, view, now)}${emptyHtml(view)}${plansHtml(club, view, now)}</div>
+    <div class="col-a">${receivedHtml(view)}${notesHtml(club, view, now)}${noStartHtml(club, view, now)}${emptyHtml(view)}${plansHtml(club, view, now)}</div>
     <div class="col-b">${ridersHtml(view)}</div>
     <div class="col-c">${upload}</div>
   </div>
 </main>`;
+    // every 30 s around a race; else every 60 s while plans from ZwiftGopher wait, so the next one
+    // comes in by itself
+    const race = refreshDue(club, now);
+    const reload = refresh && (race || view.received.length > 0);
     return captainPage(club, {now, seen, others, here: path, rows, bar: switchBar(club, view, rows, now), main,
-        cls: 'teampage', refresh: refresh && refreshDue(club, now) ? path : null, updated});
+        cls: 'teampage', refresh: reload ? path : null, refreshS: race ? 30 : WAITING_REFRESH_S, updated});
 }
 
 
@@ -406,8 +439,10 @@ function startCard(club, view, start) {
 
 
 // The settings of team `slug` (a team of the club). `typed` ({name}, {start} or {kind, weekday}, as
-// posted) is shown in its form instead of the stored value after a refusal.
-export function teamSettingsPage(club, slug, {now, seen, others, flash = null, typed = null}) {
+// posted) is shown in its form instead of the stored value after a refusal. `push` (the server has
+// PUBLIC_URL, so the upload page offers "Plan on ZwiftGopher") adds "New ZwiftGopher link", which
+// ends every link the upload page has handed out for this team.
+export function teamSettingsPage(club, slug, {now, seen, others, flash = null, typed = null, push = false}) {
     const view = teamView(club, slug, {now});
     const name = typed?.name ?? view.name;
     const start = typed?.start ?? view.start ?? '';
@@ -431,7 +466,12 @@ export function teamSettingsPage(club, slug, {now, seen, others, flash = null, t
   <section class="card" aria-labelledby="link-h">
     <h2 id="link-h">${esc(t('ts-links'))}</h2>
     ${linksHtml(club, view, now)}
-  </section>
+  </section>${push ? `
+  <section class="card" aria-labelledby="push-h">
+    <h2 id="push-h">${esc(t('ts-push'))}</h2>
+    ${postForm('/manage/team', {action: 'push-link', team: slug}, t('ts-push-new'), {icon: 'link'})}
+    <p class="hint">${esc(t('ts-push-hint'))}</p>
+  </section>` : ''}
   <section class="danger-zone" aria-labelledby="del-h">
     <h2 id="del-h">${ic('trash')}${esc(del)}</h2>
     <details class="confirm">

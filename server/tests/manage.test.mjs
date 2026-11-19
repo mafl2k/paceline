@@ -178,11 +178,13 @@ test('upload page: the file only, with the plan it was opened for', async t => {
     }
     // without a principal: the start page, as every /manage GET
     assert.equal((await srv.get('/manage/upload?team=rollers', null)).status, 303);
-    // race day near the start: the team picker reloads itself, the upload page never does
+    // race day near the start: the team picker reloads itself; the upload page only through the
+    // script's guarded reload every 60 s (coordinator, 19 Nov 2026: plans from ZwiftGopher come in),
+    // never by a script-less meta refresh, which would lose a chosen file
     srv.clock.now = NOW;
     assert.ok((await srv.body()).includes('http-equiv="refresh"'), 'the team picker');
     const race = await uploadPageOf(srv, c.cookie, 'rollers');
-    assert.ok(!race.includes('http-equiv') && !race.includes('data-refresh'));
+    assert.ok(!race.includes('http-equiv') && race.includes('data-refresh="60"'));
 });
 
 

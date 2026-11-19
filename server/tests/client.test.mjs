@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {shouldReload, holdsReload, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, touchedList, restoreState} from '../client.mjs';
+import {shouldReload, holdsReload, restoredInput, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, touchedList, restoreState} from '../client.mjs';
 
 
 test('shouldReload: only when nothing holds the page', () => {
@@ -147,4 +147,22 @@ test('startRedraw: a complete time other than the drawn one', () => {
     for (const value of ['', '2', '20:', '20:1', '24:00', '20:60', '7:30', null, undefined]) {
         assert.equal(startRedraw(value, ''), false, String(value));
     }
+});
+
+
+test('restoredInput: a text field or text area the browser filled again holds the reload; others not', () => {
+    assert.equal(restoredInput([]), false);
+    assert.equal(restoredInput([{type: 'textarea', value: '', defaultValue: ''}]), false);
+    assert.equal(restoredInput([{type: 'textarea', value: '{"riders":{}}', defaultValue: ''}]), true);
+    assert.equal(restoredInput([{type: 'text', value: 'fast', defaultValue: ''}]), true);
+    assert.equal(restoredInput([{type: 'text', value: 'Rollers', defaultValue: 'Rollers'}]), false);
+    assert.equal(restoredInput([{type: 'hidden', value: 'x', defaultValue: ''}]), false);
+    assert.equal(restoredInput([{type: 'file', value: 'C:\\fakepath\\a.json', defaultValue: ''}]), false);
+});
+
+
+test('the guarded reload: a click on a file input holds it (Safari and Firefox do not focus it)', () => {
+    const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
+    assert.match(src, /addEventListener\('click', e => \{\n\s+if \(e\.target instanceof Element && e\.target\.closest\('form input\[type="file"\]/);
+    assert.match(src, /let dirty = restoredInput\(/);
 });

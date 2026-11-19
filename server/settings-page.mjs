@@ -24,6 +24,7 @@ const LOG_SHOWN = 6;
 // The log entries with words of their own (T['log-' + what]); any other shows its raw `what`.
 const LOG_WORDS = new Set([
     'upload', 'live', 'delete', 'unpin', 'undo', 'back', 'discard', 'team-add', 'team-rename', 'team-start', 'race-start', 'team-kind', 'team-delete',
+    'push-link',
     'club-rename', 'club-tz', 'club-weekday',
     'rider-remove', 'code-on', 'code-new', 'code-off', 'link-opened', 'admin-link', 'address-changed', 'club-restored', 'club-deleted',
 ]);

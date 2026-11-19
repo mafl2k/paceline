@@ -14,6 +14,7 @@
 //   club.mjs     club operations and caps (pure)
 //   select.mjs   which sheet a rider gets, event match, the 30-minute gate, effects (pure)
 //   api.mjs      the plan check GET /api/v3/rider/<zwiftId>
+//   push.mjs     the ZwiftGopher push: the team's short-lived planner link, POST /api/v3/push
 //   logs.mjs     recordings per club: POST /api/log/<slug>, content check, quotas, retention
 //   erasures.mjs the erasure list (DATA_DIR/erasures.jsonl): every Remove a rider, applied again at
 //                start to data a restore brought back
@@ -58,10 +59,13 @@
 //   GET /, GET/POST /register, GET/POST /m/<token>, GET/POST /lost, GET /privacy   the pages (web.mjs)
 //   GET /manage…, POST /manage/…   the captain pages and their actions (manage.mjs)
 //   GET /admin, POST /admin/{link,restore,purge,registration}   the operator page (admin.mjs)
-//   GET /api/v3/rider/<zwiftId>   the plan check (api.mjs); anything else under /api/v3/ is a JSON 404
+//   GET /api/v3/rider/<zwiftId>   the plan check (api.mjs)
+//   POST /api/v3/push?paceline=<token>   a plan from ZwiftGopher into the team's inbox (push.mjs);
+//                       anything else under /api/v3/ is a JSON 404
 //   GET /api/plan/<anything>   0.2.x mods: the "Update Paceline" notice record (api.mjs)
 //   POST /api/log/<slug>?circle=&session=&athlete=&mod=   a recording (logs.mjs)
 //   OPTIONS /api/plan/…, /api/log/…, /api/v3/…   CORS preflights; the routes themselves follow
+//                       (/api/v3/push: only for zwiftgopher.com, push.mjs)
 import http from 'node:http';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -80,6 +84,7 @@ import {handleWeb, makeWebState} from './web.mjs';
 import {handleManage} from './manage.mjs';
 import {handleAdmin, makeAdminState} from './admin.mjs';
 import {handleStatic} from './static.mjs';
+import {pushSecret, makePush, handlePush, pushPreflight} from './push.mjs';
 
 export {slugify} from './ids.mjs';
 export {parseMultipart} from './http.mjs';
@@ -185,6 +190,8 @@ function serve({cfg, now, injected, db}) {
         console.error(`paceline-server: erasures.jsonl: applying again failed: ${e?.code ?? e?.name ?? 'error'}`);
     })]);
     const codeFails = makeLimiter([{ms: 3600000, max: CODE_FAILS_MAX}]);
+    // the ZwiftGopher push: its secret is made once and kept in paceline.db (push.mjs)
+    const push = makePush({secret: pushSecret(db), store, cfg});
     const web = makeWebState();
     const admin = makeAdminState();
     // Nightly dump from 03:00 local on (dump.mjs): it logs its errors and an overdue dump itself,
@@ -207,6 +214,10 @@ function serve({cfg, now, injected, db}) {
             }
             if (p.startsWith('/api/log/')) {
                 preflight(res, 'POST, OPTIONS', 'Content-Type');
+                return;
+            }
+            if (p === '/api/v3/push') {
+                pushPreflight(req, res);
                 return;
             }
             if (p.startsWith('/api/v3/')) {
@@ -236,6 +247,10 @@ function serve({cfg, now, injected, db}) {
             await handleLogUpload(req, res, {store, cfg, now: now(), logs, state: logUploads}, slug, url.searchParams);
             return;
         }
+        if (p === '/api/v3/push') {
+            await handlePush(req, res, {store, cfg, now: now(), push}, url.searchParams, method);
+            return;
+        }
         if (p.startsWith('/api/v3/')) {
             const m = /^\/api\/v3\/rider\/([^/]+)$/.exec(p);
             if (m && method === 'GET') {
@@ -248,7 +263,7 @@ function serve({cfg, now, injected, db}) {
         if (handleStatic(req, res, p, method, url)) {
             return;
         }
-        const pages = {store, cfg, mailer, now: now(), web, logs, admin, dumps: dumpJob, erasures};
+        const pages = {store, cfg, mailer, now: now(), web, logs, admin, dumps: dumpJob, erasures, push};
         if (await handleAdmin(req, res, pages, p, method) || await handleManage(req, res, pages, p, method)
             || await handleWeb(req, res, pages, p, method)) {
             return;
@@ -305,6 +320,7 @@ function serve({cfg, now, injected, db}) {
     const sweepLimits = () => {
         const t = now();
         codeFails.sweep(t);
+        push.sweep(t);
         web.sweep(t);
         admin.sweep(t);
         mailer?.sweep();
@@ -345,6 +361,7 @@ function serve({cfg, now, injected, db}) {
     server.mailer = mailer;
     server.logUploads = logUploads;
     server.web = web;
+    server.push = push;
     server.admin = admin;
     server.sweepLimits = sweepLimits;
     server.sweepLogs = sweepLogs;
