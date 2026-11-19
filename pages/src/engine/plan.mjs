@@ -75,11 +75,24 @@ function dataRowFields(line) {
 }
 
 
-export function detectFileKind(text) {
-    if (parseJsonObject(text)) {
+// A loaded file as importSources reads it: its text, and the JSON object it holds (null when it is
+// no JSON object). Parsing once here lets a caller check the parsed file before the import without
+// a second parse (the server reads uploads).
+export function readSource(text) {
+    return {text, json: parseJsonObject(text)};
+}
+
+
+function kindOf(source) {
+    if (source.json) {
         return 'json';
     }
-    return lines(text).some(l => dataRowFields(l)) ? 'text' : 'unknown';
+    return lines(source.text).some(l => dataRowFields(l)) ? 'text' : 'unknown';
+}
+
+
+export function detectFileKind(text) {
+    return kindOf(readSource(text));
 }
 
 
@@ -116,36 +129,91 @@ function num(v, fallback=0) {
 }
 
 
+// A planner number (pull_power, pull_wkg): a finite number, or a non-blank numeric string of at
+// most RAW_SHORT_MAX characters (the longest stripSheet keeps); else null.
+function planNumber(v) {
+    if (typeof v === 'number') {
+        return Number.isFinite(v) ? v : null;
+    }
+    if (typeof v === 'string' && v.trim() !== '' && v.length <= RAW_SHORT_MAX) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+    }
+    return null;
+}
+
+
 function normHex(h) {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(h ?? '').trim());
     return m ? '#' + m[1].toLowerCase() : null;
 }
 
 
+// Text rows by normalized name, each row taken at most once: take(key) gives the first row not yet
+// taken with that key (in file order) or null, rest() the rows never taken, in file order. Linear in
+// the rows, so a long text export cannot make the matching quadratic (the server reads uploads).
+function rowMatcher(rows) {
+    const byKey = new Map();
+    rows.forEach((t, i) => {
+        const key = normName(t.name);
+        const q = byKey.get(key);
+        if (q) {
+            q.list.push(i);
+        } else {
+            byKey.set(key, {list: [i], next: 0});
+        }
+    });
+    const taken = new Set();
+    return {
+        take(key) {
+            const q = byKey.get(key);
+            if (!q || q.next >= q.list.length) {
+                return null;
+            }
+            const i = q.list[q.next++];
+            taken.add(i);
+            return rows[i];
+        },
+        rest: () => rows.filter((_, i) => !taken.has(i)),
+    };
+}
+
+
+// Every field read here must also be kept by stripSheet below (the server stores only that),
+// except the ones it drops on purpose: a rider's ftp and adjustment. A rider's watts come from his
+// pull_power (by Zwift ID, rounded to whole watts) when it is there, else from his text row (by
+// name), else none; with both, the JSON wins and a differing text row warns (spec §7.8: matching
+// by name fails for two riders with one name). His wkg is pull_wkg as written (> 0, else null):
+// only the W/kg figures read it, never watts or the plan code.
 export function normalizePlan(json, textRows) {
     const ridersRaw = json && typeof json === 'object' ? json.riders : null;
     if (!ridersRaw || typeof ridersRaw !== 'object' || !Object.keys(ridersRaw).length) {
         throw new PlanError('not-a-plan', 'No riders found in the plan');
     }
     const warnings = [];
-    const unused = Array.isArray(textRows) ? textRows.slice() : [];
+    const rows = rowMatcher(Array.isArray(textRows) ? textRows : []);
     const riders = Object.entries(ridersRaw).map(([id, r], idx) => {
         r = r || {};
         const name = displayName(r.name);
-        const key = normName(name);
-        const at = unused.findIndex(t => normName(t.name) === key);
-        const row = at >= 0 ? unused.splice(at, 1)[0] : null;
+        const row = rows.take(normName(name));
         const pullS = num(r.pull_duration);
         if (row && row.pullS !== pullS) {
             warnings.push({code: 'pull-mismatch', id, name});
         }
+        const power = planNumber(r.pull_power);
+        const watts = power !== null ? Math.round(power) : row ? row.pullWatts : null;
+        if (power !== null && row && row.pullWatts !== watts) {
+            warnings.push({code: 'watts-mismatch', id, name});
+        }
+        const pullWkg = planNumber(r.pull_wkg);
         const color = normHex(r.color) || (row && normHex(row.colorHex)) || '#ffffff';
         return {
             id: String(id),
             name,
             order: num(r.order, idx),
             pullS,
-            watts: row ? row.pullWatts : null,
+            watts,
+            wkg: pullWkg !== null && pullWkg > 0 ? pullWkg : null,
             color,
             colorName: row && row.colorName ? row.colorName : colorNameFor(color),
             weight: num(r.weight),
@@ -154,7 +222,7 @@ export function normalizePlan(json, textRows) {
         };
     });
     riders.sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    for (const t of unused) {
+    for (const t of rows.rest()) {
         warnings.push({code: 'unmatched-text-row', name: t.name});
     }
     const bench = Object.entries(json.roster && typeof json.roster === 'object' ? json.roster : {})
@@ -173,8 +241,94 @@ export function normalizePlan(json, textRows) {
 }
 
 
+// The sheet as the server stores and serves it: only what normalizePlan reads, the riders'
+// pull_power and pull_wkg included (normalizePlan reads both). A rider's weight, pull_power and
+// pull_wkg stay (user, 16 Nov 2026: the mod shows other riders' targets in W/kg, pull_wkg being
+// the value on the plan images the captain reads out, and the planner's pull watts are kept);
+// height, FTP and the rest of the planner export go. Returns {json, text}; the input is not changed.
+// text holds the rows normalizePlan would match to a rider (null when none do).
+// Only typed scalars are kept; a value of another type or shape (an array, an object, a huge
+// numeric string) is dropped, so a stored sheet's memory is bounded by its counts and bytes.
+// Numbers may come as numeric strings (the planner writes target_speed as "42.6"); normalizePlan
+// reads both through num(). Colours are kept when normHex reads them.
+// Strings are limited by their RAW length (before trimming and entity decoding), so white space
+// or zero-padded entities cannot carry more than these: a name may still hold entities such as
+// &amp; (4 × the 100 characters a name may show). An over-long value is dropped like a bad type;
+// the server refuses an upload with an over-long rider or bench name instead (club.mjs).
+export const RAW_NAME_MAX = 400;
+export const RAW_TEAM_NAME_MAX = 240;
+export const RAW_SHORT_MAX = 32;          // numeric strings, colours, colour names
+const isNumber = v => (typeof v === 'number' && Number.isFinite(v)) ||
+    (typeof v === 'string' && v.length <= RAW_SHORT_MAX && Number.isFinite(Number(v)));
+const isName = v => typeof v === 'string' && v.length <= RAW_NAME_MAX;
+const isShort = v => typeof v === 'string' && v.length <= RAW_SHORT_MAX;
+const isHex = v => isShort(v) && normHex(v) !== null;
+// A rider or bench entry is kept only under a Zwift ID key (the server's ZWIFT_RE).
+const ZWIFT_ID_RE = /^\d{1,12}$/;
+const RIDER_FIELDS = {name: isName, order: isNumber, pull_duration: isNumber, color: isHex, weight: isNumber, pull_power: isNumber, pull_wkg: isNumber};
+const ROSTER_FIELDS = {name: isName};
+const TEXT_FIELDS = {name: isName, pullWatts: isNumber, pullS: isNumber, colorName: isShort, colorHex: isHex};
+
+export function stripSheet(json, textRows) {
+    const has = (o, k) => o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+    const pick = (o, fields) => {
+        const out = {};
+        for (const [k, ok] of Object.entries(fields)) {
+            if (has(o, k) && ok(o[k])) {
+                out[k] = o[k];
+            }
+        }
+        return out;
+    };
+    const out = {};
+    if (json && json.team && typeof json.team.name === 'string' && json.team.name.length <= RAW_TEAM_NAME_MAX) {
+        out.team = {name: json.team.name};
+    }
+    for (const k of ['target_speed', 'minimum_finishers']) {
+        if (has(json, k) && isNumber(json[k])) {
+            out[k] = json[k];
+        }
+    }
+    const ridersRaw = json && typeof json.riders === 'object' && json.riders ? json.riders : null;
+    const rows = rowMatcher(Array.isArray(textRows) ? textRows.filter(t => has(t, 'name') && isName(t.name)) : []);
+    const text = [];
+    if (ridersRaw) {
+        out.riders = {};
+        for (const [id, r] of Object.entries(ridersRaw)) {
+            if (!ZWIFT_ID_RE.test(id)) {
+                continue;
+            }
+            const kept = pick(r, RIDER_FIELDS);
+            out.riders[id] = kept;
+            // Matched by the name as stored, the one normalizePlan will see.
+            const t = rows.take(normName(displayName(kept.name)));
+            if (t) {
+                text.push(pick(t, TEXT_FIELDS));
+            }
+        }
+    }
+    if (json && json.roster && typeof json.roster === 'object') {
+        out.roster = {};
+        for (const [id, r] of Object.entries(json.roster)) {
+            if (!ZWIFT_ID_RE.test(id)) {
+                continue;
+            }
+            out.roster[id] = pick(r, ROSTER_FIELDS);
+        }
+    }
+    return {json: out, text: text.length ? text : null};
+}
+
+
 export function importFiles(texts) {
-    const kinds = texts.map(detectFileKind);
+    return importSources(texts.map(readSource));
+}
+
+
+// importFiles for files readSource has read already: each JSON is parsed only once. The returned
+// `json` is the source's own parsed object.
+export function importSources(sources) {
+    const kinds = sources.map(kindOf);
     if (kinds.includes('unknown')) {
         throw new PlanError('unreadable', 'A file is neither a planner JSON nor a text export');
     }
@@ -182,9 +336,9 @@ export function importFiles(texts) {
     if (ji < 0) {
         throw new PlanError('no-json', 'The planner JSON file is required');
     }
-    const json = JSON.parse(texts[ji]);
+    const json = sources[ji].json;
     const ti = kinds.indexOf('text');
-    const text = ti >= 0 ? parseTextExport(texts[ti]) : null;
+    const text = ti >= 0 ? parseTextExport(sources[ti].text) : null;
     const {plan, warnings} = normalizePlan(json, text);
     return {plan, warnings, json, text};
 }

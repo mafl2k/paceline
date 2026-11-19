@@ -1,4 +1,4 @@
-# Paceline 0.2.33
+# Paceline 0.3.0
 
 Paceline is a mod for Sauce for Zwift that helps our team time trial. It:
 
@@ -11,10 +11,21 @@ Paceline doesn't calculate plans. The rotation, pull times and pull watts come f
 [ZwiftGopher TTT planner](https://zwiftgopher.com/TTT/), which does all the maths; Paceline
 carries its plan into the ride.
 
-After the ride you send the recording to the captain. Paceline fetches the plan from the plan
-server (ttt.mafl.net) and, only when no team name is set, sends your Zwift ID to look it up.
-Recordings stay on your computer until you export and send them yourself, or until you switch on
-**Upload my recordings after each ride** (see "Recordings upload" below).
+Your captain uploads the plan to the plan server for your club, and Paceline gets it from there
+when you are in the race (see "Load the plan"). Paceline records the ride on your computer. You
+can export a recording and send it yourself, or tick **Upload my recordings after each ride**:
+then each finished recording goes to the plan server, where only the Paceline operator opens it,
+to analyse your team's rides. The server doesn't analyse recordings automatically yet.
+
+**0.3 and the plan server.** Paceline 0.3 gets its plans from the plan server
+(`https://ttt.mafl.net`): your captain registers the club there and uploads the plans there. It is
+a new server: nothing from 0.2 is carried over, so the captain registers the club again. Paceline
+0.3 talks only to this new server, and 0.2 gets only "Update Paceline" from it, so update before
+your next race. Coming from 0.2, a plan you loaded there no longer counts while the plan server is
+on, and recordings made with 0.2 stay on your computer (export them to send them). The server
+address is under **Advanced**, **Server**: leave it as it is, unless your club uses another server.
+An address you type there is kept; otherwise each build uses its own server. Betas (`0.3.x-beta.N`)
+talk to the beta plan server (`https://ttt-beta.mafl.net`), which has its own clubs and plans.
 
 <p>
   <img src="docs/images/action-rest.png" width="300" alt="Paceline Action while resting: 37 s until your pull, #3 in the line">
@@ -33,14 +44,19 @@ Recordings stay on your computer until you export and send them yourself, or unt
   <img src="docs/images/action-gap.png" width="300" alt="Paceline Action during your pull with a gap behind you: in place of the power bar a red band with a white edge, GROUP 16 m · 1.3 s">
   <img src="docs/images/rest-gap.png" width="220" alt="Paceline Rest when you lost the wheel: 3:57 until your pull, #6, and under it in amber GAP 13 m · 1.1 s">
 </p>
+<p>
+  <img src="docs/images/action-gap-early-green.png" width="300" alt="Paceline Action during your pull with a gap behind you that the rider behind is closing: the power bar in its normal look, and under your power now in green 8 m">
+  <img src="docs/images/action-gap-green.png" width="300" alt="Paceline Action during your pull with the group behind you closing the gap: in place of the power bar a green band with a white edge, GROUP 16 m · 1.3 s">
+  <img src="docs/images/rest-gap-green.png" width="220" alt="Paceline Rest while you close the gap to your wheel: 3:53 until your pull, #6, and under it in green GAP 14 m · 1.0 s">
+</p>
 
 *Top: the Action window while resting (time to your pull, your place in the line) and during your
 pull (target, time left, power bar). Middle: the Action window when the Rest window has the
 countdown, with READY shortly before your pull, and the Rest window. Then the Info
 window, for riders and in captain mode with the rotation table (two riders dropped, below the line). Bottom: a gap in the line, first
 a gap opening behind you during your pull (early stage), then the group lost your wheel, and you
-lost the wheel while resting. Demo data with
-made-up riders.*
+lost the wheel while resting. Last row: the same three in green, the gap is getting smaller (new
+in 0.3.0). Demo data with made-up riders.*
 
 ## Install
 
@@ -54,10 +70,12 @@ You need Sauce for Zwift already installed and working.
      `OneDrive\Documents\SauceMods` instead)
 
    If the `SauceMods` folder does not exist yet, create it.
-2. Download the newest `paceline-<version>.zip` (for example `paceline-0.2.33.zip`) from the
-   [latest release](https://github.com/mafl2k/paceline/releases/latest), under **Assets**. Put
-   the `paceline` folder from it into that folder. When updating from
-   0.1.0, replace the old `paceline` folder completely; your plan and recordings are kept.
+2. Download the newest `paceline-<version>.zip` (for example `paceline-0.3.0.zip`) from the
+   [latest release](https://github.com/mafl2k/paceline/releases/latest), under **Assets**. A beta
+   such as `paceline-0.3.1-beta.1.zip` is not the latest release: it is on the
+   [releases page](https://github.com/mafl2k/paceline/releases), marked **Pre-release**.
+   Put the `paceline` folder from the zip into that folder. When updating, replace the old
+   `paceline` folder completely; your plans and recordings are kept.
    - macOS: double-click the zip, then move the `paceline` folder into `SauceMods`.
    - Windows: open the zip and drag the `paceline` folder into `SauceMods`. If you use
      **Extract All** instead, change the destination to the `SauceMods` folder itself and
@@ -80,64 +98,165 @@ You need Sauce for Zwift already installed and working.
 
 ## Load the plan
 
-Nothing to load by hand — once the captain has uploaded the plan, Paceline gets it from
-ttt.mafl.net automatically.
+Nothing to load by hand: your captain uploads the plan to the plan server for your club, and
+Paceline gets it when you are in the race.
 
 1. Click a Paceline window. This opens the Paceline settings window.
-2. Under **Plan server**, the **Team name is optional: leave it empty.** Paceline then finds
-   the plan you are in by your Zwift ID (Zwift must be running). Only if you are in more than one
-   plan (for example a starter in one team and on the bench in another), type the team name the
-   captain uploaded the plan under and press Enter; without it Paceline takes the newest of them.
-3. Within a few seconds the status line says "Server plan: *team* · *plan code* · *time*" and the
-   plan shows under **Plan**. Check the plan code as described below.
+2. Under **Clubs**, check that your club is ticked. The first time, Paceline asks the plan server
+   which clubs list your Zwift ID (Zwift must have run once, so Paceline knows it), and ticks the
+   first club that lists you by itself. If the table says "No club lists you yet. Your Zwift ID is
+   …: send it to your captain.", do that.
+3. Under **Plan**, a line says what waits for you, for example "Next: Rollers fast, Thu 19 Nov
+   19:30": the next race with a plan listing you, in a club you ticked.
+4. In the race the plan arrives by itself. The status line then says "Rollers fast · F9E98R ·
+   Kettenfett RC · checked 19:02" (plan, plan code, club, last check) and the plan shows under
+   **Plan**. Check the plan code as described below.
 
-<img src="docs/images/settings.png" width="420" alt="Paceline settings: captain mode, only during TTT events, plan, riders table, pull target unit, plan server with the optional team name, upload checkbox, demo, recordings">
+<img src="docs/images/settings.png" width="420" alt="Paceline settings, the part for all windows: Get plans from the plan server, ticked, with the line what Paceline sends; the status line Rollers fast · F9E98R · Kettenfett RC · checked 19:02; Next: Rollers fast, Thu 19 Nov 19:30; the plan with its code and six riders, Ben highlighted; Load a plan from a file instead, collapsed; Clubs with Kettenfett RC ticked (lists you · your club since 12 Nov) and Spokesmen CC unticked (lists you); Add club by code; Demo; Pull target W/kg; Advanced, collapsed">
 
-*The settings window: captain mode, "Only during TTT events", the plan with its code and riders,
-the plan server with the optional team name left empty, and the upload checkbox.*
+*The settings window below "All Paceline windows": the plan server box with what Paceline sends,
+the server plan of Kettenfett RC with its code and riders, and the Clubs table. Made-up clubs and
+riders.*
 
-A Paceline window must be open: one of them asks the server. With **Only during TTT events**
-(the default) it asks as soon as you enter the TTT start pen, then every minute; while there is
-no plan yet, or the last check failed, every 10 seconds, so even a rider who joins the pen 45
-seconds before the start has the plan in time. When the captain uploads a changed plan,
-Paceline switches to it within a minute, also during the race (the rider pulling keeps his
-clock). On the first successful check the server's plan becomes active and replaces a plan you
-loaded by hand. If the server cannot be reached, Paceline keeps the plan it has; the settings
-window shows the error, the overlay windows do not.
+### Clubs
 
-If settings show "plan server is not reachable", load the two files by hand (Plan section) and
-switch the plan server off in settings.
+The Clubs table lists the clubs whose plans have your Zwift ID. Paceline takes plans only from
+ticked clubs. Tick the club you ride for, and leave a club you don't know unticked.
 
-### Load the files by hand
+- A row shows "lists you" while the club has a plan with your Zwift ID, and "your club since
+  12 Nov" once you ticked it.
+- Only the first club is ticked by itself, and only while the table is empty. Clubs that come
+  later show up unticked and have no effect until you tick them. If two clubs list you at once,
+  none is ticked and the table says "Several clubs list you. Tick yours." (In a race, Paceline
+  ticks the club that has the plan for it.)
+- Ticking and unticking apply at once, also during a ride.
+- **Private clubs.** A club can be private: then the plan server doesn't show it to anyone without
+  its code, and it is never ticked by itself. Your captain gives you the code (10 letters and
+  digits, like `7Q4MZ-2KX9B`). Type it under **Add club by code** and press **Add**; case, spaces
+  and hyphens don't matter. The club is then added, ticked, and its row shows "private · code
+  7Q4MZ-2KX9B", so you can pass the code on to a teammate. Messages:
+  - "A club code has 10 letters and digits.": a typo.
+  - "No club has this code. Check it with your captain.": nothing is stored.
+  - "Too many wrong codes from your network. Try again in an hour."
+  - In the row, "this code no longer works: ask your captain for the new one" (the captain made a
+    new code), or "private now: enter its code below" (an open club you ticked became private).
 
-If the plan server is down, load the files yourself. A plan loaded by hand stays active until
-the captain uploads a changed plan to the server. (To ignore the server completely, untick
-**Get the plan from the plan server**.)
+### When Paceline checks
 
-The captain gives you two files from the [ZwiftGopher TTT planner](https://zwiftgopher.com/TTT/): the **JSON export** and the
-**text export**. You need both. The JSON has the Zwift IDs, the text has the pull watts.
+Under **Get plans from the plan server** the settings window says what goes to the server:
+
+> When you are in a Zwift event, and when you open these settings, Paceline sends the plan server
+> your Zwift ID, the clubs you ticked, the codes of private clubs you added, your event's start
+> time and id, your plan code and the Paceline version. A club you ticked sees when you last
+> checked.
+
+- **In a Zwift event.** A Paceline window must be open: one of them asks the server, at once when
+  the event begins, then every 10 seconds while there is no plan for this event yet or the last
+  check failed, else every minute. With **Only during TTT events** (the default) only a TTT
+  counts; unticked, any Zwift event does. A team ride outside any Zwift event gets no plan from the
+  server: load the file (below).
+- **The plan opens 30 minutes before the start.** The server sends a plan only from 30 minutes
+  before the team's start time the captain set. Until then the Info window and the settings say
+  "Plan opens 19:00 · Rollers fast", and Paceline keeps checking every 10 seconds, so the plan
+  arrives within 10 seconds after that time.
+- **When the settings window opens** it checks once. That fills the Clubs table and the "Next:"
+  line, but never makes a plan active.
+- **Nothing else checks.** Outside events (and with the settings window closed) Paceline doesn't
+  ask the server at all.
+- A server plan from an earlier race is not shown in a new event until this event's answer has
+  arrived. When the server has no plan for you in this race, the settings say "No plan for you in
+  this race yet." and the old server plan goes away (unless the ride lock below holds it).
+- When the captain uploads a changed plan, Paceline switches to it within a minute, also during
+  the race (the rider pulling keeps his clock).
+- If the server cannot be reached, Paceline keeps the plan it has; the settings window shows the
+  error, the overlay windows do not. If that lasts, load the files yourself (below).
+- When a club you haven't ticked has a plan for you in this race and no ticked club has one, the
+  Info window says, once per club, "Spokesmen CC has a plan for you in this race. Click, then
+  tick it under Clubs."
+
+### Two clubs and the teammates in the pen
+
+If two clubs you ticked both have a plan with you as a rider in the same race, the teammates near
+you decide; you don't pick. For each plan Paceline counts its riders (not the planner's roster) in Sauce's
+list of riders near you:
+
+- In the start pen, as soon as one plan has 2 or more riders more than the other, it is taken. It
+  can still change while riders come and go. Until then the newest upload is active.
+- At the roll-off the plan with the most riders near you wins, on a tie the newest upload. The
+  ride lock then keeps it.
+- Without data on riders near you, the newest upload wins.
+
+The settings status then adds "2 clubs fit: picked by the teammates near you". With two or more
+clubs ticked, the Info window's plan line also names the club (`Rollers fast · plan F9E98R ·
+Kettenfett RC`).
+
+### The ride lock
+
+From your roll-off until the event ends, Paceline keeps the team whose plan was active at the
+roll-off:
+
+- A new plan for that team (the captain fixed something) applies at once.
+- Another team's plan, or "no plan", waits until the event is over.
+- What you do yourself applies at once: loading a file, **Remove**, ticking a club. Unticking the
+  locked club ends the lock and its plan.
+- With no server plan at the roll-off (none yet, a failed check, or a file plan), the lock binds
+  to the first server plan that arrives during the ride. It never binds to a file plan.
+- In the start pen and outside events there is no lock.
+
+### Pull targets from the plan
+
+The plan's JSON export has, for each rider, the pull watts (`pull_power`) and the target in W/kg
+(`pull_wkg`), the number on the plan image the captain reads out.
+
+- **Watts** come from the JSON, else from the text export, else there are none. When both files
+  have them and they differ, the JSON wins (it matches riders by Zwift ID, the text only by name),
+  and the import warns: "Pull watts for Ben differ between the files – using the JSON."
+- **W/kg** (the default target unit) is the plan's `pull_wkg` for every rider, you included,
+  shown with one decimal like Sauce. It is not worked out from watts and weight. Only for a plan
+  without `pull_wkg` Paceline divides the watts by the weight, as before.
+- A rider with W/kg but no watts gets no target.
+- The plan code covers the watts, not the W/kg, so a plan's code stays the same with or without
+  `pull_wkg`.
+
+### Load a plan from a file instead
+
+A plan from a file overrides the plan server. Use it when the server is down, or for a team ride
+outside a Zwift event.
+
+The captain gives you the files from the [ZwiftGopher TTT planner](https://zwiftgopher.com/TTT/):
+the **JSON export**, and if it has no pull watts, the **text export** too. The JSON has the Zwift
+IDs and, from the planner's newer exports, the pull watts and W/kg; the text export has the pull
+watts.
 
 1. Click a Paceline window. This opens the Paceline settings window.
-2. Under **Plan**, drop both files into the box, or press **Choose files…**. (There is also
-   **Paste instead** if you have the file contents as text.)
+2. Under **Plan**, open **Load a plan from a file instead** and drop the files into the box, or
+   press **Choose files…**. (There is also **Paste instead** if you have the file contents as
+   text.) With the plan server switched off the box is open already.
 3. You should now see the team name, the riders table and a line "You are *your name* · #position ·
-   60s@4.4" (your pull time and target in W/kg, or in watts with that setting). Until Zwift is running with your rider, that line says "Waiting for Zwift…"
-   instead. That is normal: the plan code check below works without Zwift. Once Zwift runs and
-   you are not in the plan ("You are not in this plan") or only on the bench ("You are on the
-   bench"), tell the captain.
+   60s@4.4" (your pull time and target in W/kg, or in watts with that setting). Until Zwift is
+   running with your rider, that line says "Waiting for Zwift…" instead. That is normal: the plan
+   code check below works without Zwift. Once Zwift runs and you are not in the plan ("You are not
+   in this plan", also when you are only in the planner's roster), tell the captain.
 4. Check the **Plan code**. It is 6 characters long, and everyone on the team must see the same
    code. Compare it with the captain's. If yours is different, you have a different or older plan
-   file: load both files again, and ask the captain to resend them if the code still differs.
+   file: load the files again, and ask the captain to resend them if the code still differs.
+
+While the file plan is active, the settings say "Plan from file, not from the server", with
+**Remove**. Paceline still checks the server (for the Clubs table and what waits), but its plans
+wait. A file plan ends when the first event after you loaded it is over (for a TTT, 30 seconds
+after the finish), or 18 hours after you loaded it, whichever comes first; **Remove** ends it at
+once, and the server's plan for this race, if there is one, takes over. With the plan server
+switched off (untick **Get plans from the plan server**) a file plan never ends by itself.
 
 Press **Done** to close the settings window.
 
-## During the ride (0.2)
+## During the ride
 
 **Only during TTT events.** Paceline stays quiet until you join a team time trial in Zwift
 (Zwift's event type, WTRL's TTT tags, or "TTT" or "Team Time Trial" in the event's name, for
 private TTTs; new in 0.2.31): the Action and Rest windows are empty, the Info window
 shows one quiet line "Paceline waits for the TTT start pen", nothing records and the plan server
-is not asked. It wakes up when you enter the start pen, and goes quiet again 30 seconds after
+is not asked (only the settings window checks once when you open it). It wakes up when you enter the start pen, and goes quiet again 30 seconds after
 the finish. To use Paceline outside a TTT event (a team practice ride, or if Zwift ever changes
 how it marks TTT events), untick **Only during TTT events** in the settings window.
 
@@ -145,15 +264,26 @@ how it marks TTT events), untick **Only during TTT events** in the settings wind
 
 - While you rest it shows one big clock: the time until your pull starts, in seconds as pulls
   are called (`26s`), above 100 seconds as minutes (`5:47`). It adds up the planned pulls of the
-  riders before you plus 10 seconds for each (in the races of 12 Nov 2026 riders went over their
-  pull by about that much, whatever its length: the changeover itself). The countdown is only good to
-  about 10 seconds (riders pull longer or shorter than planned); the handover itself is called
-  out by voice. When the rider at the front reaches the end of his planned pull, the countdown
-  runs on for 3 more seconds (the time Paceline needs to see the change) and then waits until
-  the next rider is at the front, so it does not run out while someone pulls longer. While it
-  waits it says so: the number is dimmed with a `≥` in front (`≥27s`: your pull is at least that
-  far away), and under it, small, how long the rider in front is over his plan (`+12`). When the
-  change comes it runs on as usual.
+  riders before you plus 10 seconds for each, the rider at the front included (in the races of
+  12 Nov 2026 riders went over their pull by about that much, whatever its length: the changeover
+  itself). Only the rider directly before you counts his planned pull alone: near the end the clock
+  rather reaches 0 a little early, and READY covers the rest until he swings off. So the clock
+  simply runs down at a normal change, without a jump when the next rider takes over. The
+  countdown is only good to about 10 seconds (riders pull longer or shorter than planned); the
+  handover itself is called out by voice. When the rider at the front has pulled his plan plus
+  the 10 seconds, the countdown runs on for 3 more seconds (the time Paceline needs to see the
+  change) and then waits until the next rider is at the front, so it does not run out while
+  someone pulls longer. While it waits it says so: the number is dimmed with a `≥` in front
+  (`≥27s`: your pull is at least that far away), and under it, small, how long the rider in front
+  is over his plan (`+14`). When the change comes it runs on as usual.
+  When the race does not go as planned (a rider swings off early, drops out of the line or comes
+  back), the clock corrects itself without jumping where it can. A few seconds it simply runs a
+  little faster or slower until it is right. A bigger change it takes at once, softly faded in,
+  and the line under it says why for 5 seconds: `ELI out −40s` (amber: your pull comes sooner) or
+  `ELI back +1:10` (dim: later), or just the amount (`−25s`) when no rider explains it. A change to
+  later waits 3 seconds first, so a short shuffle at the front never moves the clock. In the last
+  15 seconds the clock is always exact; if READY was on and the pull moves away again, it says
+  `READY off +36s`.
   Right of the clock is your place in the line right now, counted in plan order from the rider
   who is pulling (`#1`): `#2` means you are next.
 - **READY:** in the last 10 seconds before your pull the window shows three fixed points, each
@@ -171,8 +301,9 @@ how it marks TTT events), untick **Only during TTT events** in the settings wind
   shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
   while you ramp up, the marker stays white. The number in the middle is the marker's value (the
   same filtered power, so they always agree), in the marker's colour; kept small on purpose, so the
-  bar stays what you ride by and the number only confirms it. Without the text export there are
-  no target watts, so you see `–` as the target, your power now, the time and a plain grey bar.
+  bar stays what you ride by and the number only confirms it. Without pull watts in the plan
+  (neither in the JSON nor from a text export) there is no target, so you see `–` as the target,
+  your power now, the time and a plain grey bar.
 - **A gap in the line** (new in 0.2.28). Paceline watches the distance from each team rider to
   the rider ahead of him. When it is 10 m or more for 5 seconds (15 m on a real climb or
   descent), someone has lost the wheel; the warning ends when the gap has been under 6 m for 3
@@ -187,7 +318,10 @@ how it marks TTT events), untick **Only during TTT events** in the settings wind
     (`▼ 9 m`): ease off a little before the draft is gone. While you rest, only your own early
     gap shows (`▲ GAP 9 m · 0.7 s`): close up. A threshold of 6 m would have warned 20 to 70
     times a race, as the line normally rides up to 5 m apart; from 8 m it is 4 to 16 times, 2 to
-    6 seconds before the full warning at the real drops.
+    6 seconds before the full warning at the real drops. Since 0.3.0 it also comes sooner when
+    the gap grows past 8 m quickly (10 m for 2 seconds is enough) or when the rider behind is
+    clearly slower than the one ahead and easing off (from 7 m): in four recorded races typically
+    2 to 6 seconds sooner, with 0 to 4 more warnings a race.
   - **During your pull** a band takes the power bar's place: `▼ GROUP 16 m · 1.3 s` when the
     whole line behind you is gone, `▼ CORA 16 m · 1.3 s` for one rider, `▼ 3 RIDERS …` when the
     line breaks further back. Ease off until it is gone.
@@ -198,10 +332,17 @@ how it marks TTT events), untick **Only during TTT events** in the settings wind
   - **While you rest** the line under the clock says it: `▲ GAP 16 m · 1.2 s` in amber when you
     are the one who lost the wheel (close it), someone else's gap in amber when the team needs
     them (`Cora −16 m · 1.3 s`, `Gap ahead 16 m · 1.3 s`), dim when they can be spared. Your own
-    gap and a needed rider go before the standing clock's `+12`.
+    gap and a needed rider go before the standing clock's `+12` while they are amber.
+  - **Green** (new in 0.3.0) instead of amber or red, in the same place: the gap is still there
+    but getting smaller, the rider behind is closing it himself (in the early stage only the
+    `▼ 9 m` label; the bar keeps its normal look). Once it is 1 m wider than its smallest it
+    turns amber or red again. A green gap is not urgent: while you rest the standing clock and a
+    wheel change cue go before it, and while your own gap is green the full warning of a needed
+    rider that is not closing is shown instead (not one of a rider the team can spare).
   - A rider the team can spare who drops 50 m or more is let go: the warning ends and comes back
     only after he has closed up. A needed rider stays in the warning. No warnings at the start
-    (the first 60 seconds), in the last 500 m, or while standing still.
+    (the first 60 seconds), while standing still, or in finish mode (from 500 m before the finish
+    line, and past it until you stand still or Sauce shows another race).
 - **Wheel cue** (new in 0.2.31): the line under the clock tells you whose wheel to find, with
   their kit colour (`Wheel ■ DANA`):
   - **At the start**, from the roll-off until you have been on that wheel for 2 seconds, your
@@ -213,29 +354,32 @@ how it marks TTT events), untick **Only during TTT events** in the settings wind
   - Not after every pull, so it means something when it comes. The planned wheel stays in the
     Info window. The wheel comes from the plan and who is with the group, not from Zwift's order,
     so a team riding in a bunch only sees it at the start.
-  - Your own gap and a needed rider go first. A change cue goes before the standing clock's `+12`,
-    the start cue after it.
+  - Your own gap and a needed rider go first (unless the gap is closing). A change cue goes before
+    the standing clock's `+12`, the start cue after it.
 - **Paceline Rest** is an optional third window with only the countdown to your pull and your
   place. During your pull it disappears completely, background included, and from `READY` on (the
   last 10 seconds before your pull) too while an Action window is open, which takes over then;
   without one it shows `READY` itself. The Paceline windows notice each other: each one leaves a
-  sign of life every 2 seconds, and one not heard for 6 seconds counts as closed. If the big countdown in the middle of the screen is too much while you rest, open
-  the Action window's settings, untick **Show the countdown to my pull here too**, and put the
-  Rest window wherever it suits you, for example lower down. The Action window then stays empty
-  while you rest (not even the dash). In the last 10 seconds before your pull it wakes up with
-  READY (target, power now, the bar), and when your pull starts the time takes over. Ticked (the default), the Action window
-  works as before and the Rest window is not needed. Unticked but no Rest window open, the Action
-  window shows the countdown anyway, so it is never missing. Tip: with Sauce's Transparent theme for the
-  Action window, the empty window disappears completely.
+  sign of life every 2 seconds, and one not heard for 6 seconds counts as closed.
+  While a Rest window is open, the Action window leaves the countdown to it: it stays empty while
+  you rest (not even the dash), wakes up with READY in the last 10 seconds before your pull (target,
+  power now, the bar), and when your pull starts the time takes over. So if the big countdown in
+  the middle of the screen is too much while you rest, open the Rest window and put it wherever it
+  suits you, for example lower down. With no Rest window open, the Action window shows
+  the countdown itself, so it is never missing. Tip: with Sauce's Transparent theme for the Action
+  window, the empty window disappears completely.
 - Targets are shown in W/kg (since 0.2.17; before it was watts), everywhere one number. To see
-  watts instead, open the settings window and set **Pull target** (under **Plan**) to **W**.
+  watts instead, open the settings window and set **Pull target** to **W**. The W/kg is the
+  plan's own (`pull_wkg`, see "Pull targets from the plan"), for you too. For a plan without it
   Paceline divides by your weight in Zwift (or the planner's weight if Zwift gives none), with one
-  decimal like Sauce; without any weight it shows watts. The power bar compares in percent of the
-  target either way. If you had picked W before 0.2.17, pick it once more.
+  decimal like Sauce; without any weight it shows watts. In W/kg your power bar compares your
+  power now in W/kg (by your weight in Zwift, else the plan's) with that target; in W it compares
+  watts with the plan's watts. If you had picked W before 0.2.17, pick it once more.
 - An empty window means Paceline has nothing to show: outside a TTT event, no plan is loaded,
   Paceline does not know your rider yet (Zwift has not run in this Sauce session), you are not a
-  rider in the plan (bench or not listed), or the last 500 m of the race (the rotation is off for
-  the sprint).
+  rider in the plan (only in the planner's roster, or not listed), or finish mode (the rotation is off for the sprint):
+  from 500 m before the finish line, and past the line until you stand still or Sauce shows
+  another race.
 - An amber `?` means Paceline cannot tell: no teammate is near you (dropped, or their data has
   stopped), there is no current Zwift data for your own rider (Zwift stopped, you only
   spectate, or no data for 15 seconds), or nobody is being tracked at the front. Before the
@@ -276,7 +420,9 @@ share one set of columns: label, plan number, kit swatch, name, and the pull rig
 lined up on the `@` (`60s@4.4`: pull time, then the target without its unit, which the setting
 below decides):
 
-- The plan line: team and plan code.
+- The plan line: the plan's name and code (`Rollers fast · plan F9E98R`), with the club when you
+  ticked two or more. Without a plan it says "No plan – click to load one", or "Plan opens 19:00 ·
+  Rollers fast" while the plan waits for its 30 minutes, or that another club has a plan for you.
 - **Wheel:** the wheel you follow, by the plan: the rider before you in plan order (the
   last rider if you are #1). Learn it before the start; it stays put while you pull too, since
   that is the rider you drop in behind. If that rider is not with the group, it shows in amber
@@ -292,7 +438,7 @@ below decides):
   under Front shows who pulls next with their full pull line (`#4 ■ Dana  60s@4.4`),
   ready to call out. Dimmed, it is the plan's guess: before the start it shows plan #1 (who
   starts), on a real climb or descent, riding alone or without data the plan's next after the last puller. It
-  turns live again as soon as a puller is at the front; in the final sprint it shows `–`. Make the Info window a little taller for it.
+  turns live again as soon as a puller is at the front; in finish mode (from 500 m before the line until you stop) it shows `–`. Make the Info window a little taller for it.
 - **The whole rotation** (before the start for everyone): one row per rider, `#3 ■ Name
   60s@4.4`, from the rider pulling (before the start from plan #1), you highlighted. Once the
   rotation runs it goes away. In **Captain mode** you can keep it: tick **and keep the whole
@@ -310,7 +456,11 @@ seconds of a change at the front (a new puller, your own pull starting or ending
 real climb or descent) a new front rider must stay there for 15 seconds instead, so a short shuffle in
 the chaos does not count as a pull; his pull time still counts from when he got there. The same
 15 seconds apply to a teammate who would skip the planned next rider (one or two places further
-on in the plan), for example when he shows up at the front for a moment during a change. Nothing is
+on in the plan), for example when he shows up at the front for a moment during a change. The rider
+who pulled just before (the one before the puller in the plan) has to be back in front for 30
+seconds to take the pull back: two riders swapping the front, or his last seconds while the new
+puller settles in, do not throw your countdown a whole round up and down (after a climb or descent
+the order is mixed up, so there the 15 seconds apply). Nothing is
 tracked while you stand still (below 2 km/h, e.g. in the start pen). The pull
 time counts from when they got there. Your own pull is also picked up from your riding, once
 you are the next rider and the rider in front is due (10 seconds or less of his pull left) or
@@ -346,12 +496,13 @@ window for that.
   the finish, once Paceline has a plan with you in it (it may arrive a few seconds into the pen),
   with or without teammates near you, so there is a recording also when something went wrong.
   Without such a plan it does not record (new in 0.2.31: that recording would never go up), unless
-  you tick **Also record without a plan** in the settings window. It holds you and the plan's
-  riders (and bench); when fewer than two of them are near you (no plan, the wrong plan), it also
+  you tick **Also record without a plan** in the settings window (under **Advanced**). It holds you and the plan's
+  riders (and the planner's roster); when fewer than two of them are near you (no plan, the wrong plan), it also
   holds the riders of your event within 300 m of you, the 15 nearest, which in a TTT is in
   practice your team. In between it keeps recording even when you ride alone (dropped). After
-  the stop the ride goes up, if you upload (that needs a plan or a team name; otherwise export it
-  from the settings window). You do not have to press anything. (With **Only during TTT events**
+  the stop the ride goes up, if you upload (that needs a plan from a club you ticked, or a file
+  plan of one of its teams; otherwise export it from the settings window). You do not have to
+  press anything. (With **Only during TTT events**
   unticked it works as before 0.2.18: it starts when you and a teammate from the plan are near
   each other and stops 120 seconds after fewer than 2 are left.) Each recorded second also notes who Paceline thought
   was pulling and what the windows showed (countdown or pull, your place, Wheel, the captain's
@@ -389,22 +540,24 @@ With them we can check, second by second, what Paceline showed against what real
 - How old is your teammates' data when it reaches Sauce, and how much does that jumble the order?
 - Is draft a better signal than position? This decides how the next version detects pulls.
 
-The captain can also compare the plan with the race: how long each pull really lasted, at
+The recordings also show how the plan held up in the race: how long each pull really lasted, at
 what power, and where the rotation broke up (climbs, a dropped rider, the sprint). That helps to
 set pull times everyone can actually hold. It is not a ranking, and nobody is judged on it.
 
-What happens to the data: the captain and the developer of Paceline use it for exactly these
-two things. It is not passed on and not published. Heart rate is never uploaded. The captain
-deletes recordings once they are evaluated. You can always ride without sending anything:
-recording only stays on your computer unless you export it or tick the upload box.
+What happens to the data: on the plan server only the Paceline operator opens the recordings, to
+analyse your team's rides and improve Paceline. Your captain sees that a recording arrived and can
+delete it, but can't download it. Recordings are not passed on and not published. Heart rate and
+cadence are never uploaded. The server deletes recordings after 90 days. You can always ride
+without sending anything: a recording stays on your computer unless you export it or tick the
+upload box.
 
 ## After the ride
 
 1. Click a Paceline window to open the settings.
-2. Under **Recordings**, find your ride (it shows the date, how long it lasted and the plan code).
+2. Open **Advanced**, and under **Recordings** find your ride (it shows the date, how long it lasted and the plan code).
 3. Press **Export**. A normal Save dialog opens and asks where to save the file (it ends in
    `.jsonl`). Pick a place you can find again, such as the Desktop.
-4. Send that file to the captain.
+4. Send that file to whoever analyses your team's rides.
 
 You can export a ride more than once. **Delete** removes a recording from your computer for good.
 Paceline keeps the newest 20 recordings and removes any older than 14 days, so export soon after
@@ -412,33 +565,72 @@ the ride.
 
 ### Recordings upload
 
-Instead of exporting by hand you can let Paceline send each ride to the captain. It is off
-until you switch it on: in the settings window, under **Plan server**, tick **Upload my
-recordings after each ride**.
+Instead of exporting by hand you can let Paceline send each ride to the plan server. It is off
+until you switch it on: in the settings window, under **Advanced**, tick **Upload my recordings
+after each ride**. Next to the box the settings say what that means:
+
+> Sends each finished recording (power, draft, speed and position of you and the plan riders; no
+> weight or FTP) to the plan server. Only the Paceline operator can open the file, to analyse your
+> team's rides and improve Paceline; your captain sees that it arrived and can delete it. Heart
+> rate and cadence are never sent. The server deletes recordings after 90 days. Only rides
+> recorded after you tick this box go up on their own; send older ones with Upload.
 
 - **What is sent:** only what the analysis needs: power, draft, speed and position of you and
-  of the riders in the plan, with your Zwift ID and the plan. Left out: everyone's heart rate
-  (yours too) and cadence, weight and FTP in the plan, and any rider you watch who is not in the
-  plan. The file you export yourself still has everything.
-- **Where it goes:** to the plan server set under **Plan server** (normally ttt.mafl.net), filed
-  under your team name (the one you typed, else the server plan's team). There the captain can
-  download it. The server only takes recordings for a team that has a plan on it.
-- **When:** right after a recording stops (which is 2 minutes after the team has split up), or
-  later while a Paceline window is open and Zwift runs; never while it is still recording, and
-  only while the plan server is switched on. Only rides recorded after you ticked the box go up
-  on their own; older ones, and recordings shorter than a minute or older than 7 days, are not
-  sent automatically, but **Upload** sends them. If the server cannot be reached, Paceline tries
-  again every 5 minutes; if the team has no plan on it, after an hour; a recording too large for
-  the server is not tried again on its own.
+  of the riders in the plan, with your Zwift ID and the plan. When the plan changes during the
+  ride, the riders of the new plan are kept too (new in 0.3.0). Left out: everyone's heart
+  rate (yours too) and cadence, weight, W/kg and FTP in the plan, and any rider you watch who is in
+  no plan of the ride. Paceline's notes on the rotation in each second (who pulled, who was in
+  front, whose wheel, whose gap) name only riders of the plan loaded at that moment, or you. The
+  server keeps the riders of the plan you started with as they are; a rider who joins later stays
+  only if the plan named at that moment is a plan of the team that the server stores. A rider of a
+  file plan loaded during the ride loses his power, draft, speed and position there, but those
+  notes can still name him by his Zwift ID. The file you export yourself still has everything.
+- **Where it goes:** to the plan server set under **Advanced** (normally the build's own, see
+  "Beta" above), filed under your club and team: the team whose plan was active at your roll-off
+  (the ride lock's). A ride with a file plan goes up only when a club you ticked has a team of that
+  name; otherwise it stays on your computer, as do recordings made with 0.2. On the server only
+  the Paceline operator opens the file; your captain sees that it arrived and can delete it, but
+  can't download it. The server deletes recordings after 90 days.
+- **When:** right after a recording stops, or later while a Paceline window is open and Zwift
+  runs; never while it is still recording, and only while the plan server is switched on. Only
+  rides recorded after you ticked the box go up on their own; older ones, and recordings shorter
+  than a minute or older than 7 days, are not sent automatically, but **Upload** sends them. If
+  the server cannot be reached, answers with an error or has no room, Paceline tries again every
+  5 minutes.
+- **Errors that a retry can't fix** stop the automatic upload of that ride; **Upload** tries once
+  more:
+  - "you are not in this team on the plan server"
+  - "this team is not on the plan server"
+  - "a different copy of this recording is on the plan server"
+  - "the plan server refused this recording"
+  - "recording too large for the plan server"
 - Under **Recordings** each ride then shows "uploaded", "waiting for upload" or "not sent
   automatically" (with the reason if the last try failed), and **Upload** sends a ride right away.
+
+## Plan server
+
+The plan server keeps the team plans that clubs upload and gives each rider's Paceline the plan for
+the race. When you are in a Zwift event, and when you open these settings, Paceline sends the plan
+server your Zwift ID, the clubs you ticked, the codes of private clubs you added, your event's
+start time and id, your plan code and the Paceline version. A club you ticked sees when you last
+checked. Recordings go up only when you tick the upload box (see "Recordings upload").
+
+**Privacy.** What the server keeps, who sees it, for how long and where it is processed is on the
+privacy page of the server you use: its address plus `/privacy` (for example
+`https://ttt.example.org/privacy`). That page is the binding text, not this README.
+
+Operators find the server's pages, mail setup and limits in `server/README.md`.
 
 ## For developers
 
 - `npm test` runs the tests.
+- Test fixtures are made up: no planner exports or other real rider data, made-up names and
+  numbers only (see `tests/fixtures/README.md`). This repository is public.
 - `bash scripts/zip.sh` builds `dist/paceline-<version>.zip`.
+- `node tools/ride-report/report.mjs <recording.jsonl>` writes the standard analysis of a ride
+  recording (see `tools/ride-report/README.md`).
 - Open `pages/paceline.html?demo` and `pages/action.html?demo` through a local web server to try
   them without Sauce (load the plan first in `pages/settings.html?demo`). The demo team rotates
   every 20 s for 60 s, then only you are left for 130 s. Gaps open in your first pull (the
   group), in the pull after it (you), in your second pull (the early stage only) and in your last
-  pull (one rider).
+  pull (one rider); each closes again slowly and shows green meanwhile.

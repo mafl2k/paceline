@@ -1,0 +1,874 @@
+// Smoke test of the captain pages and their script (server/client.mjs) in headless Chrome, over CDP
+// with Node 22's global WebSocket (no puppeteer). Not part of `npm run test:server`, but a required
+// check before every push (plan versions spec decision 13: the captain pages run on the script).
+// Without Chrome it cannot pass. Run it as
+//     node server/tests/smoke-captain.mjs [--shots <dir>] [--data <dir>]
+// (CHROME=<path to the Chrome binary> overrides the macOS default.)
+// (--data puts the server's DATA_DIR and the fixtures in a new folder inside <dir>; by default they
+// go to the system's temp folder, as Chrome's profile always does: Chrome cannot start with a long
+// TMPDIR.) It starts a local
+// server on 127.0.0.1 on a fixed clock (2026-11-19 18:12Z: Rollers' gate has passed, the team pages
+// reload themselves) with made-up Kettenfett RC: Rollers 19:30 with its live plan "Rollers" and a
+// second plan "Rollers · slow", Sprockets 19:30 with its live plan "Sprockets", Cogs without a start
+// time. It signs Chrome in with the club cookie and checks:
+//   1-2. the pages load without a CSP violation or an exception and run the script; at 390 px
+//        nothing is wider than the screen and every control is at least 44 px;
+//   1b.  the public pages (the start page without the club cookie, register, lost link, privacy, a
+//        bad link) load the same way, without a script; with the cookie / goes to /manage;
+//   1c.  two clubs in the cookie (Spokesmen CC as well): the overview's footer (390) and the
+//        sidebar's (1280) offer Spokesmen CC, "Log out of Kettenfett RC" and "Log out of all clubs";
+//        the button switches to that club, whose footer offers Kettenfett RC, which switches back;
+//        Log out of the open club lands on the other club's overview;
+//   3.   the upload page shows the text export as a plain field and stays when the file is chosen
+//        (no auto-Continue); Continue goes on to the assign page, which shows the
+//        moves and what is still to do, has no "Update preview" button, and redraws itself when
+//        the plan radio or the live box changes, keeping the scroll position, the focused field
+//        and a typed type; the race date typed digit by digit redraws it once, a second after the
+//        last digit and never midway, or at once when the captain leaves the field; Store makes
+//        v2 live; at 1280 a back bar is a link line above the page's head without the club name
+//        (the upload page opened with from=plan goes back to the plan), the team page has none;
+//   3b.  the reshuffle of spec §10: "Upload for Sprockets" carries the plan; no holes are left;
+//   3c.  Back of the live plan asks in the page and posts confirm=1; the flash; Back to v2 next;
+//   3e.  a refused Store ("Pick a plan.", pressed right after typing a date: no redraw races it,
+//        the page stays at its top with the flash) keeps the typed type through the next redraw;
+//        Discard;
+//   4.   the guarded reload waits while a row's Make live confirm is open;
+//   5.   the stale line when offline;
+//   3d.  Make live on a row and "Make v2 live" ask in the page first (the button below the
+//        summary), post confirm=1, and change team.live only when pressed;
+//   6.   Make live without the script: a second tab with script execution disabled posts Make
+//        live, gets the server's confirm page, and confirms; team.live changes only then;
+//   7.   Delete plan on the plan page asks in the page first.
+// Each check prints `ok …` or `FAIL …`; any FAIL exits 1. With --shots it saves
+// captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen),
+// captain-team-settings-390-{light,dark}.png, captain-team-cogs-390-light.png (Cogs, no start
+// time), captain-assign-390-light.png (the assign page right after the upload) and
+// captain-plan-390-light.png (a plan page), and every captain page at 1280 (full page, so the
+// desktop frames can be laid side by side) and those not named yet at 390, and the team page with its
+// switcher open, captain-team-switch-390-light.png:
+// captain-<page>-{390,1280}-light.png for teams (1280 only), team (1280 only), team-cogs (1280
+// only), team-settings (1280 only), club-settings, new-team, upload, upload-from-plan (New version
+// on the plan page), assign (1280 only), result
+// (the answer to Store), plan (1280 only), team-gone, plan-gone, entry-gone, live-confirm and
+// back-confirm (the no-script questions) and code (the new rider code, shot last: it makes the
+// club private); the overview of a browser with two clubs (the footer's club switch),
+// captain-teams-two-{390,1280}-light.png (full page); and of the public pages
+// public-home-{390-light,390-dark,1280-light}.png (without the club cookie: with it / goes to
+// /manage) and public-register-….png (full page).
+//
+// The club cookie is `__Host-pl_club` (Secure). The script first checks whether Chrome sends a
+// Secure cookie to http://127.0.0.1 (a potentially trustworthy origin); only if it does not, it
+// starts Chrome again with --unsafely-treat-insecure-origin-as-secure=<base> and says so. Checked
+// 17 Nov 2026 with Chrome on macOS: Chrome sends it, the flag is not needed.
+import {spawn} from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {startServer, fakeMailer, planJson, T, CODE_SECRET} from './helpers.mjs';
+import {CID, makeClub, secondClub, upload} from './manage-helpers.mjs';
+import {uploadSheet} from '../club.mjs';
+import {randomId} from '../ids.mjs';
+
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const NOW = T('2026-11-19T18:12:00Z');
+const shotsAt = process.argv.indexOf('--shots');
+const shotsDir = shotsAt > 0 ? path.resolve(process.argv[shotsAt + 1] || '.') : null;
+const dataAt = process.argv.indexOf('--data');
+const dataRoot = dataAt > 0 ? path.resolve(process.argv[dataAt + 1] || '.') : os.tmpdir();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let failed = 0;
+const report = (good, what, detail = '') => {
+    if (!good) {
+        failed++;
+    }
+    console.log(`${good ? 'ok' : 'FAIL'} ${what}${detail ? ` (${detail})` : ''}`);
+};
+
+if (!fs.existsSync(CHROME)) {
+    console.log(`FAIL Chrome not found at ${CHROME}: the smoke test cannot run`);
+    process.exit(1);
+}
+
+// ---- the club: three teams; Rollers with two plans of its race, Sprockets with one; riders seen ----
+const c = makeClub({teams: [['Rollers', '19:30'], ['Sprockets', '19:30'], ['Cogs', null]]});
+const rollersLive = upload(c.club, 'rollers', {riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:00:00Z')});
+const rollersSlow = upload(c.club, 'rollers', {type: 'slow', riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:02:00Z'), live: false});
+const sprocketsLive = upload(c.club, 'sprockets', {riders: ['1007', '1008', '1009'], at: T('2026-11-18T20:05:00Z')});
+const fastPlan = c.club.sheets[rollersLive].plan;
+const slowPlan = c.club.sheets[rollersSlow].plan;
+const clock = {now: NOW};
+// startServer makes its DATA_DIR in os.tmpdir(), which reads TMPDIR
+fs.mkdirSync(dataRoot, {recursive: true});
+const tmpdir = process.env.TMPDIR;
+process.env.TMPDIR = dataRoot;
+// with a mailer and a PUBLIC_URL, so registration is open (the register page shows its form); with
+// a CODE_SECRET, so a club can be made private (the rider code page)
+const srv = await startServer({clock, mailer: fakeMailer(), env: {PUBLIC_URL: 'https://paceline.example.org', SMTP_HOST: 'smtp.example.org',
+    MAIL_FROM: 'Paceline <paceline@example.org>', CODE_SECRET}});
+if (tmpdir === undefined) {
+    delete process.env.TMPDIR;
+} else {
+    process.env.TMPDIR = tmpdir;
+}
+console.log(`note: the server's data is in ${srv.dataDir}`);
+srv.store.create(c.club);
+// a second club of the same browser (1c): no teams
+const c2 = secondClub();
+srv.store.create(c2.club);
+const token2 = c2.cookie.slice(c2.cookie.indexOf('=') + 1);
+const see = (aid, at, entry) => {
+    clock.now = T(at);
+    srv.store.see(CID, aid, entry);
+    clock.now = NOW;
+};
+const rSig = c.club.sheets[rollersLive].sig;
+for (const aid of ['1001', '1002', '1003', '1004']) {
+    see(aid, '2026-11-19T18:05:00Z', {sig: rSig, mod: '0.3.0', sheet: rollersLive, inEvent: true, event: 4567001});
+}
+see('1005', '2026-11-19T16:30:00Z', {sig: 'ABC123', mod: '0.3.0', sheet: rollersLive, inEvent: false, event: null});
+see('1007', '2026-11-19T18:08:00Z', {sig: c.club.sheets[sprocketsLive].sig, mod: '0.3.0', sheet: sprocketsLive, inEvent: true, event: 4567002});
+const base = srv.base;
+const token = c.cookie.slice(c.cookie.indexOf('=') + 1);
+const club = () => srv.store.get(CID);
+const liveOf = slug => club().teams[slug].live;
+// the newest stored version of a plan: [id, version]
+const newestOf = plan => Object.entries(club().sheets).filter(([, s]) => s.plan === plan).sort(([, a], [, b]) => b.n - a.n)[0];
+
+// the made-up uploads of the reshuffle (spec §10): Rollers takes Hanna from Sprockets and drops Ben;
+// Sprockets takes Ben
+const tmp = fs.mkdtempSync(path.join(dataRoot, 'paceline-smoke-'));
+const rollersFile = path.join(tmp, 'rollers-v2.json');
+fs.writeFileSync(rollersFile, JSON.stringify(planJson('Rollers', ['1002', '1003', '1004', '1005', '1007'], ['1006'])));
+// a plan whose planner name matches no plan: with two plans in the race nothing is preselected
+const tempoFile = path.join(tmp, 'rollers-tempo.json');
+fs.writeFileSync(tempoFile, JSON.stringify(planJson('Rollers tempo', ['1002', '1003', '1004'])));
+const sprocketsFile = path.join(tmp, 'sprockets-v2.json');
+fs.writeFileSync(sprocketsFile, JSON.stringify(planJson('Sprockets', ['1001', '1008', '1009'])));
+
+
+// ---- Chrome over CDP ----
+// One tab: its CDP commands, events, the page's log and exceptions, and the POSTs it sent.
+async function connect(wsUrl) {
+    const ws = new WebSocket(wsUrl);
+    await new Promise((res, rej) => {
+        ws.onopen = res;
+        ws.onerror = rej;
+    });
+    let id = 0;
+    const pending = new Map();
+    const waiters = [];
+    const logs = [];
+    const posts = [];
+    const navs = {count: 0};
+    ws.onmessage = ev => {
+        const m = JSON.parse(ev.data);
+        if (m.id && pending.has(m.id)) {
+            pending.get(m.id)(m);
+            pending.delete(m.id);
+            return;
+        }
+        if (m.method === 'Runtime.exceptionThrown') {
+            logs.push(`exception: ${m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text}`.slice(0, 300));
+        } else if (m.method === 'Log.entryAdded') {
+            const e = m.params.entry;
+            if (!/favicon\.ico/.test(e.url || '') && !/favicon\.ico/.test(e.text)) {
+                logs.push(`${e.level} ${e.source}: ${e.text} ${e.url || ''}`.slice(0, 300));
+            }
+        } else if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) {
+            navs.count++;
+        } else if (m.method === 'Network.requestWillBeSent' && m.params.request.method === 'POST') {
+            posts.push({url: m.params.request.url.slice(base.length), body: m.params.request.postData ?? ''});
+        }
+        for (const w of waiters.splice(0)) {
+            if (w.method === m.method) {
+                w.resolve(m);
+            } else {
+                waiters.push(w);
+            }
+        }
+    };
+    const send = (method, params = {}) => new Promise(res => {
+        const i = ++id;
+        pending.set(i, res);
+        ws.send(JSON.stringify({id: i, method, params}));
+    });
+    const once = (method, ms = 10000) => new Promise(resolve => {
+        const w = {method, resolve};
+        waiters.push(w);
+        setTimeout(() => resolve(null), ms);
+    });
+    const evaluate = async expr => {
+        const r = await send('Runtime.evaluate', {expression: expr, returnByValue: true, awaitPromise: true});
+        if (r.result?.exceptionDetails) {
+            throw new Error(`evaluate: ${r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text}`);
+        }
+        return r.result?.result?.value;
+    };
+    for (const d of ['Page', 'Runtime', 'Log', 'Network', 'DOM']) {
+        await send(`${d}.enable`);
+    }
+    // CSP violations as the page sees them (a CDP script is not bound by the page's CSP)
+    await send('Page.addScriptToEvaluateOnNewDocument', {source:
+        'window.__csp = []; document.addEventListener("securitypolicyviolation", e => window.__csp.push(e.violatedDirective + " " + e.blockedURI));'});
+    return {send, once, evaluate, logs, posts, navs, close: () => ws.close()};
+}
+
+const profiles = [];
+async function launch(extra = []) {
+    const port = 9390 + Math.floor(Math.random() * 500);
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'paceline-chrome-'));
+    profiles.push(profile);
+    const proc = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
+        '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', ...extra, 'about:blank'], {stdio: 'ignore'});
+    let tab = null;
+    for (let i = 0; i < 80 && !tab; i++) {
+        try {
+            const pg = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(t => t.type === 'page');
+            if (pg) {
+                tab = await connect(pg.webSocketDebuggerUrl);
+            }
+        } catch {
+            tab = null;
+            await sleep(250);
+        }
+    }
+    if (!tab) {
+        proc.kill();
+        throw new Error('Chrome did not open its debugging port');
+    }
+    const set = await tab.send('Network.setCookie', {name: '__Host-pl_club', value: token, url: base, secure: true, path: '/', httpOnly: true, sameSite: 'Lax'});
+    // a second tab of the same browser (it shares the cookie)
+    const newTab = async () => connect((await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, {method: 'PUT'})).json()).webSocketDebuggerUrl);
+    const close = async () => {
+        tab.close();
+        proc.kill();
+        await sleep(400);
+    };
+    return {tab, newTab, close, cookieSet: !set.error};
+}
+
+let chrome = await launch();
+let tab = chrome.tab;
+async function open(p, {w = 390, h = 844, scheme = 'light', on = tab} = {}) {
+    await on.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: 2, mobile: w < 600});
+    await on.send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-color-scheme', value: scheme}]});
+    const loaded = on.once('Page.loadEventFired');
+    await on.send('Page.navigate', {url: base + p});
+    await loaded;
+    await sleep(250);
+}
+// a full-page shot of the page as it is (no reload: also the answer to a POST) at width `w`, then
+// back to 390 x 844
+async function shootNow(name, w = 390) {
+    await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: 844, deviceScaleFactor: 2, mobile: w < 600});
+    await sleep(300);
+    const h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
+    await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
+    await sleep(300);
+    const r = await tab.send('Page.captureScreenshot', {format: 'png'});
+    fs.mkdirSync(shotsDir, {recursive: true});
+    fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
+    console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
+    await tab.send('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
+    await sleep(300);
+}
+// run `action` (an expression in the page) and wait for the page it leads to
+async function follow(action, on = tab) {
+    const loaded = on.once('Page.loadEventFired');
+    await on.evaluate(action);
+    const got = await loaded;
+    await sleep(250);
+    return got !== null;
+}
+// the upload page: choose the file (the page stays: no auto-Continue), then press Continue; true
+// when choosing the file left the page where it was
+async function chooseAndContinue(file) {
+    const doc = await tab.send('DOM.getDocument');
+    const q = await tab.send('DOM.querySelector', {nodeId: doc.result.root.nodeId, selector: 'input[name=json]'});
+    const at = await pathOf();
+    const navs0 = tab.navs.count;
+    await tab.send('DOM.setFileInputFiles', {nodeId: q.result.nodeId, files: [file]});
+    await sleep(600);
+    const stayed = tab.navs.count === navs0 && await pathOf() === at;
+    await follow('document.querySelector("form[data-upload] button[type=submit]").click()');
+    return stayed;
+}
+const signedIn = () => tab.evaluate('document.querySelector(\'a[href="/manage/team/rollers"]\') !== null');
+const pageText = (on = tab) => on.evaluate('document.body.innerText');
+const pathOf = async (on = tab) => (await on.evaluate('location.pathname + location.search'));
+// the club cookie off and on again (the start page without and with a club)
+const signOut = () => tab.send('Network.deleteCookies', {name: '__Host-pl_club', url: base});
+const signIn = (value = token) => tab.send('Network.setCookie', {name: '__Host-pl_club', value, url: base, secure: true, path: '/', httpOnly: true, sameSite: 'Lax'});
+// both clubs, Kettenfett RC the active one (the cookie's tokens joined by '.', as the server sets it)
+const signInTwo = () => signIn(`${token}.${token2}`);
+
+await open('/manage');
+if (!chrome.cookieSet || !await signedIn()) {
+    console.log(`note: Chrome did not send the Secure cookie to ${base}; again with --unsafely-treat-insecure-origin-as-secure`);
+    await chrome.close();
+    chrome = await launch([`--unsafely-treat-insecure-origin-as-secure=${base}`]);
+    tab = chrome.tab;
+    await open('/manage');
+}
+report(await signedIn(), 'signed in with the __Host- cookie');
+
+// The order of a date field's parts follows the system's locale (not --lang, not
+// Emulation.setLocaleOverride): typed 01, 02, 2030 in a scratch tab it reads 1 Feb or 2 Jan.
+const dayFirst = await (async () => {
+    const scratch = await chrome.newTab();
+    const loaded = scratch.once('Page.loadEventFired');
+    await scratch.send('Page.navigate', {url: 'data:text/html,<input type=date id=f>'});
+    await loaded;
+    await scratch.evaluate('f.focus()');
+    for (const d of '01022030') {
+        const key = {key: d, code: `Digit${d}`, windowsVirtualKeyCode: 48 + Number(d)};
+        await scratch.send('Input.dispatchKeyEvent', {type: 'keyDown', text: d, ...key});
+        await scratch.send('Input.dispatchKeyEvent', {type: 'keyUp', ...key});
+    }
+    const value = await scratch.evaluate('f.value');
+    await scratch.send('Page.close');
+    scratch.close();
+    return value === '2030-02-01';
+})();
+await tab.send('Page.bringToFront');
+
+// the page here runs its script, loads clean, fits 390 px, and its controls are 44 px
+const fit = `JSON.stringify((() => {
+  const small = [];
+  const vis = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+  for (const el of document.querySelectorAll('a,button,summary,input:not([type=hidden]),select,label.choice')) {
+    if (el.closest('.sr,.vh,.skip') || !vis(el)) continue;
+    const r = el.matches('input[type=radio],input[type=checkbox]') ? el.closest('label').getBoundingClientRect() : el.getBoundingClientRect();
+    if (r.height < 43.5 || r.width < 43.5) small.push((el.textContent.trim() || el.name || el.tagName).slice(0, 28) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+  }
+  return {sw: document.documentElement.scrollWidth, iw: innerWidth, small};
+})())`;
+async function clean(p) {
+    const js = await tab.evaluate('document.documentElement.classList.contains("js")');
+    const csp = await tab.evaluate('window.__csp');
+    report(js && !csp.length && !tab.logs.length, `${p} loads clean and runs the script`,
+        [js ? '' : 'no html.js', ...csp.map(v => `CSP ${v}`), ...tab.logs].filter(Boolean).join('; '));
+    const f = JSON.parse(await tab.evaluate(fit));
+    report(f.sw <= f.iw, `${p} fits 390 px`, `scrollWidth ${f.sw}, innerWidth ${f.iw}`);
+    report(!f.small.length, `${p} tap targets >= 44 px`, f.small.join(' | '));
+}
+
+// An in-page confirm, found by `pick` (a predicate on its <details>, in the page): open it by its
+// summary, then {open, below, inView, others}: open, its submit button below the summary and in
+// the viewport, how many other confirms are open.
+const CONFIRM = pick => `[...document.querySelectorAll('details.confirm')].find(${pick})`;
+async function openConfirm(pick) {
+    await tab.evaluate(`(() => { const d = ${CONFIRM(pick)}; d.scrollIntoView({block: 'center'}); d.querySelector('summary').click(); })()`);
+    await sleep(300);
+    return JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+      const d = ${CONFIRM(pick)};
+      const s = d.querySelector('summary').getBoundingClientRect();
+      const b = d.querySelector('[type=submit]').getBoundingClientRect();
+      return {open: d.open, below: b.top >= s.bottom - 0.5 && b.height > 0, inView: b.bottom <= innerHeight && b.top >= 0,
+        focused: document.activeElement === d.querySelector('[type=submit]'),
+        others: document.querySelectorAll('details.confirm[open]').length - 1, button: d.querySelector('[type=submit]').textContent.trim()};
+    })())`));
+}
+// press the open confirm's button: the POST it sent (url, body) and whether a page followed
+async function pressConfirm(pick) {
+    tab.posts.length = 0;
+    const loaded = await follow(`${CONFIRM(pick)}.querySelector('[type=submit]').click()`);
+    return {loaded, post: tab.posts.at(-1) ?? null};
+}
+const flash = () => tab.evaluate('document.querySelector(".flash p")?.textContent ?? ""');
+// a public page: loads clean without a script, fits 390 px, its controls are 44 px; `status` the
+// page's own answer (a bad link's 404 is logged by Chrome)
+async function cleanPublic(p, status = 200) {
+    const scripts = await tab.evaluate('document.scripts.length');
+    const csp = await tab.evaluate('window.__csp');
+    const logs = tab.logs.filter(l => !(status === 404 && l.includes('status of 404') && l.includes(base + p)));
+    report(scripts === 0 && !csp.length && !logs.length, `${p} loads clean without a script`,
+        [scripts ? `${scripts} script(s)` : '', ...csp.map(v => `CSP ${v}`), ...logs].filter(Boolean).join('; '));
+    const f = JSON.parse(await tab.evaluate(fit));
+    report(f.sw <= f.iw, `${p} fits 390 px`, `scrollWidth ${f.sw}, innerWidth ${f.iw}`);
+    report(!f.small.length, `${p} tap targets >= 44 px`, f.small.join(' | '));
+}
+
+try {
+    // ---- 1 and 2: the pages load clean, run the script, fit 390 px ----
+    for (const p of ['/manage', '/manage/team/rollers', '/manage/team/cogs', '/manage/settings', '/manage/upload?team=rollers',
+        `/manage/team/rollers/plan/${fastPlan}`]) {
+        tab.logs.length = 0;
+        await open(p);
+        await clean(p);
+    }
+
+    // ---- 1b: the public pages ----
+    for (const p of ['/register', '/lost', '/privacy', '/m/AAAAAAAAAAAAAAAAAAAAAA']) {
+        tab.logs.length = 0;
+        await open(p);
+        await cleanPublic(p, p.startsWith('/m/') ? 404 : 200);
+        if (p === '/register') {
+            report(await tab.evaluate('document.querySelector("form[action=\'/register\'] input[name=riders]") !== null'), 'registration is open: the form');
+        }
+    }
+    // with the club cookie / goes to the club's overview
+    await open('/');
+    report(await pathOf() === '/manage' && await signedIn(), 'with the cookie / opens the club', await pathOf());
+    await signOut();
+    tab.logs.length = 0;
+    await open('/');
+    await cleanPublic('/ (no cookie)');
+    report(await pathOf() === '/' && (await pageText()).includes('Register a club') && !(await pageText()).includes('Open '),
+        'the start page without the cookie: Register a club, no club', await pathOf());
+    await signIn();
+    await open('/manage');
+    report(await signedIn(), 'signed in again');
+
+    // ---- 1c: two clubs in one browser ----
+    // the texts of the visible footer's links and buttons
+    const footItems = `JSON.stringify([...document.querySelectorAll('footer.foot')].filter(f => f.getClientRects().length)
+      .flatMap(f => [...f.querySelectorAll('a, button')].map(b => b.textContent.trim())))`;
+    const visibleSwitch = 'document.querySelectorAll("footer.foot")].filter(f => f.getClientRects().length)[0].querySelector("form[action=\'/switch\'] [type=submit]")';
+    await signInTwo();
+    tab.logs.length = 0;
+    await open('/');
+    report(await pathOf() === '/manage' && await signedIn(), 'two clubs: / opens the active one, Kettenfett RC', await pathOf());
+    await clean('/manage (two clubs)');
+    const want = JSON.stringify(['Spokesmen CC', 'Privacy', 'Log out of Kettenfett RC', 'Log out of all clubs']);
+    let items = await tab.evaluate(footItems);
+    report(items === want, 'at 390 the overview\'s footer: the other club, Privacy, Log out of the club, of all', items);
+    await open('/manage', {w: 1280});
+    items = await tab.evaluate(footItems);
+    report(items === want && await tab.evaluate('document.querySelector("aside.side footer.foot").getClientRects().length > 0'),
+        'at 1280 the sidebar\'s footer has the same', items);
+    await open('/manage/team/rollers', {w: 1280});
+    items = await tab.evaluate(footItems);
+    report(items === want, 'at 1280 the team page\'s sidebar too', items);
+    await open('/manage');
+    tab.posts.length = 0;
+    await follow(`[...${visibleSwitch}.click()`);
+    const switched = await tab.evaluate('document.querySelector("h1")?.textContent ?? ""');
+    report(tab.posts.at(-1)?.url === '/switch' && await pathOf() === '/manage' && switched === 'Spokesmen CC',
+        'the footer\'s button switches to Spokesmen CC', `${JSON.stringify(tab.posts.at(-1))} ${await pathOf()} ${switched}`);
+    tab.logs.length = 0;
+    await clean('/manage (Spokesmen CC)');
+    items = await tab.evaluate(footItems);
+    report(items === JSON.stringify(['Kettenfett RC', 'Privacy', 'Log out of Spokesmen CC', 'Log out of all clubs']), 'Spokesmen CC\'s footer offers Kettenfett RC', items);
+    await follow(`[...${visibleSwitch}.click()`);
+    report(await pathOf() === '/manage' && await signedIn(), 'switched back to Kettenfett RC', await pathOf());
+    // Log out of the open club: / and on to the other club's overview
+    await follow('[...document.querySelectorAll("footer.foot")].filter(f => f.getClientRects().length)[0].querySelector("form[action=\'/manage/logout\'] [type=submit]").click()');
+    const after = await tab.evaluate('document.querySelector("h1")?.textContent ?? ""');
+    report(await pathOf() === '/manage' && after === 'Spokesmen CC', 'Log out of Kettenfett RC lands on Spokesmen CC\'s overview', `${await pathOf()} ${after}`);
+    await signIn();
+    await open('/manage');
+    report(await signedIn(), 'one club again');
+
+    // ---- 3: upload, assign (redraws by itself), store ----
+    tab.logs.length = 0;
+    await open(`/manage/upload?team=rollers&plan=${rollersLive}`);
+    tab.posts.length = 0;
+    const textField = await tab.evaluate(`(() => { const i = document.querySelector('input[name=text]');
+      return Boolean(i) && !i.closest('details') && i.getClientRects().length > 0; })()`);
+    report(textField, 'the text export is a plain visible field, in no fold');
+    // setting the files fires input and change, as a real choice does
+    const stayed = await chooseAndContinue(rollersFile);
+    report(stayed, 'choosing the file stays on the upload page (no auto-Continue)');
+    const assignAt = await pathOf();
+    report(/^\/manage\/inbox\/[0-9a-z]{6}$/.test(assignAt), 'Continue goes on to the assign page', assignAt);
+    report(tab.posts.filter(x => x.url.startsWith('/manage/upload')).length === 1, 'one upload sent', JSON.stringify(tab.posts.map(x => x.url)));
+    // "What happens": its lines, without the heading
+    const what = () => tab.evaluate('document.querySelector("#wh-h")?.closest("section").querySelector(".pv-list").innerText ?? ""');
+    let wh = await what();
+    report(wh.includes('moves from') && wh.includes('Still to do'), 'What happens shows the moves and what is still to do', JSON.stringify(wh));
+    await clean(assignAt);
+    const noButton = await tab.evaluate('!document.querySelector("[data-redraw], [formmethod]") && !document.body.innerText.includes("Update preview")');
+    report(noButton, 'the assign page has no "Update preview" button');
+    if (shotsDir) {
+        await shootNow('captain-assign-390-light.png');
+        await shootNow('captain-assign-1280-light.png', 1280);
+    }
+    const checkedAs = () => tab.evaluate('document.querySelector("input[name=as]:checked")?.value ?? null');
+    report(await checkedAs() === fastPlan, 'the plan the upload came from is preselected', await checkedAs());
+
+    // the captain types a type, scrolls, picks "New plan": the page redraws itself
+    await tab.evaluate('document.querySelector("input[name=type]").focus()');
+    await tab.send('Input.insertText', {text: 'fast'});
+    const state = `JSON.stringify({y: Math.round(scrollY), type: document.querySelector('input[name=type]').value,
+      live: document.querySelector('input[name=live]').checked, as: document.querySelector('input[name=as]:checked')?.value ?? null,
+      focus: document.activeElement?.name ?? null, focusValue: document.activeElement?.value ?? null, touched: document.querySelector('input[name=touched]').value,
+      url: location.pathname + location.search, n: performance.getEntriesByType('navigation')[0]?.type})`;
+    report(JSON.parse(await tab.evaluate(state)).touched === 'type', 'typing the type marks it touched');
+    const scrollTo = async () => {
+        await tab.evaluate('window.scrollTo(0, Math.min(260, document.documentElement.scrollHeight - innerHeight))');
+        await sleep(100);
+        return tab.evaluate('Math.round(scrollY)');
+    };
+    let y = await scrollTo();
+    let redrawn = await follow('document.querySelector("input[name=as][value=new]").click()');
+    let s = JSON.parse(await tab.evaluate(state));
+    report(redrawn && s.url.startsWith(`${assignAt}?`) && s.as === 'new', 'picking another plan redraws the page (a GET of itself)', s.url);
+    report(y > 0 && Math.abs(s.y - y) <= 2, 'the redraw keeps the scroll position', `${y} → ${s.y}`);
+    report(s.focus === 'as' && s.focusValue === 'new', 'the redraw focuses the changed field', `${s.focus}=${s.focusValue}`);
+    report(s.type === 'fast', 'the redraw keeps the typed type', JSON.stringify(s.type));
+    report(s.live === false, 'a new plan next to the live plan: the box goes back to off');
+    report(await tab.evaluate('!document.querySelector("[data-redraw], [formmethod]")'), 'still no "Update preview" button');
+
+    // the race date typed digit by digit (in the field's order): no redraw while typing, one after it
+    const typeDate = (y, m, d) => typeDigits(dayFirst ? `${d}${m}${y}` : `${m}${d}${y}`);
+    const typeDigits = async digits => {
+        for (const d of digits) {
+            const key = {key: d, code: `Digit${d}`, windowsVirtualKeyCode: 48 + Number(d), nativeVirtualKeyCode: 48 + Number(d)};
+            await tab.send('Input.dispatchKeyEvent', {type: 'keyDown', text: d, ...key});
+            await tab.send('Input.dispatchKeyEvent', {type: 'keyUp', ...key});
+            await sleep(120);
+        }
+    };
+    const dateNow = () => tab.evaluate('document.querySelector("input[name=date]")?.value ?? null');
+    await tab.evaluate(`(() => { const d = document.querySelector('input[name=date]'); window.__changes = 0;
+      d.addEventListener('change', () => window.__changes++); d.closest('details').open = true; d.scrollIntoView({block: 'center'}); d.focus(); })()`);
+    const drawnDate = await dateNow();
+    let navs = tab.navs.count;
+    let dateLoaded = tab.once('Page.loadEventFired', 4000);
+    await typeDate('2026', '11', '20');
+    const midway = {changes: await tab.evaluate('window.__changes'), navs: tab.navs.count - navs, value: await dateNow()};
+    report(midway.navs === 0 && midway.value === '2026-11-20', 'typing the date digit by digit does not redraw midway', JSON.stringify({drawnDate, ...midway}));
+    await dateLoaded;
+    await sleep(1500);
+    s = JSON.parse(await tab.evaluate(state));
+    report(tab.navs.count - navs === 1 && /[?&]date=2026-11-20(&|$)/.test(s.url) && await dateNow() === '2026-11-20',
+        'a second after the last digit the page redraws once with that date', `${tab.navs.count - navs} redraws, ${midway.changes} changes, ${s.url}`);
+    report(s.focus === 'date' && await tab.evaluate('document.querySelector("input[name=date]").closest("details").open'), 'the date keeps its focus, its fold open');
+    // typed and left at once (a tap on the event link): the redraw comes on leaving, not a second later
+    navs = tab.navs.count;
+    dateLoaded = tab.once('Page.loadEventFired', 4000);
+    await typeDate('2026', '11', '19');
+    const ev = JSON.parse(await tab.evaluate('(() => { const e = document.querySelector("input[name=event]"); e.scrollIntoView({block: "center"}); return JSON.stringify(e.getBoundingClientRect()); })()'));
+    const leftAt = Date.now();
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await tab.send('Input.dispatchMouseEvent', {type, x: ev.x + 10, y: ev.y + ev.height / 2, button: 'left', clickCount: 1});
+    }
+    await dateLoaded;
+    const took = Date.now() - leftAt;
+    await sleep(1500);
+    s = JSON.parse(await tab.evaluate(state));
+    report(tab.navs.count - navs === 1 && took < 900 && /[?&]date=2026-11-19(&|$)/.test(s.url) && s.focus === 'event',
+        'leaving the date redraws at once, once, and focuses where the captain went', `${tab.navs.count - navs} redraws in ${took} ms, focus ${s.focus}`);
+
+    // the live box
+    y = await scrollTo();
+    redrawn = await follow('document.querySelector("input[name=live]").click()');
+    s = JSON.parse(await tab.evaluate(state));
+    report(redrawn && s.live === true && s.type === 'fast' && /[?&]touched=live%2Ctype(&|$)/.test(s.url), 'ticking the live box redraws the page and keeps it ticked',
+        JSON.stringify(s));
+    report(Math.abs(s.y - y) <= 2 && s.focus === 'live', 'the scroll position and the focus stay', `${y} → ${s.y}, ${s.focus}`);
+
+    // back to the live plan: the box and the type the captain touched stay
+    redrawn = await follow(`document.querySelector("input[name=as][value='${fastPlan}']").click()`);
+    s = JSON.parse(await tab.evaluate(state));
+    report(redrawn && s.as === fastPlan && s.live === true && s.type === 'fast', 'another plan choice keeps the touched box and type', JSON.stringify(s));
+    wh = await what();
+    report(wh.startsWith('v2 of \'Rollers · fast\', live') && wh.includes('moves from') && wh.includes('Still to do'), 'What happens follows the choice', JSON.stringify(wh));
+    report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, 'redraws without errors', tab.logs.join('; '));
+
+    const before = liveOf('rollers');
+    await follow('document.querySelector("[data-submit]").click()');
+    let text = await pageText();
+    report(text.includes('v2 is live'), 'Store: "v2 is live"', JSON.stringify(text.slice(0, 200)));
+    if (shotsDir) {
+        await shootNow('captain-result-390-light.png');
+        await shootNow('captain-result-1280-light.png', 1280);
+    }
+    report(liveOf('rollers') !== before && club().sheets[liveOf('rollers')].plan === fastPlan && club().sheets[liveOf('rollers')].type === 'fast',
+        'Rollers\' live plan is v2 of \'Rollers · fast\'');
+
+    // ---- 3b: the reshuffle (spec §10): Upload for Sprockets, with its plan ----
+    const href = await tab.evaluate('[...document.querySelectorAll("a")].find(a => a.textContent.includes("Upload for Sprockets"))?.getAttribute("href") ?? ""');
+    report(href === `/manage/upload?team=sprockets&plan=${sprocketsLive}`, '"Upload for Sprockets" carries its live plan', href);
+    await follow(`location.href = ${JSON.stringify(href)}`);
+    await chooseAndContinue(sprocketsFile);
+    wh = await what();
+    report(/^\/manage\/inbox\//.test(await pathOf()) && wh.startsWith('v2 of \'Sprockets\', live') && !wh.includes('Still to do'),
+        'Sprockets: a new version of its live plan, no holes', JSON.stringify(wh));
+    await follow('document.querySelector("[data-submit]").click()');
+    text = await pageText();
+    report(text.includes('v2 is live') && !text.includes('Still to do'), 'Sprockets stored, nothing still to do', JSON.stringify(text.slice(0, 200)));
+    for (const slug of ['sprockets', 'rollers']) {
+        await open(`/manage/team/${slug}`);
+        text = await pageText();
+        const notes = await tab.evaluate('[...document.querySelectorAll(".note")].map(n => n.innerText).join(" | ")');
+        report(!text.includes('Still to do') && !text.includes('Upload without') && notes === '', `/manage/team/${slug} shows no hole`, notes);
+    }
+
+    // ---- 3c: Back of the live plan asks in the page; then it offers the way back ----
+    await open('/manage/team/rollers');
+    const back1 = 'd => d.querySelector("summary").textContent.startsWith("Back to v1")';
+    let cf = await openConfirm(back1);
+    report(cf.open && cf.below && cf.focused && cf.others === 0, 'Back to v1: the confirm opens below its summary, its button focused', JSON.stringify(cf));
+    let liveNow = liveOf('rollers');
+    report(liveNow === newestOf(fastPlan)[0], 'opening it changes nothing');
+    let pressed = await pressConfirm(back1);
+    report(pressed.post?.url === '/manage/plan/back' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), 'Back posts confirm=1', JSON.stringify(pressed.post));
+    let fl = await flash();
+    report(fl.startsWith('Back to v1:'), 'the flash says "Back to v1:"', JSON.stringify(fl));
+    report(club().sheets[liveOf('rollers')].n === 3, 'v3 (the copy of v1) is live');
+    report(await tab.evaluate('[...document.querySelectorAll(".planrow.live summary")].some(s => s.textContent.startsWith("Back to v2"))'),
+        'the live row then offers "Back to v2"');
+
+    // ---- 3e: a refused Store keeps what the captain touched; Store does not race the date ----
+    await open('/manage/upload?team=rollers');
+    await chooseAndContinue(tempoFile);
+    const tempoAt = await pathOf();
+    report(/^\/manage\/inbox\//.test(tempoAt) && await checkedAs() === null, 'two plans in the race: no plan preselected', `${tempoAt} ${await checkedAs()}`);
+    await tab.evaluate('document.querySelector("input[name=type]").focus()');
+    await tab.send('Input.insertText', {text: 'tempo'});
+    // a new date typed, then Store pressed at once: the POST goes, no redraw
+    await tab.evaluate(`(() => { const d = document.querySelector('input[name=date]'); d.closest('details').open = true; d.scrollIntoView({block: 'center'}); d.focus(); })()`);
+    await typeDate('2026', '11', '20');
+    const store = JSON.parse(await tab.evaluate('(() => { const b = document.querySelector("[data-submit]"); b.scrollIntoView({block: "center"}); return JSON.stringify(b.getBoundingClientRect()); })()'));
+    navs = tab.navs.count;
+    tab.posts.length = 0;
+    const refusedAt = tab.once('Page.loadEventFired', 4000);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await tab.send('Input.dispatchMouseEvent', {type, x: store.x + store.width / 2, y: store.y + store.height / 2, button: 'left', clickCount: 1});
+    }
+    await refusedAt;
+    await sleep(1500);
+    s = JSON.parse(await tab.evaluate(state));
+    const refusedFlash = await flash();
+    report(refusedFlash === 'Pick a plan.' && s.url === tempoAt && tab.navs.count - navs === 1 && tab.posts.length === 1,
+        'Store right after typing a date: one POST, no redraw, refused "Pick a plan."', `${tab.navs.count - navs} pages, ${tab.posts.length} posts, ${s.url}, ${JSON.stringify(refusedFlash)}`);
+    report(s.y === 0 && await tab.evaluate('document.querySelector(".flash").getBoundingClientRect().top >= 0'), 'the refused page stays at its top, the flash in view', `y ${s.y}`);
+    report(s.touched === 'type' && s.type === 'tempo', 'the refused page carries the touched type', JSON.stringify({touched: s.touched, type: s.type}));
+    redrawn = await follow('document.querySelector("input[name=as][value=new]").click()');
+    s = JSON.parse(await tab.evaluate(state));
+    report(redrawn && s.as === 'new' && s.type === 'tempo' && s.touched === 'type', 'the next redraw keeps the typed type', JSON.stringify(s));
+    const entry = tempoAt.split('/').at(-1);
+    await follow('document.querySelector("form[action$=\'/discard\'] [type=submit]").click()');
+    report((await flash()).startsWith('Discarded') && !club().inbox.some(e => e.id === entry), 'Discard', await flash());
+
+    // ---- the way back at 1280: a back bar is a link line above the page's head, without the club
+    // name (the sidebar names it); the team page's switcher stays hidden; at 390 the bar as before ----
+    const way = `JSON.stringify((() => {
+      const a = document.querySelector('.app>.topbar .back'), club = document.querySelector('.app>.topbar .topbar-club'), h = document.querySelector('main h1');
+      return {href: a && a.offsetParent !== null ? a.getAttribute('href') : null, club: club ? club.offsetParent !== null : null,
+        above: a && h ? a.getBoundingClientRect().bottom <= h.getBoundingClientRect().top : null};
+    })())`;
+    for (const [p, href] of [[`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`, `/manage/team/rollers/plan/${fastPlan}`],
+        ['/manage/upload?team=rollers', '/manage/team/rollers'], [`/manage/team/rollers/plan/${fastPlan}`, '/manage/team/rollers'],
+        ['/manage/team/rollers/settings', '/manage/team/rollers'], ['/manage/new-team', '/manage'], ['/manage/settings', '/manage']]) {
+        await open(p, {w: 1280});
+        const wb = JSON.parse(await tab.evaluate(way));
+        report(wb.href === href && wb.club === false && wb.above === true, `at 1280 ${p} shows the way back above its head, no club name`, JSON.stringify(wb));
+    }
+    await open('/manage/team/rollers', {w: 1280});
+    report(JSON.parse(await tab.evaluate(way)).href === null, 'at 1280 the team page shows no top bar');
+    await open(`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`);
+    const phone = JSON.parse(await tab.evaluate(way));
+    report(phone.href === `/manage/team/rollers/plan/${fastPlan}` && phone.club === true, 'at 390 the bar goes back to the plan and names the club', JSON.stringify(phone));
+
+    // ---- shots for a look next to the prototype's ----
+    if (shotsDir) {
+        const shoot = async (name, p, w, scheme, full) => {
+            await open(p, {w, scheme});
+            let h = 844;
+            if (full) {
+                h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
+                await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
+                await sleep(300);
+            }
+            const r = await tab.send('Page.captureScreenshot', {format: 'png'});
+            fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
+            console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
+        };
+        for (const scheme of ['light', 'dark']) {
+            await shoot(`captain-teams-390-${scheme}.png`, '/manage', 390, scheme, false);
+            await shoot(`captain-team-390-${scheme}.png`, '/manage/team/rollers', 390, scheme, false);
+            await shoot(`captain-team-settings-390-${scheme}.png`, '/manage/team/rollers/settings', 390, scheme, true);
+        }
+        await shoot('captain-team-cogs-390-light.png', '/manage/team/cogs', 390, 'light', true);
+        // the team page with its switcher open (phones: the teams, All teams)
+        await open('/manage/team/rollers');
+        await tab.evaluate('document.querySelector("details.switch").open = true');
+        await shootNow('captain-team-switch-390-light.png');
+        await shoot('captain-plan-390-light.png', `/manage/team/rollers/plan/${fastPlan}`, 390, 'light', true);
+        // every captain page reached by a GET at 1280, those without a shot above at 390 as well (a
+        // gone page answers 404)
+        const pages = [['teams', '/manage'], ['team', '/manage/team/rollers'], ['team-cogs', '/manage/team/cogs'],
+            ['team-settings', '/manage/team/rollers/settings'], ['club-settings', '/manage/settings', 390], ['new-team', '/manage/new-team', 390],
+            ['upload', '/manage/upload?team=rollers', 390], ['upload-from-plan', `/manage/upload?team=rollers&plan=${fastPlan}&from=plan`, 390],
+            ['plan', `/manage/team/rollers/plan/${fastPlan}`],
+            ['team-gone', '/manage/team/nope', 390], ['plan-gone', '/manage/team/rollers/plan/zzzzzz', 390], ['entry-gone', '/manage/inbox/zzzzzz', 390]];
+        for (const [name, p, also] of pages) {
+            await shoot(`captain-${name}-1280-light.png`, p, 1280, 'light', true);
+            if (also) {
+                await shoot(`captain-${name}-${also}-light.png`, p, also, 'light', true);
+            }
+        }
+        const publicShots = async (name, p) => {
+            for (const scheme of ['light', 'dark']) {
+                await shoot(`public-${name}-390-${scheme}.png`, p, 390, scheme, name === 'register');
+            }
+            await shoot(`public-${name}-1280-light.png`, p, 1280, 'light', name === 'register');
+        };
+        // two clubs: the footer's club switch
+        await signInTwo();
+        await shoot('captain-teams-two-390-light.png', '/manage', 390, 'light', true);
+        await shoot('captain-teams-two-1280-light.png', '/manage', 1280, 'light', true);
+        await publicShots('register', '/register');
+        await signOut();
+        await publicShots('home', '/');
+        await signIn();
+        await open('/manage');
+        report(await signedIn(), 'signed in again after the shots');
+    }
+
+    // ---- 4: the guarded reload waits while a confirm is open ----
+    tab.logs.length = 0;
+    await open('/manage/team/rollers');
+    const slowRow = 'd => d.closest(".planrow") && !d.closest(".planrow.live") && d.querySelector("form[action=\'/manage/live\']")';
+    await tab.evaluate(`window.__mark = 1; ${CONFIRM(slowRow)}.open = true`);
+    await sleep(35000);
+    report(await tab.evaluate('window.__mark') === 1, 'no reload while a row\'s Make live confirm is open');
+    await tab.evaluate(`${CONFIRM(slowRow)}.open = false`);
+    await sleep(35000);
+    report(await tab.evaluate('typeof window.__mark') === 'undefined', 'reload once it is closed');
+    report(!tab.logs.length, 'reload without errors', tab.logs.join('; '));
+
+    // ---- 5: the stale line when offline ----
+    await open('/manage/team/rollers');
+    await tab.send('Network.emulateNetworkConditions', {offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1});
+    await sleep(35000);
+    const stale = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+      const s = document.querySelector('[data-stale]');
+      return {shown: !s.hidden && s.offsetHeight > 0, text: s.innerText, dim: document.querySelector('.fresh').classList.contains('is-stale')};
+    })())`));
+    await tab.send('Network.emulateNetworkConditions', {offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1});
+    report(stale.shown && stale.text.includes('Not updated since 19:12 · no connection'), 'stale line when offline', JSON.stringify(stale.text));
+    report(stale.dim, 'the Updated line is marked stale');
+
+    // ---- 3d: Make live on a row asks first; so does "Make v2 live" ----
+    await open('/manage/team/rollers');
+    liveNow = liveOf('rollers');
+    cf = await openConfirm(slowRow);
+    report(cf.open && cf.below && cf.inView && cf.focused, 'Make live on a row: the confirm opens below its summary', JSON.stringify(cf));
+    await sleep(500);
+    report(liveOf('rollers') === liveNow, 'team.live unchanged until the button is pressed');
+    pressed = await pressConfirm(slowRow);
+    report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), 'Make live posts confirm=1', JSON.stringify(pressed.post));
+    report(liveOf('rollers') === rollersSlow, '\'Rollers · slow\' is live', await flash());
+
+    // a newer version of the live plan that is not live: "Make v2 live"
+    srv.store.change(CID, cl => uploadSheet(cl, {
+        slug: 'rollers', json: planJson('Rollers slow', ['1002', '1003', '1004', '1005', '1006']), text: null, as: slowPlan, live: false,
+        base: cl.teams.rollers.version, pinnedEventId: null, via: 'file',
+    }, {now: NOW, newId: () => randomId(6)}));
+    const [slowV2] = newestOf(slowPlan);
+    await open('/manage/team/rollers');
+    const newer = 'd => d.querySelector("summary").textContent.startsWith("Make v2 live")';
+    cf = await openConfirm(newer);
+    report(cf.open && cf.below && cf.focused, '"Make v2 live": the confirm opens below its summary', JSON.stringify(cf));
+    report(liveOf('rollers') === rollersSlow, 'team.live unchanged until the button is pressed');
+    pressed = await pressConfirm(newer);
+    report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), '"Make v2 live" posts confirm=1', JSON.stringify(pressed.post));
+    report(liveOf('rollers') === slowV2, 'v2 of \'Rollers · slow\' is live', await flash());
+
+    // ---- 6: Make live without the script: the server's confirm page ----
+    const plain = await chrome.newTab();
+    await plain.send('Emulation.setScriptExecutionDisabled', {value: true});
+    await open('/manage/team/rollers', {on: plain});
+    const [fastNewest] = newestOf(fastPlan);
+    const info = JSON.parse(await plain.evaluate(`JSON.stringify({js: document.documentElement.classList.contains('js'),
+      noteShown: [...document.querySelectorAll('p.banner.warn')].some(p => p.textContent === 'This page needs JavaScript. Make live still works without it.' && p.getBoundingClientRect().height > 0)})`));
+    report(!info.js && info.noteShown, 'without the script: no html.js, and the page says it needs JavaScript', JSON.stringify(info));
+    // the row's Make live, opened by a real tap on its summary (a <details> needs no script); its
+    // form sent without confirm, as any POST without it: the server asks on a page of its own
+    const pdoc = await plain.send('DOM.getDocument', {depth: -1});
+    const nodeOf = async selector => (await plain.send('DOM.querySelector', {nodeId: pdoc.result.root.nodeId, selector})).result?.nodeId ?? 0;
+    const tap = async nodeId => {
+        await plain.send('DOM.scrollIntoViewIfNeeded', {nodeId});
+        const got = await plain.send('DOM.getBoxModel', {nodeId});
+        if (!got.result) {
+            throw new Error(`no box for node ${nodeId}: ${JSON.stringify(got.error)}`);
+        }
+        const box = got.result.model.content;
+        const x = (box[0] + box[2]) / 2;
+        const yy = (box[1] + box[5]) / 2;
+        for (const type of ['mousePressed', 'mouseReleased']) {
+            await plain.send('Input.dispatchMouseEvent', {type, x, y: yy, button: 'left', clickCount: 1});
+        }
+    };
+    // (:has cannot nest) the confirm whose Make live form names that version
+    const rowConfirm = `details.confirm:has(form[action="/manage/live"] input[name=sheet][value="${fastNewest}"])`;
+    const rowForm = `${rowConfirm} form[action="/manage/live"]`;
+    const rowSummary = await nodeOf(`${rowConfirm} > summary`);
+    if (!rowSummary) {
+        throw new Error(`no Make live for ${fastNewest}: ${await plain.evaluate('JSON.stringify([...document.querySelectorAll("form[action=\'/manage/live\'] input[name=sheet]")].map(i => i.value))')}, `
+            + `in the page ${await plain.evaluate(`Boolean(document.querySelector(${JSON.stringify(`${rowConfirm} > summary`)}))`)}`);
+    }
+    await tap(rowSummary);
+    await sleep(300);
+    report(await plain.evaluate(`document.querySelector(${JSON.stringify(rowConfirm)}).open`), 'without the script the confirm opens by a tap');
+    await plain.send('DOM.removeNode', {nodeId: await nodeOf(`${rowForm} input[name=confirm]`)});
+    plain.posts.length = 0;
+    let loaded = plain.once('Page.loadEventFired');
+    await tap(await nodeOf(`${rowForm} [type=submit]`));
+    await loaded;
+    await sleep(250);
+    text = await pageText(plain);
+    report(plain.posts.at(-1)?.url === '/manage/live' && !/confirm=/.test(plain.posts.at(-1).body) && text.includes('Make \'Rollers · fast\' live?'),
+        'a Make live POST without confirm gets the server\'s confirm page', JSON.stringify(text.slice(0, 200)));
+    report(liveOf('rollers') === slowV2, 'team.live unchanged on the confirm page');
+    const cdoc = await plain.send('DOM.getDocument', {depth: -1});
+    const confirmButton = (await plain.send('DOM.querySelector', {nodeId: cdoc.result.root.nodeId, selector: 'form[action="/manage/live"] [type=submit]'})).result.nodeId;
+    loaded = plain.once('Page.loadEventFired');
+    await plain.send('DOM.scrollIntoViewIfNeeded', {nodeId: confirmButton});
+    const cbox = (await plain.send('DOM.getBoxModel', {nodeId: confirmButton})).result.model.content;
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await plain.send('Input.dispatchMouseEvent', {type, x: (cbox[0] + cbox[2]) / 2, y: (cbox[1] + cbox[5]) / 2, button: 'left', clickCount: 1});
+    }
+    await loaded;
+    await sleep(250);
+    report(/(^|&)confirm=1(&|$)/.test(plain.posts.at(-1)?.body ?? '') && liveOf('rollers') === fastNewest,
+        'confirming there makes it live, without the script', `${JSON.stringify(plain.posts.at(-1))} ${JSON.stringify((await pageText(plain)).slice(0, 120))}`);
+    plain.close();
+
+    // ---- 7: Delete plan on the plan page asks in the page first ----
+    tab.logs.length = 0;
+    await open(`/manage/team/rollers/plan/${slowPlan}`);
+    const del = 'd => d.querySelector("summary").textContent.includes("Delete plan")';
+    cf = await openConfirm(del);
+    report(cf.open && cf.below && cf.focused, 'Delete plan: the confirm opens below its summary', JSON.stringify(cf));
+    report(Object.values(club().sheets).some(x => x.plan === slowPlan), 'nothing deleted until the button is pressed');
+    pressed = await pressConfirm(del);
+    report(pressed.post?.url === '/manage/sheet/delete' && await pathOf() === '/manage/team/rollers'
+        && !Object.values(club().sheets).some(x => x.plan === slowPlan), 'Delete plan deletes it and goes back to the team page', `${JSON.stringify(pressed.post)} ${await flash()}`);
+    report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, 'confirms without errors', tab.logs.join('; '));
+
+    // ---- shots of the pages that answer a POST: the no-script questions, the new rider code (last:
+    // it makes the club private) ----
+    if (shotsDir) {
+        const postPage = async (action, fields) => {
+            await open('/manage/team/rollers', {w: 1280});
+            await follow(`(() => { const f = document.createElement('form'); f.method = 'post'; f.action = ${JSON.stringify(action)};
+              for (const [k, v] of Object.entries(${JSON.stringify({club: CID, ...fields})})) {
+                const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.append(i);
+              }
+              document.body.append(f); f.submit(); })()`);
+        };
+        const notLive = Object.entries(club().sheets).find(([id, x]) => x.team === 'rollers' && id !== liveOf('rollers'))?.[0];
+        for (const [name, action, fields] of [['live-confirm', '/manage/live', {team: 'rollers', sheet: notLive}],
+            ['back-confirm', '/manage/plan/back', {team: 'rollers', plan: fastPlan, n: '2', version: String(club().teams.rollers.version)}],
+            ['code', '/manage/code', {action: 'on'}]]) {
+            await postPage(action, fields);
+            await shootNow(`captain-${name}-1280-light.png`, 1280);
+            await shootNow(`captain-${name}-390-light.png`);
+        }
+    }
+} catch (e) {
+    report(false, 'smoke run', e.stack);
+} finally {
+    await chrome.close();
+    await srv.stop();
+    for (const dir of [tmp, ...profiles]) {
+        fs.rmSync(dir, {recursive: true, force: true, maxRetries: 5});
+    }
+}
+console.log(failed ? `${failed} check(s) failed` : 'all checks ok');
+process.exit(failed ? 1 : 0);

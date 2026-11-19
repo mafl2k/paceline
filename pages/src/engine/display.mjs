@@ -63,6 +63,42 @@ export function formatTarget(watts, weight, unit) {
 }
 
 
+// A plan rider's pull_wkg as the plan wrote it (> 0), or null.
+function planWkg(rider) {
+    return Number.isFinite(rider?.wkg) && rider.wkg > 0 ? rider.wkg : null;
+}
+
+
+// A plan rider's target as {value, unit} like formatTarget, or null without the plan's watts
+// (pull_wkg alone sets no target; spec §7.8). unit 'W' is watts, anything else W/kg. In W/kg the
+// plan's pull_wkg wins with one decimal, whatever the weights (the number on the plan image, for me
+// too); without it watts / weight as before: `weight` is my Zwift weight for me and null for the
+// others, the plan rider's weight the fallback, watts when there is none.
+export function riderTarget(rider, weight, unit) {
+    if (!Number.isFinite(rider?.watts)) {
+        return null;
+    }
+    const wkg = unit !== 'W' ? planWkg(rider) : null;
+    if (wkg !== null) {
+        return {value: wkg.toFixed(1), unit: S.wkgUnit};
+    }
+    return formatTarget(rider.watts, pickWeight(weight, rider.weight), unit === 'W' ? 'W' : 'Wkg');
+}
+
+
+// The watts my power bar compares with, or null without the plan's watts: in W/kg with the plan's
+// pull_wkg, pull_wkg × my weight (my Zwift weight, else the plan's), so the bar compares my live
+// W/kg with pull_wkg; else the plan's watts (W mode, no pull_wkg, or no weight at all).
+export function barTarget(rider, weight, unit) {
+    if (!Number.isFinite(rider?.watts)) {
+        return null;
+    }
+    const wkg = unit !== 'W' ? planWkg(rider) : null;
+    const kg = pickWeight(weight, rider.weight);
+    return wkg !== null && kg !== null ? wkg * kg : rider.watts;
+}
+
+
 // ---------- the power marker's filter ----------
 // User, 12 Nov 2026: within about 10 W of the target the marker should keep still, a real drop of
 // 10 % should show. Zwift's 1 Hz power has single spikes, so a median first throws them out, then
@@ -123,9 +159,12 @@ export function markerPower(st, now) {
 // kind 'none': nothing to show (no view). 'rest': timeS = seconds to my pull; `next` in the last
 // WARN_S of it, when the window shows a steady amber NEXT instead of the seconds (the countdown is
 // only good to about 10 s, the handover is called by voice; user, 12 Nov 2026). 'pull': watts =
-// my target (null without the text export), timeS = seconds left (or over, when `over`),
-// marker = powerBar of my smoothed power (null without target or power).
-export function actionModel(view, meanW, zone) {
+// my target (the plan's watts, from pull_power or the text export; null without both), timeS =
+// seconds left (or over, when `over`),
+// marker = powerBar of my smoothed power (null without target or power) against barW (barTarget:
+// pull_wkg × my weight in W/kg mode) when it is a number, else against the plan's watts; `watts`
+// stays the plan's watts either way (the window's target and the recorder's `w`).
+export function actionModel(view, meanW, zone, {barW = null} = {}) {
     if (!view) {
         return {kind: 'none'};
     }
@@ -142,17 +181,19 @@ export function actionModel(view, meanW, zone) {
         // READY: my target and where my power is, the marker neutral (below target is right in the
         // draft), so I can come up to the target before the handover instead of surging.
         const watts = Number.isFinite(view.me?.watts) ? view.me.watts : null;
-        return {...rest, watts, marker: watts === null ? null : withZone(powerBar(meanW, watts), null)};
+        const bar = Number.isFinite(barW) ? barW : watts;
+        return {...rest, watts, marker: watts === null ? null : withZone(powerBar(meanW, bar), null)};
     }
     const over = view.remainingS < 0;
     const watts = Number.isFinite(view.me?.watts) ? view.me.watts : null;
+    const bar = Number.isFinite(barW) ? barW : watts;
     return {
         kind: 'pull',
         watts,
         timeS: Math.abs(view.remainingS),
         over,
         warn: view.remainingS <= WARN_S,    // also when over time
-        marker: watts === null ? null : withZone(powerBar(meanW, watts), zone),
+        marker: watts === null ? null : withZone(powerBar(meanW, bar), zone),
     };
 }
 
@@ -162,7 +203,7 @@ function withZone(bar, zone) {
 }
 
 
-// The Action window when the Rest window has the countdown (prefs.restInAction off; user, 12 Nov
+// The Action window when the Rest window has the countdown (an open Rest window; user, 12 Nov
 // 2026): 'blank' (nothing at all, not even the dash) while I rest and whenever there is no pull to
 // show; 'armed' in the last WARN_S before my pull (NEXT on the countdown): my target `watts` with
 // NEXT where the pull's time will run, "get ready". My pull itself is unchanged.
@@ -191,8 +232,9 @@ export function pullOnlyModel(m, {watts = null} = {}) {
 
 // What the windows showed in one step, for the recorder, so a ride can be checked against the
 // plan by what riders saw. Compact, with rider ids (names are in the session's plan).
-//   act    action window: {k: 'rest'|'next', t, place, s?, o?} ('next': READY shown; s: 1 and o: the
-//          puller's overrun while the clock stands) | {k: 'pull', t, over, w, pos}
+//   act    action window: {k: 'rest'|'next', t, place, s?, o?, c?} ('next': READY shown; s: 1 and o: the
+//          puller's overrun while the clock stands; c: {k, d} a correction shown under the clock,
+//          clock.mjs: its kind and seconds) | {k: 'pull', t, over, w, pos}
 //          | {k: dash} with dash from dashKind ('none' = dim dash, 'unknown' = amber ?, 'climb', 'descent')
 //   meanW  my 3 s mean power (the bar marker's input), rounded
 //   wheel  info "Wheel": {planned, live} (live only while the planned rider is missing)
@@ -203,6 +245,9 @@ export function shownModel({m, dash, meanW = null, wheel = null, next = null}) {
         act = {k: m.next || m.timeS === 0 ? 'next' : 'rest', t: m.timeS, place: m.place ?? null};
         if (m.standing) {
             act = {...act, s: 1, o: m.overS};    // the standing clock and the overrun
+        }
+        if (m.correction) {
+            act = {...act, c: {k: m.correction.kind, d: m.correction.deltaS}};
         }
     } else if (m.kind === 'pull') {
         act = {k: 'pull', t: m.timeS, over: !!m.over, w: m.watts ?? null,

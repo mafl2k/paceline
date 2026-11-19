@@ -17,10 +17,13 @@
 //      counts down to the finish, and is within 500 m from then on).
 // Gaps in the line (gaps.mjs): in my first pull the whole group lets GAP_M open behind me, in my
 // second one the last rider drifts to EARLY_M (the early stage only), in my last one (in C) the
-// last rider drops GAP_M, and in the pull after my first one I (now last) do.
+// last rider drops GAP_M, and in the pull after my first one I (now last) do. Each gap opens within
+// GAP_RAMP_S and closes again over GAP_CLOSE_S, the rider behind faster by what it takes, so it
+// shows green while it closes (user, 17 Nov 2026).
 // After each of my pulls I drift back to the end of the line over DRIFT_S.
-// Then 130 s with only the self rider left (alone: "?"), so the recorder's stop (120 s without 2
-// team riders) shows up, and the timeline repeats.
+// Then 130 s with only the self rider left (past the finish: the rotation shows Finish, since
+// finish mode stays on until I stand still or the next round's distance shows), so the recorder's
+// stop (120 s without 2 team riders) shows up, and the timeline repeats.
 //
 // Like real Sauce data, every entry is a sample of a slightly different moment: an entry with
 // age `a` reports worldTime = now - a and the distance its rider had then. gapDistance is the
@@ -50,6 +53,7 @@ const GAP_M = 14;          // a gap in the line opens to this ...
 const EARLY_M = 7;         // ... or only to this (the early stage; plus the 2 m spacing)
 const GAP_EDGE_S = 4;      // ... from this long into the pull until this long before its end
 const GAP_RAMP_S = 3;
+const GAP_CLOSE_S = 10;    // ... and closes again over this long (the rider behind closes it)
 const DRIFT_S = 20;        // after my pull I drift back to the end of the line this long
 
 
@@ -104,7 +108,7 @@ function script(riders) {
 
 
 // The gap segments: my first pull 'group', my second 'early' (the last rider), my last one 'last'
-// (one rider), the first pull of rider 1 'last' (that is me).
+// (one rider), the first pull of rider 1 'last' (that is me; at least MY_PULL_S long).
 function markGaps(segs) {
     const mine = segs.filter(sg => sg.lead === 0);
     if (mine.length) {
@@ -117,6 +121,7 @@ function markGaps(segs) {
     const after = segs.find(sg => sg.lead === 1 && !sg.out.size);
     if (after) {
         after.gap = 'last';
+        after.dur = Math.max(after.dur, MY_PULL_S);    // long enough to open fully and close slowly
     }
 }
 
@@ -173,7 +178,7 @@ export function startDemo(plan, onNearby) {
         if (slot === null || !(at.sg.gap === 'group' ? slot >= 1 : slot === last)) {
             return 0;
         }
-        const f = Math.min((at.u - GAP_EDGE_S) / GAP_RAMP_S, (at.sg.dur - GAP_EDGE_S - at.u) / GAP_RAMP_S);
+        const f = Math.min((at.u - GAP_EDGE_S) / GAP_RAMP_S, (at.sg.dur - GAP_EDGE_S - at.u) / GAP_CLOSE_S);
         return (at.sg.gap === 'early' ? EARLY_M : GAP_M) * Math.max(0, Math.min(1, f));
     };
     const distAt = (i, s) => {
@@ -266,7 +271,8 @@ export function startDemo(plan, onNearby) {
                 state: {
                     power: Math.round(power),
                     draft: inWind ? 0 : gapBack(i, s) > 8 ? Math.round(rand(0, 15)) : Math.round(rand(80, 110)),
-                    speed: SPEED_MS * 3.6,
+                    // Slower while his gap opens, faster while he closes it.
+                    speed: Math.round((SPEED_MS - (gapBack(i, s) - gapBack(i, s - 0.5)) / 0.5) * 3.6 * 10) / 10,
                     distance,
                     eventDistance: distance,
                     grade,

@@ -1,7 +1,7 @@
 // Overlay windows and the team recorder. All pages run main(mode): 'info' (paceline.html: plan,
 // you, front rider, your wheel, recorder), 'action' (action.html: one big element, the clock to my
 // pull or my pull's target in W or W/kg, time left and power bar) and 'rest' (rest.html: the same
-// element with only the clock to my pull; prefs.restInAction off leaves that to it alone).
+// element with only the clock to my pull; while it is open the Action window leaves that to it).
 //
 // About once a second each open overlay window takes part in a lease (raw localStorage, LEASE_KEY) so
 // that exactly one of them records. The owner runs the recorder state machine on the state kept
@@ -15,9 +15,11 @@
 // power drop (see trackFront). Climbs pause the rotation, the final sprint ends it, and a rider
 // without a teammate near him sees no rotation. That state lives in memory.
 //
-// One overlay window (its own lease, POLL_LEASE_KEY) polls the plan server every POLL_MS (with the
-// TTT-only option only during the TTT event, from the start pen on) and
-// activates a changed plan right away; the other windows pick it up through the storage event.
+// One overlay window (its own lease, POLL_LEASE_KEY) checks the plan server, only in an event (with
+// the TTT-only option only in a TTT event): at once when the event begins, then every POLL_FAST_MS
+// without a plan from this event or after an error, else every POLL_MS (serverTick). It keeps the
+// Clubs table, the ride lock and the latest answer (paceline:pending:v1) and activates the plan the
+// lock, a file plan and the pen rule allow; the other windows pick it up through the storage event.
 // Network errors stay out of the overlay; the settings window shows them.
 //
 // When the rider switched recording upload on (and the plan server too), the recorder's lease
@@ -33,7 +35,8 @@
 // uploaded. ?demo in a plain browser (no Sauce) does the same but keeps the recorder running.
 import {findMe} from './engine/plan.mjs';
 import {MAX_AGE_MS, LEASE_STALE_MS, planIds, selfEntry, planRidersPresent, initialRecState,
-        recStep, makeTick, leaseStep, selfSubgroupId, eventSummary, eventLogStep, initialGate, gateStep}
+        recStep, makeTick, detPlanOnly, leaseStep, selfSubgroupId, eventSummary, eventLogStep, initialGate, gateStep,
+        gateEv, isTtt}
     from './engine/recording.mjs';
 import {BAR_RANGE_PCT, GREEN_PCT, AMBER_PCT, DRAFT_N, selfLive, draftMean, dashKind, wheelOf, placeOf,
         pushPower as pushHist, initialRotation, rotationStep, rotationStatus as statusOf, carryRotation,
@@ -43,19 +46,26 @@ import {BAR_RANGE_PCT, GREEN_PCT, AMBER_PCT, DRAFT_N, selfLive, draftMean, dashK
 import {routeProfile, routeHills, hillAt, initialAlign, alignStep} from './engine/terrain.mjs';
 import {GAP_FINISHERS, initialGaps, gapStep, gapView, cutBehind} from './engine/gaps.mjs';
 import {initialCue, cueStep, cueView, dropWheel, linePlace, freshIds} from './engine/wheelcue.mjs';
+import {initialClock, clockStep, deltaText} from './engine/clock.mjs';
 import {ALIVE_PREFIX, aliveKey, parseAlive, aliveModes, staleKeys, aliveDue} from './engine/presence.mjs';
 import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, initialMarker, markerStep, markerPower, actionModel,
-        pullOnlyModel, penModel, formatTarget, pickWeight,
+        pullOnlyModel, penModel, riderTarget, barTarget, pickWeight,
         shownModel}
     from './engine/display.mjs';
-import {planUrl, serverBase, serverEntry, serverPlanUpdate, pollDue, pollEvery, pollLeaseStep}
+import {serverBase, pollDue, pollEvery, pollLeaseStep, checkUrl, checkHeaders, inEventOf, rollStep, choosePlan,
+        lockAtRollOff, lockAfterClubs, lockFor, serverDecision, chooseForLock, pendingFor, recordEntry, entryUpdate,
+        answerHint, choiceStatus, dropsAtEventBegin, eventOverStatus, serverRuns, eventChange}
     from './engine/planserver.mjs';
+import {joinedIds, sameJoined, sameCodes, codesToSend, applyAnswer, answerClubs, markHinted} from './engine/clubs.mjs';
+import {activeEntry, fileActive, fileEnded, endFilePlan, endsAtGateClose} from './engine/library.mjs';
 import {activePlan, initFlush, schedFlush, onLibraryChange, readPrefs, writePrefs, onPrefsChange,
-        readLibrary, writeLibrary, LEASE_KEY, REC_STATE_KEY, POLL_LEASE_KEY} from './store.mjs';
+        readLibrary, writeLibrary, readLock, writeLock, readPending, writePending, onKeyChange,
+        LEASE_KEY, REC_STATE_KEY, POLL_LEASE_KEY, PENDING_KEY} from './store.mjs';
+import {readClubs, writeClubs, onClubsChange, initClubs} from './clubs.mjs';
 import {logUploadSinceFix, demoOn} from './engine/prefs.mjs';
 import {samplePlan} from './engine/demoplan.mjs';
-import {SWEEP_MS, logSlug, sessionSlug, pendingUploads} from './engine/logupload.mjs';
-import {addTick, saveSessionMeta, prune, listSessions} from './recdb.mjs';
+import {SWEEP_MS, rideTarget, sessionTarget, pendingUploads} from './engine/logupload.mjs';
+import {addTick, saveSessionMeta, prune, listSessions, markUpload} from './recdb.mjs';
 import {uploadSession} from './logupload.mjs';
 import {loadCommon, isDemo, selfAthleteId} from './sauce.mjs';
 import {startDemo} from './demo.mjs';
@@ -79,6 +89,7 @@ const ME = (globalThis.crypto && crypto.randomUUID) ?
     crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 let Common = null;
+let clubsReady = false;          // the shared Clubs copy is merged (or Sauce didn't answer in time)
 let mode = 'info';         // 'info' | 'action' | 'rest'
 let plan = null;           // active plan or null
 let ids = new Set();       // plan rider + bench ids (strings)
@@ -88,6 +99,7 @@ let planSig = null;        // sig of the loaded plan; a new plan keeps the front
 let detFailed = false;     // detOf threw once (logged once; those ticks record det: null)
 let shownFailed = false;   // shownOf threw once (logged once; those ticks record shown: null)
 let gate = initialGate();     // the TTT event gate (gateStep): open from the start pen to the finish
+let gateSg;                   // the TTT subgroup the gate saw in this step (undefined: none, or no data)
 const eventInfo = new Map();   // my event subgroup id -> {summary, at, busy} (eventSummary)
 let eventLogged = null;        // {sessionId, key} of the event last written to a tick
 let selfId = null;         // own athlete id (string), cached once known
@@ -97,6 +109,13 @@ let rpcWeight = null;      // my weight (kg) from getAthleteData('self'), the fa
 let lastWeightPoll = 0;
 let prefs = readPrefs();
 let polling = false;       // a plan server request is under way in this window
+let pollOwner = false;     // this window held the poll lease in its last step
+let rideGate = initialGate();  // the plan server's event gate: TTT only with tttOnly, else any event
+let roll = null;           // roll-off tracking (rollStep) in the current event
+let evKey = null;          // the event the plan server step is in (inEventOf key), null outside
+let planFromEvent = false; // the active plan came from (or was confirmed by) this event's answer
+let joinedSeen = null;     // the ticked clubs as last read (ids joined with ','), to see a change
+let info = {joined: 0, club: null, hint: null};    // for the Info plan line (refreshInfo)
 let uploading = false;     // a recording upload (sweep) is under way in this window
 let lastSweepAt = 0;       // when this window last looked for recordings to upload (0: soon)
 const uploadLogged = new Set();    // upload error kinds already logged
@@ -114,6 +133,8 @@ let rot = initialRotation();
 let marker = initialMarker();    // my smoothed power and the marker's colour (power bar)
 let gaps = initialGaps();  // gaps in the team line (gaps.mjs): a rider or the group losing the wheel
 let cue = initialCue();    // the wheel to drop in behind, in the rest line (wheelcue.mjs)
+let restClk = initialClock();    // the rest countdown as shown: corrections absorbed or explained (clock.mjs)
+let fadedAt = null;    // the clock's last snap that this window faded in
 let powerWt = null;        // worldTime of the last self sample taken
 let hist = [];             // my power history {t, w} for my own pull start and end
 let drafts = [];           // my last DRAFT_N draft samples (W)
@@ -159,7 +180,8 @@ function readRecState() {
         (st.recording && (st.sessionId === null || st.lastSeenAt === null))) {
         return initialRecState();
     }
-    return {recording: st.recording, sessionId: st.sessionId, lastSeenAt: st.lastSeenAt};
+    const rec = {recording: st.recording, sessionId: st.sessionId, lastSeenAt: st.lastSeenAt};
+    return Number.isFinite(st.sg) ? {...rec, sg: st.sg} : rec;
 }
 
 
@@ -179,6 +201,7 @@ function loadPlan() {
         console.error('Paceline: loading the plan failed, continuing without one', e);
     }
     plan = res ? res.plan : demoKind ? samplePlan() : null;
+    refreshInfo();
     ids = planIds(plan);
     riderIds = new Set((plan ? plan.riders : []).map(r => r.id));
     const sig = plan ? plan.sig : null;
@@ -321,6 +344,9 @@ function rotate(now) {
         hill: rot.hill?.mode === 'pause',
         // The riders the team must bring over the line: the plan's, else WTRL's and ZRL's 4.
         needed: plan?.minimumFinishers > 0 ? plan.minimumFinishers : GAP_FINISHERS,
+        // Speed, power and data age of the plan riders and me, for the watch (and its power history).
+        riders: Object.fromEntries(list.filter(x => x && (x.self === true || riderIds.has(String(x.athleteId))))
+            .map(x => [String(x.athleteId), {speed: x.state?.speed, power: x.state?.power, age: x.age ?? 0}])),
     });
     // The wheel cue: at the start, and when my wheel changes (user, 15 Nov 2026; wheelcue.mjs).
     // My pull ends for the cue as soon as someone is ahead of me (the next puller is confirmed only
@@ -416,10 +442,11 @@ function muted() {
 }
 
 
-// While I pull (by the engine's last step): {since, target} for the power marker, else null.
+// While I pull (by the engine's last step): {since, target} for the power marker, else null. The
+// target is the bar's (barTarget: pull_wkg × my weight in W/kg mode, else the plan's watts).
 function myPull(now) {
     const {view} = statusOf(rot, {now, plan, selfId, live: true});
-    return view && view.mine ? {since: rot.front.since, target: Number.isFinite(view.me.watts) ? view.me.watts : null} : null;
+    return view && view.mine ? {since: rot.front.since, target: barTarget(view.me, liveWeight(), prefs.targetUnit)} : null;
 }
 
 
@@ -521,7 +548,20 @@ function storeMeta() {
 }
 
 
-function onStart(state) {
+// Where the recording goes up, as far as known now (rideTarget): the ride lock of the event I am
+// in, else this event's server plan, else a file plan's team in a ticked club. Set again at
+// roll-off. The recorder can start before the plan server step has seen the event (and dropped
+// last event's server plan), so a server plan counts only when it is from this event.
+function startTarget(list, now) {
+    const ev = inEventOf(eventOf(list, now), {tttOnly: prefs.tttOnly});
+    const lib = readLibrary();
+    return rideTarget({lock: ev ? lockFor(readLock(), ev.key) : null, entry: activeEntry(lib), plan, lib,
+                       joined: joinedIds(readClubs(serverBase(prefs.serverUrl))), eventKey: ev ? ev.key : null});
+}
+
+
+function onStart(state, list, now) {
+    const target = startTarget(list, now);
     pendingMeta = {
         sessionId: state.sessionId,
         inFlight: false,
@@ -533,7 +573,8 @@ function onStart(state) {
             selfName: sessionName(),
             version: VERSION,
             display: {targetUnit: prefs.targetUnit, showNext: prefs.showNext},
-            slug: logSlug(prefs, plan),    // the team to upload this recording to (sessionSlug)
+            slug: target?.slug ?? null,    // the club and team to upload this recording to (sessionTarget)
+            circle: target?.circle ?? null,
             plan,
         },
     };
@@ -568,14 +609,14 @@ function step() {
         return;
     }
     const before = readRecState();
-    const {state, action} = recStep(before, {now, present: planRidersPresent(list, ids), gate: eventGate(),
+    const {state, action} = recStep(before, {now, present: planRidersPresent(list, ids), gate: eventGate(), sg: gateSg,
                                              planned: prefs.recordWithoutPlan || ids.has(String(selfId))});
     if (JSON.stringify(state) !== JSON.stringify(before)) {
         writeJson(REC_STATE_KEY, state);
     }
     maybeSweep(now, state);
     if (action === 'start') {
-        onStart(state);
+        onStart(state, list, now);
     } else if (action === 'stop') {
         pendingMeta = null;
         prune().catch(logDb('pruning old recordings'));
@@ -588,7 +629,7 @@ function step() {
         // In a TTT: the riders of my event near me too when the plan riders are missing.
         const row = makeTick(list, ids, now, {fallback: !!eventGate()});
         try {
-            row.det = detOf(now);
+            row.det = detPlanOnly(detOf(now), ids, selfId);    // no Zwift ID of a rider in no plan
         } catch (e) {
             if (!detFailed) {
                 detFailed = true;
@@ -596,7 +637,7 @@ function step() {
             }
             row.det = null;
         }
-        const ev = eventOf(list, now);
+        const ev = gateEv(list, eventOf(list, now));    // a gap in my data is no change of event
         if (ev !== undefined) {
             const {log, next} = eventLogStep(eventLogged, {sessionId: state.sessionId, summary: ev});
             eventLogged = next;
@@ -658,10 +699,17 @@ function windowModel(view, reason, now) {
     if (pen) {
         const watts = myRider(view)?.watts;
         const ok = Number.isFinite(watts);
-        const bar = ok ? powerBar(meanW, watts) : null;
+        const bar = ok ? powerBar(meanW, barTarget(myRider(view), liveWeight(), prefs.targetUnit)) : null;
         return {...pen, watts: ok ? watts : null, marker: bar ? {...bar, zone: null} : null};
     }
-    return actionModel(view, meanW, marker.zone);
+    // The countdown as shown (clock.mjs): the rotation's clock with its corrections absorbed, or
+    // snapped and explained on the line under it (expert panel, 18 Nov 2026).
+    const resting = view && !view.mine && Number.isFinite(view.toMyPullS);
+    restClk = clockStep(restClk, {now, trueS: resting ? view.toMyPullS : null, standing: !!view?.standing,
+                                  present: resting ? (rot.present || []).filter(id => id !== selfId) : null});
+    const shown = resting ? {...view, toMyPullS: Math.floor(restClk.shownS)} : view;
+    const m = actionModel(shown, meanW, marker.zone, {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit)});
+    return m.kind === 'rest' ? {...m, correction: restClk.label, fadeAt: restClk.fadeAt} : m;
 }
 
 
@@ -707,7 +755,7 @@ function detOf(now) {
         routeDist: sauceRouteDist,    // Sauce's own route distance, to compare
         pending: rot.front.pending ? rot.front.pending.at : null,
         selfDraft3: draftMean(drafts),
-        gap: gapNow(),    // the gap warning: {kind, id, m, s, n, mine, behind} or null
+        gap: gapNow(),    // the gap warning: {kind, id, m, s, n, mine, behind, level, closing} or null
         shadowEarly: stepOut.shadowEarly,
         shadowEnd06: stepOut.shadowEnd06,
     };
@@ -750,19 +798,23 @@ function maybeSweep(now, state) {
 }
 
 
-// Uploads the oldest pending recording, if any.
+// Uploads the oldest pending recording that has a club to go to (sessionTarget), if any. One
+// without stays local and is skipped, so it never holds up the newer ones.
 async function sweep(now, p, currentSessionId) {
     const sessions = await listSessions();
-    const [id] = pendingUploads(sessions, {now, currentSessionId, since: p.logUploadSince});
-    if (id === undefined) {
+    let s = null, target = null;
+    for (const id of pendingUploads(sessions, {now, currentSessionId, since: p.logUploadSince})) {
+        s = sessions.find(x => x.sessionId === id);
+        target = s ? sessionTarget(s.meta) : null;
+        if (target) {
+            break;
+        }
+    }
+    if (!target) {
         return;
     }
-    const s = sessions.find(x => x.sessionId === id);
-    const slug = sessionSlug(s.meta, p, plan);
-    if (!slug) {
-        return;    // no team known yet: nothing to file the recording under
-    }
-    const res = await uploadSession(id, {url: p.serverUrl, slug, athleteId: s.meta.selfId ?? selfId, now});
+    const res = await uploadSession(s.sessionId, {url: p.serverUrl, slug: target.slug, circle: target.circle,
+                                                  athleteId: s.meta.selfId ?? selfId, now});
     if (!res.ok) {
         logUploadError(res.error, res.cause);
     }
@@ -771,96 +823,380 @@ async function sweep(now, p, currentSessionId) {
 
 // ---------- plan server ----------
 
-// One poll step: only the poll lease owner asks, at most every POLL_MS (shared through
-// serverCheckedAt, so a window taking the lease over does not ask again right away).
-function pollStep(now) {
-    const {act, write} = pollLeaseStep(readJson(POLL_LEASE_KEY), ME, now);
-    if (write) {
-        writeJson(POLL_LEASE_KEY, write);
+// What the Info plan line needs besides the plan: the number of ticked clubs, the active server
+// plan's club and the pending hint. Read again when the library, the clubs or the pending answer
+// change (refreshInfo), not on every render.
+function refreshInfo() {
+    try {
+        const clubs = readClubs(serverBase(prefs.serverUrl));
+        const e = activeEntry(readLibrary());
+        const joined = joinedIds(clubs);
+        info = {joined: joined.length, club: e?.source === 'server' ? e.circleName ?? null : null,
+                hint: readPending()?.hint ?? null};
+        joinedSeen = joined.join(',');
+    } catch(e) {
+        console.error('Paceline: reading the clubs failed', e);
     }
-    const p = readPrefs();
-    // In the event, without a plan or after a failed check, ask every 10 s instead of every minute.
-    const every = pollEvery({inEvent: !!eventGate() && gate.open, hasPlan: !!plan, error: p.serverError});
-    if (!act || polling || !p.serverOn || muted() || !pollDue(p.serverCheckedAt, now, every)) {
+}
+
+
+function setPrefs(changes) {
+    prefs = writePrefs(changes);    // the storage event only reaches the other windows
+    return prefs;
+}
+
+
+function nearbyIds(now) {
+    return currentNearby(now).map(x => x?.athleteId).filter(id => id !== null && id !== undefined).map(String);
+}
+
+
+// Deactivates the active plan when `which(entry)` says so.
+function deactivate(which) {
+    const lib = readLibrary();
+    const e = activeEntry(lib);
+    if (!e || !which(e)) {
         return;
     }
-    const url = planUrl({url: p.serverUrl, team: p.serverTeam, selfId});
-    if (!url) {
-        if (!serverBase(p.serverUrl)) {
-            writePrefs({serverError: 'badurl', serverCheckedAt: now});
+    writeLibrary({...lib, active: null});
+    if (e.source === 'server') {
+        setPrefs({serverEtag: null, serverSig: null, serverLabel: null, serverClub: null});
+    }
+    loadPlan();
+    render();
+}
+
+
+// Carries out serverDecision's verdict on `record` (choosePlan's choice) for the event `key`.
+function applyDecision({action, bind}, record, key, now) {
+    if (action === 'take') {
+        let entry = null;
+        try {
+            entry = recordEntry(record, {now, eventKey: key});
+        } catch(e) {
+            console.error('Paceline: unusable server plan', e);
         }
-        return;    // no team name and no athlete id yet: ask once Zwift tells who I am
+        if (!entry) {
+            setPrefs({serverError: 'invalid'});
+            return;
+        }
+        const lib = entryUpdate(readLibrary(), entry);
+        if (lib) {
+            writeLibrary(lib);
+            loadPlan();
+            render();
+        }
+    } else if (action === 'drop') {
+        // A server plan goes; so does a file plan that has ended (it no longer overrides the server).
+        deactivate(e => e.source === 'server' || fileEnded(e, {now, serverOn: true}));
+        planFromEvent = false;
+        return;
+    }
+    if (action === 'take' || action === 'same') {
+        planFromEvent = true;
+        if (prefs.serverEtag !== record.etag) {
+            setPrefs({serverEtag: record.etag ?? null, serverSig: record.sig ?? null, serverLabel: record.label ?? null,
+                      serverClub: record.circle?.name ?? null});
+        }
+        if (bind) {
+            writeLock({state: 'bound', circle: record.circle.id, slug: record.slug, eventKey: key});
+            // The lock binds after my roll-off (the plan came late): the recording running now
+            // goes up under this team, not under the empty lock's null that roll-off gave it.
+            retarget(readRecState(), {slug: record.slug, circle: record.circle.id});
+        }
+    }
+}
+
+
+// serverDecision for choosePlan's result against the stored lock (of this event), the file plan
+// and the active server plan; carried out unless `only` names other actions.
+function decide(choice, key, now, only = null) {
+    const lib = readLibrary();
+    const e = activeEntry(lib);
+    const dec = serverDecision({
+        record: choice.record, waiting: choice.waiting, lock: lockFor(readLock(), key),
+        fileActive: fileActive(lib, {now, serverOn: true}), activeEtag: e?.source === 'server' ? e.etag ?? null : null,
+    });
+    if (!only || only.includes(dec.action)) {
+        applyDecision(dec, choice.record, key, now);
+    }
+}
+
+
+// A new event (or this window took the poll lease mid-event): a server plan of another event goes,
+// and so does a file plan that has ended (dropsAtEventBegin); so do a lock and an answer left from
+// one, and the check goes at once.
+function eventBegins(key, now) {
+    evKey = key;
+    planFromEvent = false;
+    deactivate(e => dropsAtEventBegin(e, {key, now}));
+    const lock = readLock();
+    if (lock && !lockFor(lock, key)) {
+        writeLock(null);
+    }
+    const changes = {serverCheckedAt: null};
+    const pend = readPending();
+    if (pend && pend.eventKey !== key) {
+        writePending(null);
+        Object.assign(changes, {serverFits: null, serverOpensAt: null, serverOpensLabel: null});
+    }
+    setPrefs(changes);
+    refreshInfo();
+}
+
+
+// The event is over (the gate closed): no lock, no pending answer, the hint was shown, no status
+// that only meant this race, and a file plan loaded by the time the event was last seen (`seenAt`)
+// ends; one loaded later (the gate closed late, after a gap in the data) stays.
+function eventOver(now, seenAt) {
+    writeLock(null);
+    const pend = readPending();
+    if (pend?.hint) {
+        const clubs = readClubs(serverBase(prefs.serverUrl));
+        const next = markHinted(clubs, pend.hint.id, now);
+        if (next !== clubs) {
+            writeClubs(next);
+        }
+    }
+    writePending(null);
+    setPrefs(eventOverStatus(readPrefs()));
+    const lib = readLibrary();
+    if (endsAtGateClose(activeEntry(lib), seenAt)) {
+        writeLibrary(endFilePlan(lib, now));
+        loadPlan();
+        render();
+    }
+    evKey = null;
+    roll = null;
+    planFromEvent = false;
+    refreshInfo();
+}
+
+
+// My roll-off: the pending answer's plan by the roll-off pen rule, then the lock binds to the
+// active server plan (empty without one, or with a file plan), and the recording running now gets
+// its final upload target from the new lock (spec §7.7), null (stays local) included.
+function rollOff(key, now) {
+    decide(choosePlan(pendingFor(readPending(), key), {nearbyIds: nearbyIds(now), rolledOff: true}), key, now);
+    const lib = readLibrary();
+    const lock = {...lockAtRollOff(activeEntry(lib), {fileActive: fileActive(lib, {now, serverOn: true})}), eventKey: key};
+    writeLock(lock);
+    const target = rideTarget({lock, entry: activeEntry(lib), plan, lib,
+                               joined: joinedIds(readClubs(serverBase(prefs.serverUrl))), eventKey: key});
+    retarget(readRecState(), target);
+}
+
+
+// Files the recording running now under `target` ({slug, circle}, or null: it stays local, so a
+// start target from last event's plan never survives). Nothing without a recording. The recorder
+// may be another window: the row is changed in the database. When this window recorded it and its row is not stored yet, the meta
+// about to be stored gets the target too, and the change waits for that write.
+function retarget(rec, target) {
+    if (!rec.recording || !rec.sessionId) {
+        return;
+    }
+    const fields = {slug: target?.slug ?? null, circle: target?.circle ?? null};
+    if (pendingMeta && pendingMeta.sessionId === rec.sessionId) {
+        pendingMeta.meta = {...pendingMeta.meta, ...fields};
+    }
+    const gate = metaGate.sessionId === rec.sessionId && metaGate.ready ? metaGate.ready : Promise.resolve();
+    gate.catch(() => {})
+        .then(() => markUpload(rec.sessionId, fields))
+        .catch(logDb('filing the recording under its team'));
+}
+
+
+// The poll lease owner's step (spec §7.1-§7.5): event begin and end, roll-off and lock, the pen
+// rule while several clubs' plans fit, and the check when due. Never in the demo, never with the
+// plan server off.
+function serverTick(now) {
+    const list = currentNearby(now);
+    // Without fresh data of mine the gate stays as it is (gateEv), up to EVENT_LOST_MS: a gap
+    // mid-race never ends the ride, a rider who is gone ends it.
+    const summary = gateEv(list, eventOf(list, now), {gate: rideGate, now});
+    const ev = inEventOf(summary, {tttOnly: prefs.tttOnly});
+    const wasOpen = rideGate.open;
+    const lastSeen = rideGate.seenAt;    // the old event's, before this step sees a new one
+    rideGate = gateStep(rideGate, {now, ev: summary, any: !prefs.tttOnly});
+    if (wasOpen && !rideGate.open) {
+        eventOver(now, rideGate.seenAt);
+    }
+    const change = eventChange(evKey, ev);
+    if (change.over) {
+        eventOver(now, lastSeen);    // the old event was never ended (held through a gap)
+    }
+    if (change.begin) {
+        eventBegins(ev.key, now);
+    }
+    if (ev) {
+        const time = selfEntry(list)?.state?.time;
+        if (typeof time === 'number' && Number.isFinite(time)) {
+            const r = rollStep(roll, {key: ev.key, time});
+            roll = r.state;
+            if (r.midRide && !lockFor(readLock(), ev.key)) {
+                writeLock({state: 'empty', eventKey: ev.key});
+            }
+            if (r.rolledOff) {
+                rollOff(ev.key, now);
+            }
+        }
+        if (!roll?.rolled && prefs.serverFits >= 2) {
+            // Before my roll-off the pen rule picks again on every step while several plans fit.
+            const choice = choosePlan(pendingFor(readPending(), ev.key), {nearbyIds: nearbyIds(now), rolledOff: false});
+            if (choice.fits >= 2) {
+                decide(choice, ev.key, now, ['take']);
+            }
+        }
+    }
+    const p = readPrefs();
+    if (!ev || selfId === null || polling || !clubsReady ||
+        !pollDue(p.serverCheckedAt, now, pollEvery({inEvent: true, hasPlan: planFromEvent, error: p.serverError}))) {
+        return;
+    }
+    if (!serverBase(p.serverUrl)) {
+        setPrefs({serverError: 'badurl', serverCheckedAt: now});
+        return;
     }
     polling = true;
-    pollServer(url, p, now).catch(e => console.error('Paceline: plan server check failed', e))
+    checkServer(ev, p, now).catch(e => console.error('Paceline: plan server check failed', e))
         .finally(() => {
             polling = false;
         });
 }
 
 
-async function pollServer(url, p, now) {
-    writePrefs({serverCheckedAt: now});
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
-    let res;
-    let rec = null;
-    try {
-        res = await fetch(url, {
-            cache: 'no-store',
-            headers: p.serverEtag ? {'If-None-Match': p.serverEtag} : {},
-            signal: ctl.signal,
-        });
-        if (res.status === 200) {
-            rec = await res.json();
-        }
-    } catch(e) {
-        // No answer, or a timeout while reading it: not reachable. A broken body: invalid.
-        res = res && !ctl.signal.aborted ? {status: 'invalid'} : null;
-    } finally {
-        clearTimeout(timer);
+// One step of this window: the poll lease, and serverTick while it holds it. A step without
+// serverTick forgets this window's event state, so it starts over (eventBegins, roll-off seen as
+// mid-ride) when the window takes the lease again, instead of resuming stale: a stale roll-off would
+// overwrite a bound lock, a stale open gate could close later and end a fresh file plan.
+function serverStep(now) {
+    const {act, write} = pollLeaseStep(readJson(POLL_LEASE_KEY), ME, now);
+    if (write) {
+        writeJson(POLL_LEASE_KEY, write);
     }
-    // The rider changed server or team while this request ran: its answer no longer counts.
-    const cur = readPrefs();
-    if (cur.serverUrl !== p.serverUrl || cur.serverTeam !== p.serverTeam || !cur.serverOn) {
-        return;
-    }
-    const at = Date.now();
-    if (!res) {
-        writePrefs({serverError: 'offline'});
-    } else if (res.status === 304) {
-        writePrefs({serverOkAt: at, serverError: null});
-    } else if (res.status === 404) {
-        writePrefs({serverError: 'notfound'});
-    } else if (res.status !== 200) {
-        writePrefs({serverError: res.status === 'invalid' ? 'invalid' : 'http'});
+    pollOwner = act;
+    if (serverRuns({act, demo: demoKind, serverOn: prefs.serverOn})) {
+        serverTick(now);
     } else {
-        takeServerPlan(rec, res.headers.get('ETag'), cur, at);
+        rideGate = initialGate();
+        roll = null;
+        evKey = null;
+        planFromEvent = false;
     }
 }
 
 
-// A 200 answer: the record's etag (content-aware: a renamed rider changes it, the plan code not)
-// decides whether the plan changed. A changed plan is stored and activated at once.
-function takeServerPlan(rec, headerEtag, cur, at) {
-    const etag = rec && typeof rec.etag === 'string' && rec.etag ? rec.etag : headerEtag || null;
-    if (etag !== null && etag === cur.serverEtag) {
-        writePrefs({serverOkAt: at, serverError: null});
+// The in-event check (spec §6.1). Errors keep the plan.
+async function checkServer(ev, p, now) {
+    const base = serverBase(p.serverUrl);
+    const clubs = readClubs(base);
+    const joined = joinedIds(clubs);
+    const codes = codesToSend(clubs);
+    const args = {url: p.serverUrl, selfId, mod: VERSION, joined, sig: plan?.sig ?? null};
+    const url = checkUrl({...args, start: ev.start, eventId: ev.eventId});
+    if (!url || url === checkUrl(args)) {
+        return;    // no Zwift ID yet, or no usable start and event id: nothing goes out as in-event
+    }
+    setPrefs({serverCheckedAt: now});
+    const req = {url: p.serverUrl, base, eventKey: ev.key, clubs, joined, codes};
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+    let res = null;
+    let answer = null;
+    let error = null;
+    try {
+        res = await fetch(url, {cache: 'no-store', headers: checkHeaders(codes), signal: ctl.signal});
+        if (res.status === 200) {
+            answer = await res.json();
+        }
+    } catch(e) {
+        // No answer, or a timeout while reading it: not reachable. A broken body: invalid.
+        error = res && !ctl.signal.aborted ? 'invalid' : 'offline';
+    } finally {
+        clearTimeout(timer);
+    }
+    // The rider changed the server or switched it off, or the event changed: the answer no longer counts.
+    const cur = readPrefs();
+    if (cur.serverUrl !== p.serverUrl || !cur.serverOn || evKey !== ev.key || demoKind) {
         return;
     }
-    const got = serverEntry(rec, at);
-    if (!got) {
-        writePrefs({serverError: 'invalid'});
+    if (!error && res.status !== 200) {
+        error = 'http';    // a 429 for wrong codes too
+    }
+    if (!error && (!answer || typeof answer !== 'object' || Array.isArray(answer))) {
+        error = 'invalid';
+    }
+    if (error) {
+        setPrefs({serverError: error});
         return;
     }
-    const lib = serverPlanUpdate(readLibrary(), rec, at);
-    if (lib) {
-        writeLibrary(lib);
-        loadPlan();    // the storage event only reaches the other windows
-        render();
+    onAnswer(answer, req, Date.now());
+}
+
+
+// An in-event answer: clubs first (lost update, auto-join), then the status, the pending answer
+// and the plan (spec §7.2-§7.5).
+function onAnswer(answer, req, now) {
+    const fresh = readClubs(req.base);
+    if (!sameJoined(fresh, req.clubs) || !sameCodes(fresh, req.clubs)) {
+        // Ticked or coded while the request ran: keep the clubs part, drop the plans, ask again.
+        writeClubs(applyAnswer(fresh, answer, now, req.codes));
+        setPrefs({serverCheckedAt: null});
+        refreshInfo();
+        return;
     }
-    writePrefs({serverEtag: etag, serverTeamName: got.entry.team || got.plan.team || null,
-                serverSig: got.plan.sig, serverOkAt: at, serverError: null});
+    const near = nearbyIds(now);
+    const rolledOff = !!roll?.rolled;
+    const res = answerClubs(fresh, answer, {now, inEvent: true, nearbyIds: near, rolledOff, sentCodes: req.codes});
+    if (JSON.stringify(res.clubs) !== JSON.stringify(fresh)) {
+        writeClubs(res.clubs);
+    }
+    if (res.autoJoined !== null) {
+        setPrefs({serverCheckedAt: null});
+        refreshInfo();
+        return;
+    }
+    const plans = Array.isArray(answer.plans) ? answer.plans : [];
+    setPrefs({serverNotice: typeof answer.notice === 'string' ? answer.notice : null, serverOkAt: now,
+              serverError: plans.length ? null : 'notfound'});
+    writePending({eventKey: req.eventKey, at: now, plans, hint: answerHint(answer, res.clubs)});
+    // Under a bound lock its own team's records come first (a new final applies at once).
+    const choice = chooseForLock(plans, lockFor(readLock(), req.eventKey), {nearbyIds: near, rolledOff});
+    setPrefs(choiceStatus(choice));
+    decide(choice, req.eventKey, now);
+    refreshInfo();
+}
+
+
+// Another window changed the clubs. The poll owner clears a lock whose club was unticked (and that
+// club's plan), and in an event a changed joined set is checked at once.
+function clubsChanged() {
+    const before = joinedSeen;
+    refreshInfo();
+    if (!pollOwner || demoKind || !prefs.serverOn) {
+        return;
+    }
+    const ids = joinedIds(readClubs(serverBase(prefs.serverUrl)));
+    const lock = readLock();
+    if (lock && lockAfterClubs(lock, ids) === null) {
+        writeLock(null);
+        deactivate(e => e.source === 'server' && e.circleId === lock.circle);
+    }
+    if (evKey !== null && ids.join(',') !== before) {
+        setPrefs({serverCheckedAt: null});
+    }
+}
+
+
+// Another window changed the library. With no plan active (Remove), in an event, the poll owner
+// activates the pending plan of this event's latest answer, subject to the lock.
+function libraryChanged() {
+    if (!pollOwner || demoKind || !prefs.serverOn || evKey === null || !rideGate.open || activeEntry(readLibrary())) {
+        return;
+    }
+    const now = Date.now();
+    decide(chooseForLock(pendingFor(readPending(), evKey), lockFor(readLock(), evKey),
+                         {nearbyIds: nearbyIds(now), rolledOff: !!roll?.rolled}), evKey, now);
 }
 
 
@@ -1038,6 +1374,29 @@ function renderRotation(now) {
 }
 
 
+function hhmm(ms) {
+    return new Date(ms).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+
+// "Rollers fast · plan RE5CFQ" (with the club when two or more are ticked); without a plan "Plan
+// opens 19:00 · Rollers fast", the hint for an unticked club, or the prompt to load one.
+function planLine() {
+    if (plan) {
+        return info.joined >= 2 && info.club ?
+            fmt('planLineClub', {label: plan.team, sig: plan.sig, club: info.club}) :
+            fmt('planLine', {label: plan.team, sig: plan.sig});
+    }
+    if (prefs.serverOn && Number.isFinite(prefs.serverOpensAt)) {
+        return fmt('opensLine', {time: hhmm(prefs.serverOpensAt), label: prefs.serverOpensLabel ?? ''});
+    }
+    if (prefs.serverOn && info.hint) {
+        return fmt('hintLine', {club: info.hint.name});
+    }
+    return S.noPlanLine;
+}
+
+
 function renderInfo(now) {
     document.documentElement.classList.toggle('pl-show-next', prefs.showNext);
     document.documentElement.classList.toggle('pl-table-front', tableFront());
@@ -1049,7 +1408,7 @@ function renderInfo(now) {
         fitInfo();
         return;
     }
-    setText($('#pl-line-plan'), plan ? fmt('planLine', {team: plan.team, sig: plan.sig}) : S.noPlanLine);
+    setText($('#pl-line-plan'), planLine());
     // Without a self id the you-line says "waiting for Zwift" (even with no plan) and the
     // recorder line is hidden, since nothing records then.
     const you = $('#pl-line-you');
@@ -1078,9 +1437,14 @@ function renderInfo(now) {
         setValue(yc, null);
     }
     const recEl = $('#pl-line-rec');
-    const rec = demoKind === 'pref' ? {text: fmt('demoLine', {time: mmss(prefs.demoUntil - now)}), live: false} :
+    let rec = demoKind === 'pref' ? {text: fmt('demoLine', {time: mmss(prefs.demoUntil - now)}), live: false} :
         selfId === null ? {text: '', live: false} : recText(now);
-    recEl.hidden = selfId === null && demoKind !== 'pref';
+    // The server's notice (an outdated Paceline) takes the line while nothing records.
+    const notice = !rec.live && demoKind !== 'pref' && prefs.serverOn && prefs.serverNotice;
+    if (notice) {
+        rec = {text: prefs.serverNotice, live: false};
+    }
+    recEl.hidden = !notice && selfId === null && demoKind !== 'pref';
     recEl.classList.toggle('pl-demo-on', demoKind === 'pref');
     recEl.classList.toggle('pl-rec-on', rec.live);
     setText(recEl, rec.text);
@@ -1315,9 +1679,10 @@ function renderAction(now) {
         renderRestRow(vanish ? {kind: 'blank'} : m, reason);
         return;
     }
-    if (!prefs.restInAction && windowOpen('rest', now)) {
-        // Only my pull: blank while resting, armed (READY) in its last seconds. Without an open
-        // Rest window the countdown shows here anyway, so it is never missing.
+    if (windowOpen('rest', now)) {
+        // An open Rest window has the countdown (user, 17 Nov 2026: no setting): here only my pull,
+        // blank while resting, armed (READY) in its last seconds. Without an open Rest window the
+        // countdown shows here, so it is never missing.
         m = pullOnlyModel(m, {watts: me?.watts});
     } else if (m.kind === 'rest' && m.next) {
         m = {...m, kind: 'armed'};
@@ -1406,21 +1771,31 @@ function renderRestRow(m, reason) {
     const standing = resting && !!m.standing;
     clockEl.classList.toggle('pl-standing', standing);
     // The same line carries a gap in the line (user, 13 Nov 2026): mine first (amber, I must close
-    // it), then the standing clock, then someone else's gap (dim, the puller deals with it).
+    // it), then the standing clock, then someone else's gap (dim, the puller deals with it). A gap
+    // that is closing comes after the standing clock too (green when mine or critical).
     // The early stage only when it is mine (close up before the draft is gone).
     const g0 = resting ? gapNow() : null;
     const g = g0 && (g0.level === 'full' || g0.mine) ? g0 : null;
     const over = $('#pl-act-over');
     // Amber when I must close it or the team needs the riders cut off; someone with riders to spare
-    // stays dim. A critical gap of someone else goes before the standing clock.
-    const urgent = !!g && (g.mine || g.critical);
+    // stays dim. A critical gap of someone else goes before the standing clock. Green instead of amber
+    // while the gap is closing (user, 17 Nov 2026: the rider behind closes it himself): then it is
+    // not urgent and ranks like someone else's gap, after the standing clock and a wheel change.
+    const urgent = !!g && (g.mine || g.critical) && !g.closing;
     // The wheel to drop in behind at the start, or when it changes (user, 15 Nov 2026): kit colour
     // and name, amber when it is not the plan's (that rider is dropped). After my own and critical
     // gaps; the start cue also after the standing clock and other gaps, a change goes before them.
-    const cv = !urgent && (resting || (m.kind === 'none' && reason === 'start')) ? cueView(cue, Date.now()) : null;
+    // A correction of the clock (clock.mjs): after my own and critical gaps, before the wheel and
+    // the standing clock; in READY only "READY off".
+    const ready0 = resting && (m.next || m.timeS === 0);
+    const corr = !urgent && resting && m.correction && (!ready0 || m.correction.kind === 'readyOff') ? m.correction : null;
+    const cv = !urgent && !corr && (resting || (m.kind === 'none' && reason === 'start')) ? cueView(cue, Date.now()) : null;
     const cueId = cv && (cv.kind === 'change' || (!standing && !g)) ? cv.id : null;
     const cueRider = cueId ? plan?.riders.find(r => r.id === cueId) : null;
     over.classList.toggle('pl-gap-warn', urgent);
+    over.classList.toggle('pl-corr', !!corr);
+    over.classList.toggle('pl-corr-sooner', !!corr && (corr.deltaS < 0 || corr.kind === 'readyOff'));
+    over.classList.toggle('pl-gap-closing', !!g && (g.mine || g.critical) && g.closing && !cueRider && !standing && !corr);
     over.classList.toggle('pl-cue', !!cueRider);
     over.classList.toggle('pl-cue-swap', !!cueRider && cueId !== plannedWheel(plan, selfId)?.id);
     show($('#pl-act-overlbl'), !!cueRider);
@@ -1433,9 +1808,9 @@ function renderRestRow(m, reason) {
             linePlace(plan, {pullerId: rot.front.puller, selfId, id: cueId, presentIds: cue.kind === 'start' ? groupIds() : cueGroupIds(Date.now())}) : null;
         cueText = firstName(cueId).toUpperCase() + (place ? ` ${fmt('place', {n: place})}` : '');
     }
-    setText($('#pl-act-overtxt'), cueRider ? cueText :
-        g?.mine ? fmt('gapMe', {gap: gapAmount(g)}) : urgent ? gapInfo(g) :
-        standing ? `+${m.overS}` : g ? gapInfo(g) : '');
+    setText($('#pl-act-overtxt'), corr ? correctionText(corr) : cueRider ? cueText :
+        urgent && g.mine ? fmt('gapMe', {gap: gapAmount(g)}) : urgent ? gapInfo(g) :
+        standing ? `+${m.overS}` : g?.mine ? fmt('gapMe', {gap: gapAmount(g)}) : g ? gapInfo(g) : '');
     show(clockEl, resting);
     show(placeEl, resting && m.place !== null);
     if (!resting) {
@@ -1448,8 +1823,42 @@ function renderRestRow(m, reason) {
     setText($('#pl-act-cnum'), (standing ? '\u2265' : '') + (secs ? text.slice(0, -S.secUnit.length) : text));
     setText($('#pl-act-cunit'), secs ? S.secUnit : '');
     clockEl.classList.toggle('pl-warn', !!m.warn);
+    // After a snap (clock.mjs) the new number fades in once and its explanation with it: no
+    // movement, no colour, no values in between (expert panel, 18 Nov 2026).
+    if (m.fadeAt != null && m.fadeAt !== fadedAt) {
+        fadedAt = m.fadeAt;
+        if (!ready) {
+            fadeIn($('#pl-act-cnum'), 0.25, 400);
+        }
+        if (corr) {
+            fadeIn(over, 0, 200);
+        }
+    }
     if (m.place !== null) {
         setText(placeEl, fmt('place', {n: m.place}));
+    }
+}
+
+
+// The clock's correction for the rest line: "DANA out −40s", "DANA back +1:10", "−25s", "READY off +36s".
+function correctionText(c) {
+    const delta = deltaText(c.deltaS);
+    if (c.kind === 'readyOff') {
+        return fmt('corrReadyOff', {delta});
+    }
+    if (c.kind === 'out' || c.kind === 'back') {
+        const name = c.ids.map(id => firstName(id).toUpperCase()).join(', ');
+        return fmt(c.kind === 'out' ? 'corrOut' : 'corrBack', {name, delta});
+    }
+    return delta;
+}
+
+
+// One fade-in of an element's opacity from `from` (the Web Animations API; nothing where it is
+// missing).
+function fadeIn(el, from, ms) {
+    if (el && typeof el.animate === 'function') {
+        el.animate([{opacity: from}, {opacity: 1}], {duration: ms, easing: 'ease-out'});
     }
 }
 
@@ -1465,7 +1874,8 @@ function gapInfo(g) {
 
 // The gap band in place of the power bar during my pull (user, 13 Nov 2026): red with a white edge
 // when the team needs the riders cut off (always the group behind me), amber for a rider or a split
-// the team can spare. Ease off; the target does not count then.
+// the team can spare; green while it is closing (user, 17 Nov 2026). Ease off; the target does not
+// count then.
 function renderGapBand(on, g) {
     const band = $('#pl-act-gap');
     $('#pl-act-bar').classList.toggle('pl-gapped', on);
@@ -1475,6 +1885,7 @@ function renderGapBand(on, g) {
     }
     band.dataset.kind = g.kind;
     band.dataset.critical = g.critical ? '1' : '';
+    band.dataset.closing = g.closing ? '1' : '';
     const gap = gapAmount(g);
     setText(band, g.kind === 'group' ? fmt('gapGroup', {gap}) :
         g.kind === 'one' ? fmt('gapOne', {name: firstName(g.id).toUpperCase(), gap}) :
@@ -1484,10 +1895,13 @@ function renderGapBand(on, g) {
 
 // The early stage during my pull (user, 13 Nov 2026): the bar stays, with an amber edge, and the
 // label under my power now says how far back it is ("▼ 9 m"). Short, so the middle never widens.
+// While the gap is closing (user, 17 Nov 2026) the bar keeps its normal look (a green edge would melt
+// into its green zone) and only the label turns green.
 function renderGapEarly(on, g) {
-    $('#pl-act-bar').classList.toggle('pl-gap-early', on);
+    $('#pl-act-bar').classList.toggle('pl-gap-early', on && !g.closing);
     const label = $('#pl-act-nowlbl');
     label.classList.toggle('pl-gap-warn', on);
+    label.classList.toggle('pl-gap-closing', on && g.closing);
     setText(label, on ? fmt('gapEarly', {m: g.m}) : S.nowLabel);
 }
 
@@ -1501,13 +1915,16 @@ function renderTriple(m, me, now) {
     show($('#pl-act-tri'), true);
     const weight = pickWeight(liveWeight(), me?.weight);
     const hasTarget = m.watts !== null && m.watts !== undefined;
-    const target = hasTarget ? formatTarget(m.watts, weight, prefs.targetUnit) : null;
+    // No weight at all: the target and the "now" number are both watts. With the plan's pull_wkg
+    // the target is it (riderTarget), and the "now" number my live W/kg (live watts / weight).
+    const unit = weight === null ? 'W' : prefs.targetUnit;
+    const target = hasTarget ? riderTarget(me, weight, unit) : null;
     const wnum = $('#pl-act-wnum');
     setText(wnum, target ? target.value : S.noRotation);
     wnum.classList.toggle('pl-dim', !target);
     setText($('#pl-act-wunit'), target ? target.unit : '');
     const nowW = markerPower(marker, now);
-    const nowText = nowValue(nowW, weight, target ? prefs.targetUnit : 'W');
+    const nowText = nowValue(nowW, weight, target ? unit : 'W');
     const nowEl = $('#pl-act-now');
     setText(nowEl, nowText ?? S.noRotation);
     const zone = m.kind === 'pull' && nowText !== null ? m.marker?.zone ?? null : null;
@@ -1559,8 +1976,13 @@ function tick() {
     lastStepAt = Date.now();
     aliveStep(lastStepAt);
     try {
-        const ev = eventOf(currentNearby(lastStepAt), lastStepAt);
-        gate = gateStep(gate, {now: lastStepAt, ev});
+        const list = currentNearby(lastStepAt);
+        const ev = eventOf(list, lastStepAt);
+        // A gap in my data holds the gate (gateEv) up to EVENT_LOST_MS: a Sauce dropout mid-race
+        // neither mutes the windows nor splits the recording.
+        const seen = gateEv(list, ev, {gate, now: lastStepAt});
+        gate = gateStep(gate, {now: lastStepAt, ev: seen});
+        gateSg = isTtt(seen) ? seen.sgId : undefined;
         terrainStep(ev, lastStepAt);
     } catch(e) {
         console.error('Paceline: event check failed', e);
@@ -1576,7 +1998,7 @@ function tick() {
         console.error('Paceline: recorder step failed', e);
     }
     try {
-        pollStep(lastStepAt);
+        serverStep(lastStepAt);
     } catch(e) {
         console.error('Paceline: plan server step failed', e);
     }
@@ -1680,6 +2102,20 @@ export async function main(m = 'info') {
     loadPlan();
     onLibraryChange(() => {
         loadPlan();
+        libraryChanged();
+        render();
+    });
+    onClubsChange(() => {
+        clubsChanged();
+        render();
+    });
+    // The table shared by all window profiles comes first: no plan-server check before it is merged,
+    // or a fresh profile's empty table could auto-join before the shared ticks arrive.
+    initClubs(Common, serverBase(prefs.serverUrl)).then(() => {
+        clubsReady = true;
+    });
+    onKeyChange(PENDING_KEY, () => {
+        refreshInfo();
         render();
     });
     // The Info window's text follows the window size (fitInfo runs when the size changed), and is
@@ -1691,6 +2127,7 @@ export async function main(m = 'info') {
     });
     onPrefsChange(p => {
         prefs = p;
+        refreshInfo();    // another server has another Clubs table
         syncDemo(Date.now());
         render();
     });

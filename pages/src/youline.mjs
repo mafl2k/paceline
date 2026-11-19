@@ -1,8 +1,8 @@
 // The "who am I in this plan" line, shared by the overlay and the settings window:
-// "You are Dario · #4 · 60s@4.1W/kg". The target is in the unit set (unit: 'Wkg' | 'W'; W/kg
-// falls back to watts without a weight).
+// "You are Dario · #4 · 60s@4.1W/kg". The target is in the unit set (unit: 'Wkg' | 'W'; W/kg is
+// the plan's pull_wkg when it has one, else watts / weight, and falls back to watts without a weight).
 import {findMe} from './engine/plan.mjs';
-import {pickWeight} from './engine/display.mjs';
+import {riderTarget} from './engine/display.mjs';
 import {S, fmt} from './strings.mjs';
 
 
@@ -29,7 +29,8 @@ export function youParts(plan, selfId, {weight = null, unit = 'Wkg', bare = fals
             position: me.position,
         };
     }
-    return {head: me.role === 'bench' ? S.bench : S.notInPlan, pull: '', position: null};
+    // only in the planner's roster (role 'bench', the club's rider pool): the same as not in the plan
+    return {head: S.notInPlan, pull: '', position: null};
 }
 
 
@@ -46,22 +47,19 @@ export function riderPull(rider, weight = null, unit = 'Wkg', {bare = false} = {
 // {secs: '60s', target: '4.4'}, target without its unit, null without the plan's watts.
 export function riderPullParts(rider, weight = null, unit = 'Wkg') {
     const secs = fmt('pullOnly', {pullS: rider.pullS});
-    if (!Number.isFinite(rider.watts)) {
-        return {secs, target: null};
-    }
-    const kg = pickWeight(weight, rider.weight);
-    return {secs, target: unit !== 'W' && kg !== null ? (rider.watts / kg).toFixed(1) : String(rider.watts)};
+    const t = riderTarget(rider, weight, unit);
+    return {secs, target: t ? t.value : null};
 }
 
 
-// One number per the unit setting (user, 13 Nov 2026): W/kg, or watts with 'W' or without a weight.
+// One number per the unit setting (user, 13 Nov 2026): W/kg (the plan's pull_wkg when it has one,
+// else watts / weight), or watts with 'W' or without a weight (riderTarget).
 function pullTarget(rider, weight, unit, bare = false) {
-    if (!Number.isFinite(rider.watts)) {
+    const t = riderTarget(rider, weight, unit);
+    if (!t) {
         return fmt('pullOnly', {pullS: rider.pullS});
     }
-    const kg = pickWeight(weight, rider.weight);
-    const wkg = unit !== 'W' && kg !== null;
-    const value = wkg ? (rider.watts / kg).toFixed(1) : String(rider.watts);
-    const target = bare ? value : wkg ? fmt('wkg', {wkg: value}) : fmt('watts', {watts: value});
+    const wkg = t.unit === S.wkgUnit;
+    const target = bare ? t.value : wkg ? fmt('wkg', {wkg: t.value}) : fmt('watts', {watts: t.value});
     return fmt('pullAt', {pullS: rider.pullS, target});
 }

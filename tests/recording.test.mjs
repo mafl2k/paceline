@@ -63,12 +63,52 @@ test('makeTick row shape and missing self', () => {
     const t = R.makeTick([e(1, {gap: 3.5, gapDistance: 40, isGapEst: true, eventSubgroupId: 77})], new Set(['1']), 5);
     assert.equal(t.ts, 5); assert.equal(t.wt, null); assert.equal(t.selfId, null); assert.equal(t.watchingId, null);
     assert.deepEqual(t.riders[0], {
-        id: '1', self: false, watching: false, age: 500, gap: 3.5, gapDistance: 40, isGapEst: true, eventSubgroupId: 77,
+        id: '1', self: false, watching: false, inPlan: true, age: 500, gap: 3.5, gapDistance: 40, isGapEst: true, eventSubgroupId: 77,
         sgRaw: 0, time: 0, eventPosition: undefined, eventParticipants: undefined,
         power: 250, draft: 50, speed: 43, distance: 1000, eventDistance: 900, worldTime: 1e9, heartrate: 150, cadence: 90,
         grade: 0.02, altitude: 35.5, x: 100, y: 200, roadId: 12, reverse: true, courseId: 6,
     });
 });
+
+// 17 Nov 2026 (ZRL): the plan changed mid-race; the upload kept only the head plan's riders. A row
+// of a rider in the current plan carries inPlan, so the upload keeps it whatever the head plan says.
+test('makeTick marks riders of the current plan (starters and bench) with inPlan, not watched or fallback riders', () => {
+    const me = e(7, {self: true, eventSubgroupId: 55});
+    // 1 starts, 3 is on the bench, 7 (me) starts too; 9 is watched
+    const ids = R.planIds({riders: [{id: '1'}, {id: '7'}], bench: [{id: '3'}]});
+    const t = R.makeTick([me, e(1), e(3), e(8), e(9, {watching: true})], ids, 5);
+    const flags = t => Object.fromEntries(t.riders.map(r => [r.id, Object.hasOwn(r, 'inPlan') ? r.inPlan : 'none']));
+    assert.deepEqual(flags(t), {1: true, 3: true, 7: true, 9: 'none'});
+    // with one plan rider near, the fallback brings in 4 of my subgroup: no flag; me outside the plan: no flag
+    const few = R.makeTick([me, e(1), e(4, {gapDistance: 20, eventSubgroupId: 55}), e(9, {watching: true})],
+        new Set(['1']), 5, {fallback: true});
+    assert.deepEqual(flags(few), {1: true, 4: 'none', 7: 'none', 9: 'none'});
+});
+
+test('detPlanOnly: the det ids name only riders of the current plan (starters and bench) or me', () => {
+    const ids = R.planIds({riders: [{id: '1'}, {id: '7'}], bench: [{id: '3'}]});
+    const det = {planSig: 'ABC', puller: '1', since: 5, frontId: '3', self: 'start', view: 'rest', wheel: '9',
+                 wheelObs: '8', wheelCue: '9', place: 2, chainSize: 4,
+                 gap: {kind: 'one', id: '8', m: 12, s: 1.1, n: 1, mine: false, behind: false, level: 'full', closing: false}};
+    const out = R.detPlanOnly(det, ids, '5');
+    assert.deepEqual(R.DET_ID_FIELDS.map(k => out[k]), ['1', '3', null, null, null], 'puller, frontId, wheel, wheelObs, wheelCue');
+    assert.deepEqual(out.gap, {...det.gap, id: null}, 'the gap keeps its numbers');
+    // everything else as it was, the input untouched
+    assert.deepEqual({...out, puller: 0, frontId: 0, wheel: 0, wheelObs: 0, wheelCue: 0, gap: 0},
+                     {...det, puller: 0, frontId: 0, wheel: 0, wheelObs: 0, wheelCue: 0, gap: 0});
+    assert.equal(det.wheel, '9');
+    assert.equal(det.gap.id, '8');
+    // me (not in the plan) stays; a plan rider's gap stays; numbers compare as strings
+    const mine = R.detPlanOnly({...det, puller: '5', wheelObs: 7, gap: {...det.gap, id: '3'}}, ids, '5');
+    assert.deepEqual([mine.puller, mine.wheelObs, mine.gap.id], ['5', 7, '3']);
+    // nulls and a missing gap stay; no plan: only me
+    assert.deepEqual(R.detPlanOnly({puller: null, frontId: undefined, gap: null}, ids, '5'),
+                     {puller: null, frontId: null, gap: null});
+    assert.deepEqual(R.detPlanOnly({puller: '1', frontId: '5'}, new Set(), '5'), {puller: null, frontId: '5'});
+    assert.deepEqual(R.detPlanOnly({puller: '5'}, new Set(), null), {puller: null});
+    assert.equal(R.detPlanOnly(null, ids, '5'), null);
+});
+
 
 test('selfSubgroupId: top-level id first, else the raw one, null outside events', () => {
     assert.equal(R.selfSubgroupId([e(1)]), null);
@@ -243,6 +283,21 @@ test('gateStep: open from my TTT subgroup until EVENT_GRACE_MS after it is gone'
 });
 
 
+test('gateStep: any event opens it when asked', () => {
+    const ride = {eventType: 'GROUP_RIDE', tags: [], name: 'Coffee ride', eventId: 7};
+    assert.equal(R.gateStep(R.initialGate(), {now: 0, ev: ride}).open, false);
+    let g = R.gateStep(R.initialGate(), {now: 1000, ev: ride, any: true});
+    assert.deepEqual(g, {open: true, seenAt: 1000});
+    g = R.gateStep(g, {now: 2000, ev: undefined, any: true});            // still asking Sauce
+    assert.equal(g.open, true);
+    g = R.gateStep(g, {now: 1000 + R.EVENT_GRACE_MS - 1, ev: null, any: true});
+    assert.equal(g.open, true);
+    g = R.gateStep(g, {now: 1000 + R.EVENT_GRACE_MS, ev: null, any: true});
+    assert.equal(g.open, false);
+    assert.equal(R.gateStep(R.initialGate(), {now: 0, ev: null, any: true}).open, false);
+});
+
+
 test('makeTick with fallback: riders of my event subgroup within FALLBACK_RANGE_M when the plan riders are missing', () => {
     const me = e(7, {self: true, eventSubgroupId: 55});
     const near = (id, gapDistance, sg = 55) => e(id, {gapDistance, eventSubgroupId: sg});
@@ -258,4 +313,183 @@ test('makeTick with fallback: riders of my event subgroup within FALLBACK_RANGE_
     const m = R.makeTick(many, new Set(), 5, {fallback: true});
     assert.equal(m.riders.length, R.FALLBACK_MAX + 1);
     assert.ok(m.riders.some(r => r.id === '100') && !m.riders.some(r => r.id === '129'));
+});
+
+
+test('gateEv: no fresh self entry means "still asking Sauce", so a data gap never closes the gate', () => {
+    const ttt = {eventType: 'TEAM_TIME_TRIAL', tags: [], eventId: 7, start: 1000};
+    const me = {self: true, athleteId: 1001, state: {eventSubgroupId: 55}};
+    assert.equal(R.gateEv([], null), undefined);              // stale nearby: currentNearby gives []
+    assert.equal(R.gateEv(null, null), undefined);
+    assert.equal(R.gateEv([{athleteId: 2002}], null), undefined);    // others, but not me
+    assert.equal(R.gateEv([me], null), null);                 // me, outside events: null
+    assert.equal(R.gateEv([me], ttt), ttt);
+    assert.equal(R.gateEv([me], undefined), undefined);       // me, Sauce still being asked
+    // Mid-race Zwift reconnects for a minute: the gate stays open and the race goes on.
+    let g = R.gateStep(R.initialGate(), {now: 0, ev: R.gateEv([me], ttt)});
+    for (let t = 1000; t <= 60000; t += 1000) {
+        g = R.gateStep(g, {now: t, ev: R.gateEv([], null)});
+    }
+    assert.deepEqual(g, {open: true, seenAt: 0, heldTo: 60000, shift: 59000});
+    g = R.gateStep(g, {now: 61000, ev: R.gateEv([me], ttt)});
+    assert.deepEqual(g, {open: true, seenAt: 61000});
+    // Back outside events with fresh data: the gate closes after the grace.
+    g = R.gateStep(g, {now: 61000 + R.EVENT_GRACE_MS, ev: R.gateEv([me], null)});
+    assert.equal(g.open, false);
+});
+
+
+test('EVENT_LOST_MS: longer than a dropout, longer than the gate grace', () => {
+    assert.equal(R.EVENT_LOST_MS, 30 * 60000);
+    assert.ok(R.EVENT_LOST_MS > R.EVENT_GRACE_MS && R.EVENT_LOST_MS > R.STOP_AFTER_MS);
+});
+
+
+test('gateEv: the hold ends after EVENT_LOST_MS without data of mine (the rider is gone)', () => {
+    const open = {open: true, seenAt: 1000};
+    assert.equal(R.gateEv([], null, {gate: open, now: 1000 + R.EVENT_LOST_MS - 1}), undefined);
+    assert.equal(R.gateEv([], null, {gate: open, now: 1000 + R.EVENT_LOST_MS}), null);
+    assert.equal(R.gateEv([], undefined, {gate: open, now: 1000 + R.EVENT_LOST_MS}), null);
+    assert.equal(R.gateEv([], null, {gate: {open: false, seenAt: 1000}, now: 1e9}), undefined);
+    const me = {self: true, athleteId: 1001};
+    const ttt = {eventType: 'TEAM_TIME_TRIAL', sgId: 55};
+    assert.equal(R.gateEv([me], ttt, {gate: open, now: 1e9}), ttt);    // fresh data decides
+    // Zwift quit mid-race, Sauce stays up: the gate closes once the rider is gone.
+    let g = R.gateStep(R.initialGate(), {now: 0, ev: ttt});
+    for (let t = 10000; t < R.EVENT_LOST_MS; t += 10000) {
+        g = R.gateStep(g, {now: t, ev: R.gateEv([], null, {gate: g, now: t})});
+        assert.equal(g.open, true, String(t));
+    }
+    g = R.gateStep(g, {now: R.EVENT_LOST_MS, ev: R.gateEv([], null, {gate: g, now: R.EVENT_LOST_MS})});
+    assert.deepEqual(g, {open: false, seenAt: 0});
+});
+
+
+// A race: the gate as tick() steps it (gateEv), the recorder as step() steps it (sg: the TTT
+// subgroup seen). Each step 1 s; `fresh(t)` says whether Sauce has data of mine at t.
+function race({until, fresh, sgAt = () => 55, steps = t => true}) {
+    const ttt = sg => ({eventType: 'TEAM_TIME_TRIAL', sgId: sg});
+    const me = {self: true, athleteId: 1001};
+    let g = R.initialGate(), s = R.initialRecState();
+    const sessions = [];
+    let closedAt = null, stoppedAt = null;
+    for (let t = 0; t <= until; t += 1000) {
+        if (!steps(t)) {
+            continue;    // no tick at all (window throttled, Sauce stalled)
+        }
+        const list = fresh(t) ? [me] : [];
+        const summary = list.length ? (sgAt(t) === null ? null : ttt(sgAt(t))) : null;
+        const ev = R.gateEv(list, summary, {gate: g, now: t});
+        const was = g.open;
+        g = R.gateStep(g, {now: t, ev});
+        if (was && !g.open && closedAt === null) {
+            closedAt = t;
+        }
+        const r = R.recStep(s, {now: t, present: 0, gate: g, planned: true, sg: R.isTtt(ev) ? ev.sgId : undefined});
+        s = r.state;
+        if (r.action === 'start') {
+            sessions.push(s.sessionId);
+        }
+        if (r.action === 'stop' && stoppedAt === null) {
+            stoppedAt = t;
+        }
+    }
+    return {sessions, s, g, closedAt, stoppedAt};
+}
+
+test('recStep + gate: a 60 s and a 3 min Sauce gap mid-race keep one session', () => {
+    for (const len of [60000, 180000]) {
+        const r = race({until: 600000, fresh: t => t < 20000 || t >= 20000 + len});
+        assert.equal(r.sessions.length, 1, String(len));
+        assert.equal(r.s.recording, true);
+        assert.equal(r.s.sg, 55);
+    }
+});
+
+test('recStep + gate: 3 min without any tick in the same event keep one session', () => {
+    const r = race({until: 600000, fresh: () => true, steps: t => t < 20000 || t >= 200000});
+    assert.deepEqual(r.sessions, ['0']);
+    assert.equal(r.s.recording, true);
+});
+
+test('recStep + gate: a gap followed by another event starts a new session', () => {
+    const r = race({until: 400000, fresh: t => t < 20000 || t >= 80000, sgAt: t => (t < 80000 ? 55 : 77)});
+    assert.equal(r.sessions.length, 2);
+    assert.equal(r.s.sg, 77);
+    // Back to back without a gap too.
+    const b = race({until: 400000, fresh: () => true, sgAt: t => (t < 80000 ? 55 : 77)});
+    assert.equal(b.sessions.length, 2);
+});
+
+test('recStep + gate: a gap followed by fresh data outside events ends it', () => {
+    const r = race({until: 400000, fresh: t => t < 20000 || t >= 200000, sgAt: t => (t < 200000 ? 55 : null)});
+    assert.equal(r.sessions.length, 1);
+    assert.equal(r.s.recording, false);
+});
+
+test('recStep + gate: the long-gap bound ends it (no data, or no tick, for EVENT_LOST_MS)', () => {
+    const quit = race({until: R.EVENT_LOST_MS + 60000, fresh: t => t < 20000});
+    assert.equal(quit.sessions.length, 1);
+    assert.equal(quit.s.recording, false);
+    assert.equal(quit.g.open, false);
+    // No tick for EVENT_LOST_MS (a sleeping laptop): the first step after ends it, even in the same
+    // event, and the next one starts a fresh session.
+    let r = R.recStep({recording: true, sessionId: 'old', lastSeenAt: 1000, sg: 55},
+                      {now: 1000 + R.EVENT_LOST_MS, present: 0, gate: {open: true}, sg: 55});
+    assert.equal(r.action, 'stop');
+    r = R.recStep(r.state, {now: 2000 + R.EVENT_LOST_MS, present: 0, gate: {open: true}, sg: 55});
+    assert.equal(r.action, 'start');
+    // Just under it: same session.
+    r = R.recStep({recording: true, sessionId: 'old', lastSeenAt: 1000, sg: 55},
+                  {now: R.EVENT_LOST_MS, present: 0, gate: {open: true}, sg: 55});
+    assert.equal(r.action, null);
+    assert.equal(r.state.sessionId, 'old');
+});
+
+
+test('gate + recStep: finish, then Zwift quit within the grace: it closes EVENT_GRACE_MS after the finish', () => {
+    // The last fresh data already showed my subgroup gone: no hold, the grace runs on.
+    for (const quit of [1000, 10000, 29000]) {
+        const r = race({until: 2400000, fresh: t => t < 1000000 + quit, sgAt: t => (t < 1000000 ? 55 : null)});
+        assert.equal(r.closedAt, 999000 + R.EVENT_GRACE_MS, String(quit));    // last seen at 999 s
+        assert.equal(r.stoppedAt, 999000 + R.EVENT_GRACE_MS);
+        assert.equal(r.sessions.length, 1);
+    }
+});
+
+test('gate + recStep: after a gap a short blip without my subgroup gets the whole grace', () => {
+    // 60 s Sauce gap, then 3 s of fresh data without the subgroup (Zwift's few-second dropout).
+    const blip = race({until: 1200000, fresh: t => t < 100000 || t >= 160000,
+                       sgAt: t => (t >= 160000 && t < 163000 ? null : 55)});
+    assert.equal(blip.closedAt, null);
+    assert.equal(blip.sessions.length, 1);
+    assert.equal(blip.s.recording, true);
+    // The time without data does not count: back at 160 s without the subgroup, the gate stays
+    // open while the grace (1 s before the gap, 1 s after it, counted) has not run out.
+    const gone = race({until: 400000, fresh: t => t < 100000 || t >= 160000,
+                       sgAt: t => (t < 100000 ? 55 : null)});
+    assert.equal(gone.closedAt, 99000 + 59000 + R.EVENT_GRACE_MS);
+    assert.equal(gone.sessions.length, 1);
+    assert.equal(gone.s.recording, false);
+});
+
+test('gateStep: a hold does not eat the grace; once gone the grace runs on through a hold', () => {
+    const ttt = {eventType: 'TEAM_TIME_TRIAL', tags: []};
+    let g = R.gateStep(R.initialGate(), {now: 0, ev: ttt});
+    for (let t = 1000; t <= 60000; t += 1000) {
+        g = R.gateStep(g, {now: t, ev: undefined});
+    }
+    assert.deepEqual(g, {open: true, seenAt: 0, heldTo: 60000, shift: 59000});
+    g = R.gateStep(g, {now: 61000, ev: null});
+    assert.deepEqual(g, {open: true, seenAt: 0, goneAt: 59000});
+    g = R.gateStep(g, {now: 59000 + R.EVENT_GRACE_MS - 1, ev: undefined});    // no data again: runs on
+    assert.equal(g.open, true);
+    g = R.gateStep(g, {now: 59000 + R.EVENT_GRACE_MS, ev: undefined});
+    assert.deepEqual(g, {open: false, seenAt: 0});
+    // The event again: clean.
+    g = R.gateStep(g, {now: 100000, ev: ttt});
+    assert.deepEqual(g, {open: true, seenAt: 100000});
+    // A hold reaching EVENT_LOST_MS closes it in gateStep too (without gateEv's null).
+    g = R.gateStep(g, {now: 100000 + R.EVENT_LOST_MS, ev: undefined});
+    assert.deepEqual(g, {open: false, seenAt: 100000});
 });

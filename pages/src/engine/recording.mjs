@@ -54,35 +54,46 @@ export function initialRecState() {
 // planned: a plan with me in it (or the rider records without one). With a gate a recording only
 // starts with it (user, 15 Nov 2026: a recording without a plan never goes up, so it only fills the
 // rider's storage); once started it runs to the end of the event.
-export function recStep(state, {now, present, gate = null, planned = true}) {
+// sg: with a gate, the TTT subgroup Sauce shows me in now (undefined: not known in this step, e.g.
+// a gap in the data). The session keeps the one it started in (`sg` in the state); another one
+// ends it, and the next step starts a fresh session for the new event. A gap in the same event is
+// only a hole in the ticks (user, 17 Nov 2026: a Sauce dropout must not split the race).
+export function recStep(state, {now, present, gate = null, planned = true, sg = undefined}) {
     if (gate && !gate.open) {
         return state.recording ? {state: {...state, recording: false}, action: 'stop'} : {state: {...state}, action: null};
+    }
+    const known = !!gate && Number.isFinite(sg);
+    if (known && state.recording && Number.isFinite(state.sg) && sg !== state.sg) {
+        return {state: {...state, recording: false}, action: 'stop'};
     }
     const enough = present >= MIN_RIDERS || (!!gate && (planned || state.recording));
     if (!state.recording) {
         if (enough) {
-            return {state: {recording: true, sessionId: String(now), lastSeenAt: now}, action: 'start'};
+            return {state: {recording: true, sessionId: String(now), lastSeenAt: now, ...(known ? {sg} : {})},
+                    action: 'start'};
         }
         return {state: {...state}, action: null};
     }
     // A long gap between ticks (sleeping laptop, throttled window) ends the session even if
-    // riders are present now; the next call then starts a fresh one.
-    if (state.lastSeenAt != null && now - state.lastSeenAt >= STOP_AFTER_MS) {
+    // riders are present now; the next call then starts a fresh one. In an event (gate) only after
+    // EVENT_LOST_MS, the bound the gate itself uses for "the rider is gone".
+    if (state.lastSeenAt != null && now - state.lastSeenAt >= (gate ? EVENT_LOST_MS : STOP_AFTER_MS)) {
         return {state: {...state, recording: false}, action: 'stop'};
     }
     if (enough) {
-        return {state: {...state, lastSeenAt: now}, action: null};
+        return {state: {...state, lastSeenAt: now, ...(known && !Number.isFinite(state.sg) ? {sg} : {})}, action: null};
     }
     return {state: {...state}, action: null};
 }
 
 
-function makeRow(x) {
+function makeRow(x, inPlan) {
     const s = x.state || {};
     return {
         id: String(x.athleteId),
         self: x.self === true,
         watching: x.watching === true,
+        ...(inPlan ? {inPlan: true} : {}),
         age: x.age,
         gap: x.gap,
         gapDistance: x.gapDistance,
@@ -113,6 +124,11 @@ function makeRow(x) {
 
 // fallback: with fewer than MIN_RIDERS plan riders near, also the riders of my event subgroup
 // within FALLBACK_RANGE_M (the FALLBACK_MAX nearest).
+// A row of a rider in the current plan (`ids`: starters and bench) carries `inPlan: true`, a watched
+// or fallback rider's row does not. The upload keeps the flagged rows (stripForUpload): 17 Nov 2026
+// (ZRL) the plan changed mid-race (7AA3FX -> Y8EAQW), and the upload, which kept only the head
+// plan's riders, lost the new plan's. The server does not trust the flag; it checks each row against
+// the plan the tick names (det.planSig).
 export function makeTick(nearby, ids, now, {fallback = false} = {}) {
     const list = nearby || [];
     const self = selfEntry(list);
@@ -129,7 +145,7 @@ export function makeTick(nearby, ids, now, {fallback = false} = {}) {
                 .forEach(x => keep.add(x));
         }
     }
-    const riders = list.filter(x => keep.has(x)).map(makeRow);
+    const riders = list.filter(x => keep.has(x)).map(x => makeRow(x, ids.has(String(x.athleteId))));
     return {
         ts: now,
         wt: self?.state?.worldTime ?? null,
@@ -140,11 +156,44 @@ export function makeTick(nearby, ids, now, {fallback = false} = {}) {
 }
 
 
+// The det fields that name a rider: each one goes into the recording only when it is a rider of the
+// current plan (`ids`: starters and bench) or me, else null (final review 18 Nov 2026: no Zwift ID
+// of a rider in no plan in the recording; the rows already keep only those riders). The rotation's
+// chain and the gap warnings follow plan riders only, but state carried over a plan change (the
+// wheel cue) can still name a rider of the plan before. `gap` keeps its numbers, without the id.
+export const DET_ID_FIELDS = ['puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue'];
+
+export function detPlanOnly(det, ids, selfId) {
+    if (!det || typeof det !== 'object') {
+        return det;
+    }
+    const known = id => ids.has(String(id)) || (selfId != null && String(id) === String(selfId));
+    const ok = id => (id != null && known(id) ? id : null);
+    const out = {...det};
+    for (const k of DET_ID_FIELDS) {
+        if (k in out) {
+            out[k] = ok(out[k]);
+        }
+    }
+    if (out.gap && typeof out.gap === 'object' && 'id' in out.gap) {
+        out.gap = {...out.gap, id: ok(out.gap.id)};
+    }
+    return out;
+}
+
+
 // ---------- the event gate (user, 13 Nov 2026: everything starts in the TTT start pen) ----------
 
 // A gap without my TTT subgroup shorter than this does not close the gate: Zwift's state drops
 // out for a few seconds now and then (12 Nov 2026: 9 s mid-race). At the finish the subgroup goes.
 export const EVENT_GRACE_MS = 30000;
+// Without any data of mine (no fresh self entry, or no step at all) for this long the rider is gone
+// (Zwift quit mid-race, a sleeping laptop): the gates close and the recording ends. Shorter gaps
+// in the event keep the ride (user, 17 Nov 2026: a Sauce dropout after the start split a race).
+// 30 min: far longer than a Sauce or Zwift reconnect (seconds to a few minutes), while the stale
+// race state ("No plan for you in this race yet.", the race's plan) lasts no longer than that; a
+// race that lost half an hour of data has no usable rest anyway.
+export const EVENT_LOST_MS = 30 * 60000;
 
 
 // A team time trial: Zwift's event type, WTRL's tags, or the event's name (user, 15 Nov 2026:
@@ -163,20 +212,51 @@ export function initialGate() {
 }
 
 
-// ev: my event (eventSummary), null outside events, undefined while Sauce is still asked (no
-// change). Open from my TTT subgroup (the start pen) until EVENT_GRACE_MS after it is gone.
-export function gateStep(prev, {now, ev}) {
+// ev: my event (eventSummary), null outside events, undefined while Sauce is still asked or has
+// no data of mine (gateEv). Open from my TTT subgroup (the start pen) until EVENT_GRACE_MS after it
+// is gone. With `any` every event opens it (Paceline not tied to TTTs).
+// While open, a run of undefined steps is a hold: the time without data does not count toward the
+// grace (`shift`, user 17 Nov 2026: a blip without my subgroup right after a Sauce gap must not end
+// the race). Once fresh data showed my subgroup gone (`goneAt`, when the grace began), the grace
+// runs on through a hold (the finish, then Zwift quit). A hold of EVENT_LOST_MS since the event was
+// last seen closes it (the rider is gone). heldTo: the last undefined step of the current hold.
+export function gateStep(prev, {now, ev, any = false}) {
     const g = prev || initialGate();
+    const closed = {open: false, seenAt: g.seenAt};
     if (ev === undefined) {
-        return g;
+        if (!g.open) {
+            return g;
+        }
+        if (now - g.seenAt >= EVENT_LOST_MS) {
+            return closed;
+        }
+        if (Number.isFinite(g.goneAt)) {
+            return now - g.goneAt >= EVENT_GRACE_MS ? closed : g;
+        }
+        const shift = (g.shift ?? 0) + (Number.isFinite(g.heldTo) ? now - g.heldTo : 0);
+        return {open: true, seenAt: g.seenAt, heldTo: now, shift};
     }
-    if (isTtt(ev)) {
+    if (any ? !!ev : isTtt(ev)) {
         return {open: true, seenAt: now};
     }
-    if (g.open && now - g.seenAt < EVENT_GRACE_MS) {
-        return g;
+    if (!g.open || now - g.seenAt >= EVENT_LOST_MS) {
+        return closed;
     }
-    return {open: false, seenAt: g.seenAt};
+    const goneAt = Number.isFinite(g.goneAt) ? g.goneAt : g.seenAt + (g.shift ?? 0);
+    return now - goneAt < EVENT_GRACE_MS ? {open: true, seenAt: g.seenAt, goneAt} : closed;
+}
+
+
+// The gate's `ev` from the nearby list and eventOf's answer: without a fresh entry of mine (Sauce
+// lost the data, Zwift is reconnecting) it is undefined, "still asking Sauce", so the gate stays as
+// it is. A gap in the data mid-race must never end the ride (final review I-1, 17 Nov 2026). Once
+// an open `gate` has not seen the event for EVENT_LOST_MS it is null: the rider is gone, it closes.
+export function gateEv(nearby, summary, {gate = null, now = null} = {}) {
+    if (selfEntry(nearby)) {
+        return summary;
+    }
+    return gate?.open && Number.isFinite(now) && Number.isFinite(gate.seenAt) && now - gate.seenAt >= EVENT_LOST_MS
+        ? null : undefined;
 }
 
 

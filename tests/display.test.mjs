@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import * as P from '../pages/src/engine/plan.mjs';
 import * as R from '../pages/src/engine/rotation.mjs';
 import * as D from '../pages/src/engine/display.mjs';
+import * as C from '../pages/src/engine/clock.mjs';
 
 const json = readFileSync(new URL('./fixtures/rollers.json', import.meta.url), 'utf8');
 const txt = readFileSync(new URL('./fixtures/rollers.txt', import.meta.url), 'utf8');
@@ -176,6 +177,11 @@ test('youParts: name part and pull part, pull empty when not riding', async () =
     assert.deepEqual(youParts(plan, '5100002', {weight: 64.2}),
                      {head: 'You are Dario Brandl [KFR] · #4', pull: '60s@4.1W/kg', position: 4});
     assert.equal(youParts(plan, '1').pull, '');
+    // a rider only in the planner's roster (role 'bench') reads as one not in the plan
+    const pool = plan.bench[0].id;
+    assert.equal(P.findMe(plan, pool).role, 'bench');
+    assert.deepEqual(youParts(plan, pool), youParts(plan, '1'));
+    assert.deepEqual(youParts(plan, pool), {head: 'You are not in this plan.', pull: '', position: null});
     assert.ok(!youParts(plan, '5100002', {weight: 64.2, bare: true}).pull.includes('W'));
 });
 
@@ -280,4 +286,219 @@ test('actionModel and shownModel: the standing clock, not in READY', () => {
     // Running: no extra keys (the recording keeps its shape).
     const run = D.actionModel({...base, standing: false, overS: 0}, null);
     assert.deepEqual(run, {kind: 'rest', timeS: 57, warn: false, next: false, place: 3});
+});
+
+
+test('shownModel: a correction under the clock is recorded as c: {k, d}', () => {
+    const m = {kind: 'rest', timeS: 120, warn: false, next: false, place: 3,
+               correction: {kind: 'out', deltaS: -70, ids: ['5100004'], until: 5000}};
+    assert.deepEqual(D.shownModel({m, dash: 'none'}).act, {k: 'rest', t: 120, place: 3, c: {k: 'out', d: -70}});
+    assert.deepEqual(D.shownModel({m: {...m, correction: null}, dash: 'none'}).act, {k: 'rest', t: 120, place: 3});
+});
+
+
+// ---------- pull_wkg (spec §7.8) ----------
+
+test('riderTarget: pull_wkg wins in W/kg, watts / weight without it', () => {
+    const r = {pullS: 60, watts: 325, weight: 80, wkg: 4.2};
+    assert.deepEqual(D.riderTarget(r, null, 'Wkg'), {value: '4.2', unit: 'W/kg'});
+    assert.deepEqual(D.riderTarget(r, 71, 'Wkg'), {value: '4.2', unit: 'W/kg'});    // my Zwift weight changes nothing
+    assert.deepEqual(D.riderTarget({...r, wkg: null}, null, 'Wkg'), {value: '4.1', unit: 'W/kg'});   // 4.0625
+    assert.deepEqual(D.riderTarget({...r, wkg: null}, 71, 'Wkg'), {value: '4.6', unit: 'W/kg'});     // 4.577
+    assert.deepEqual(D.riderTarget(r, null, 'W'), {value: '325', unit: 'W'});
+    assert.deepEqual(D.riderTarget({...r, weight: null}, null, 'Wkg'), {value: '4.2', unit: 'W/kg'});  // needs no weight
+    assert.deepEqual(D.riderTarget({...r, wkg: null, weight: null}, null, 'Wkg'), {value: '325', unit: 'W'});
+    assert.deepEqual(D.riderTarget({...r, wkg: 4.25}, null, 'Wkg'), {value: '4.3', unit: 'W/kg'});
+    assert.deepEqual(D.riderTarget({...r, wkg: 4.04}, null, 'Wkg'), {value: '4.0', unit: 'W/kg'});
+    assert.deepEqual(D.riderTarget({...r, wkg: 0}, null, 'Wkg'), {value: '4.1', unit: 'W/kg'});
+    assert.equal(D.riderTarget({...r, watts: null}, null, 'Wkg'), null);
+    assert.equal(D.riderTarget(null, null, 'Wkg'), null);
+});
+
+test('barTarget: pull_wkg × weight in W/kg mode', () => {
+    const r = {pullS: 60, watts: 325, weight: 80, wkg: 4.2};
+    assert.equal(D.barTarget(r, 80, 'Wkg'), 336);
+    assert.equal(D.barTarget(r, null, 'Wkg'), 336);                        // the plan's weight is the fallback
+    assert.ok(Math.abs(D.barTarget(r, 71, 'Wkg') - 298.2) < 1e-9);
+    assert.equal(D.barTarget({...r, weight: null}, null, 'Wkg'), 325);     // no weight at all
+    assert.equal(D.barTarget(r, 71, 'W'), 325);
+    assert.equal(D.barTarget({...r, wkg: null}, 71, 'Wkg'), 325);
+    assert.equal(D.barTarget({...r, watts: null}, 80, 'Wkg'), null);
+    assert.equal(D.barTarget(null, 80, 'Wkg'), null);
+});
+
+test('the bar follows live W/kg', () => {
+    const r = {pullS: 60, watts: 325, weight: 80, wkg: 4.2};
+    const t = D.barTarget(r, 71, 'Wkg');
+    const on = R.powerBar(298.2, t);                     // live 4.2 W/kg: on target
+    assert.equal(on.zone, 'green');
+    assert.ok(Math.abs(on.pos - 0.5) < 1e-9);
+    // +9.0 %: 325 W is the plan's watts, but my Zwift weight (71 kg) is below the plan's 80 kg
+    assert.equal(R.powerBar(325, t).zone, 'amber');
+    assert.deepEqual(R.powerBar(325, D.barTarget(r, 71, 'W')), {pos: 0.5, zone: 'green'});
+});
+
+test('actionModel: barW moves the bar, not the target', () => {
+    const front = {puller: '5100002', since: 0};    // Dario, 266 W
+    const m = D.actionModel(view(20000, front), 272, undefined, {barW: 314});
+    assert.equal(m.kind, 'pull');
+    assert.equal(m.watts, 266);
+    assert.equal(m.marker.zone, 'red');             // −13.4 %
+    assert.equal(D.actionModel(view(20000, front), 272, undefined).marker.zone, 'green');
+    assert.equal(D.actionModel(view(20000, front), 272, undefined, {barW: null}).marker.zone, 'green');
+    // READY: the same bar target
+    const ready = D.actionModel(view(55000, {puller: '5100003', since: 0}), 272, undefined, {barW: 314});   // 5 s to my pull
+    assert.equal(ready.kind, 'rest');
+    assert.equal(ready.next, true);
+    assert.equal(ready.watts, 266);
+    assert.ok(Math.abs(ready.marker.pos - R.powerBar(272, 314).pos) < 1e-9);
+    assert.equal(ready.marker.zone, null);          // READY stays neutral
+});
+
+test('riderPull and riderPullParts with pull_wkg', async () => {
+    const {riderPull, riderPullParts} = await import('../pages/src/youline.mjs');
+    const r = {pullS: 60, watts: 325, weight: 80, wkg: 4.2};
+    assert.equal(riderPull(r), '60s@4.2W/kg');
+    assert.equal(riderPull(r, 71), '60s@4.2W/kg');
+    assert.equal(riderPull({...r, wkg: null}), '60s@4.1W/kg');
+    assert.equal(riderPull({...r, wkg: null}, 71), '60s@4.6W/kg');
+    assert.equal(riderPull(r, null, 'W'), '60s@325W');
+    assert.equal(riderPull(r, null, 'Wkg', {bare: true}), '60s@4.2');
+    assert.equal(riderPull({...r, watts: null}), '60s');
+    assert.deepEqual(riderPullParts(r), {secs: '60s', target: '4.2'});
+    assert.deepEqual(riderPullParts(r, null, 'W'), {secs: '60s', target: '325'});
+});
+
+test('youParts with pull_wkg from an import', async () => {
+    const {youParts} = await import('../pages/src/youline.mjs');
+    const copy = JSON.parse(json);
+    copy.riders['5100002'].pull_wkg = 4.5;           // 266 W, 64.2 kg: 4.1 without it
+    const {plan} = P.importFiles([JSON.stringify(copy), txt]);
+    assert.equal(youParts(plan, '5100002', {weight: 64.2}).pull, '60s@4.5W/kg');
+    assert.equal(youParts(plan, '5100002', {weight: 70}).pull, '60s@4.5W/kg');
+    assert.equal(youParts(plan, '5100002', {weight: 64.2, unit: 'W'}).pull, '60s@266W');
+    const plain = P.importFiles([json, txt]).plan;
+    assert.equal(youParts(plain, '5100002', {weight: 70}).pull, '60s@3.8W/kg');    // 266 / 70
+});
+
+
+// ---------- the shown rest clock (clock.mjs) ----------
+
+// Steps the clock once a second over truth(t) (seconds since 0), from `from` to `to` inclusive;
+// returns {t: state}.
+function runClock(truth, {from = 0, to, present = () => null, standing = () => false} = {}) {
+    let s = C.initialClock();
+    const out = {};
+    for (let t = from; t <= to; t++) {
+        s = C.clockStep(s, {now: t * 1000, trueS: truth(t), present: present(t), standing: standing(t)});
+        out[t] = s;
+    }
+    return out;
+}
+const shownAt = (run, t) => Math.floor(run[t].shownS);
+
+
+test('clockStep: in step with the rotation it shows the rotation clock, second by second', () => {
+    const r = runClock(t => 200 - t, {to: 50});
+    for (let t = 0; t <= 50; t++) {
+        assert.equal(shownAt(r, t), 200 - t);
+        assert.equal(r[t].label, null);
+    }
+    assert.deepEqual([C.SMALL_S, C.SNAP_BELOW_S, C.CATCH_DOWN, C.CATCH_UP, C.UP_HOLD_MS, C.LABEL_MS], [10, 15, 2, 0.5, 3000, 5000]);
+});
+
+
+test('clockStep: a small correction is absorbed, no jump and no label', () => {
+    // At 20 s the pull comes 6 s sooner: the clock runs twice as fast until it is there.
+    const down = runClock(t => (t < 20 ? 200 - t : 194 - t), {to: 40});
+    assert.equal(shownAt(down, 19), 181);
+    assert.deepEqual([20, 21, 22, 23, 24, 25, 26].map(t => shownAt(down, t)), [179, 177, 175, 173, 171, 169, 168]);
+    assert.equal(shownAt(down, 26), 194 - 26);              // caught up after 6 s
+    for (let t = 1; t <= 40; t++) {
+        const step = down[t - 1].shownS - down[t].shownS;
+        assert.ok(step >= 0.99 && step <= 2.01, `at ${t}: ${step}`);
+        assert.equal(down[t].label, null);
+    }
+    // At 20 s it comes 4 s later: the clock runs at half speed until the rotation's clock is there.
+    const up = runClock(t => (t < 20 ? 200 - t : 204 - t), {to: 40});
+    assert.deepEqual([20, 22, 24, 26, 28].map(t => shownAt(up, t)), [180, 179, 178, 178, 176]);    // in step at 26 s
+    assert.equal(shownAt(up, 30), 174);                      // 204 - 30: in step again
+    assert.equal(up[25].label, null);
+});
+
+
+test('clockStep: a big correction sooner snaps at once and says so; later only once it holds 3 s', () => {
+    const present = t => (t < 30 ? ['a', 'b', 'c'] : ['a', 'c']);
+    // b drops out at 30 s: my pull comes 70 s sooner.
+    const r = runClock(t => (t < 30 ? 300 - t : 230 - t), {to: 40, present});
+    assert.equal(shownAt(r, 29), 271);
+    assert.equal(shownAt(r, 30), 200);
+    assert.equal(r[30].fadeAt, 30000);
+    assert.deepEqual(r[30].label, {kind: 'out', deltaS: -70, ids: ['b'], until: 35000});
+    assert.equal(C.deltaText(-70), '\u221270s');                // seconds below 100, as the clock
+    assert.equal(C.deltaText(-130), '\u22122:10');
+    assert.equal(r[34].label.kind, 'out');
+    assert.equal(r[35].label, null);                         // 5 s
+    // He comes back at 30 s (+70): the clock goes on as before for 3 s, then takes it.
+    const back = runClock(t => (t < 30 ? 300 - t : 370 - t), {to: 40, present: t => (t < 30 ? ['a', 'c'] : ['a', 'b', 'c'])});
+    assert.deepEqual([30, 31, 32].map(t => shownAt(back, t)), [270, 269, 268]);
+    assert.equal(shownAt(back, 33), 337);
+    assert.deepEqual(back[33].label, {kind: 'back', deltaS: 70, ids: ['b'], until: 38000});
+    assert.equal(C.deltaText(70), '+70s');
+    // No rider to blame: just the amount.
+    const plain = runClock(t => (t < 30 ? 300 - t : 250 - t), {to: 31});
+    assert.deepEqual([plain[30].label.kind, plain[30].label.ids, C.deltaText(plain[30].label.deltaS)], ['sooner', [], '\u221250s']);
+});
+
+
+test('clockStep: a flip at the front that is undone within 3 s never shows', () => {
+    // 40 → 146 → 57 (a 12 Nov race): up by a round for 2 s, then down again.
+    const truth = t => (t < 10 ? 50 - t : t < 12 ? 156 - t : 50 - t);
+    const r = runClock(truth, {to: 20});
+    for (let t = 0; t <= 20; t++) {
+        assert.equal(shownAt(r, t), 50 - t, `at ${t}`);
+        assert.equal(r[t].label, null);
+    }
+});
+
+
+test('clockStep: corrections in a row add up, a net under 10 s clears the label', () => {
+    const r = runClock(t => (t < 10 ? 300 - t : t < 11 ? 260 - t : 280 - t), {to: 20});
+    assert.equal(r[10].label.deltaS, -40);
+    assert.equal(r[14].label.deltaS, -40 + 20);              // up 20 at 11 s, taken after 3 s
+    assert.equal(r[14].label.until, 19000);                  // the sum shows its 5 s
+    const n = runClock(t => (t < 10 ? 300 - t : t < 11 ? 280 - t : 300 - t), {to: 20});
+    assert.equal(n[10].label.deltaS, -20);
+    assert.equal(n[14].label, null);                         // -20 + 20
+    assert.equal(shownAt(n, 14), 286);
+});
+
+
+test('clockStep: near the pull it follows exactly, no label in READY, READY taken back says so', () => {
+    // 40 s sooner into the last 15 s: exact, and no label in READY.
+    const r = runClock(t => (t < 10 ? 60 - t : 20 - t), {to: 14});
+    assert.equal(shownAt(r, 10), 10);
+    assert.equal(r[10].label, null);
+    // A small correction near the pull is not absorbed either.
+    const s = runClock(t => (t < 5 ? 20 - t : 14 - t), {to: 8});
+    assert.equal(shownAt(s, 5), 9);
+    // READY (8 s) taken back: +36 at once, amber "READY off".
+    const off = runClock(t => (t < 12 ? 20 - t : 56 - t), {to: 14});
+    assert.equal(shownAt(off, 11), 9);
+    assert.equal(shownAt(off, 12), 44);
+    assert.deepEqual([off[12].label.kind, off[12].label.deltaS], ['readyOff', 36]);
+});
+
+
+test('clockStep: the standing clock is followed exactly; no countdown resets', () => {
+    // The rotation's clock stands at 57 from 10 s to 30 s (puller over his time), then runs on.
+    const truth = t => (t < 10 ? 67 - t : t < 30 ? 57 : 57 - (t - 30));
+    const r = runClock(truth, {to: 40, standing: t => t >= 13 && t < 30});
+    assert.deepEqual([12, 13, 20, 29, 30, 31].map(t => shownAt(r, t)), [57, 57, 57, 57, 57, 56]);
+    // My pull, a pause: null resets, the next value is taken as it is.
+    let s = C.clockStep(C.initialClock(), {now: 0, trueS: 100});
+    s = C.clockStep(s, {now: 1000, trueS: null});
+    assert.equal(s.shownS, null);
+    s = C.clockStep(s, {now: 2000, trueS: 300});
+    assert.deepEqual([s.shownS, s.label], [300, null]);
 });

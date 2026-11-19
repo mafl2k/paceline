@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Pr from '../pages/src/engine/prefs.mjs';
+import {DEFAULT_SERVER_URL} from '../pages/src/engine/planserver.mjs';
 
 
 test('normalizePrefs: target unit W/kg by default; a stored unit counts once the rider picked it', () => {
@@ -21,39 +22,110 @@ test('normalizePrefs: target unit W/kg by default; a stored unit counts once the
 test('normalizePrefs: plan server defaults and status', () => {
     const d = Pr.normalizePrefs(null);
     assert.equal(d.serverOn, true);
-    assert.equal(d.serverUrl, 'https://ttt.mafl.net');
-    assert.equal(d.serverTeam, '');
+    assert.equal(d.serverUrl, DEFAULT_SERVER_URL);
+    assert.equal(d.serverUrlSet, false);
     assert.equal(d.serverEtag, null);
     assert.equal(d.serverCheckedAt, null);
-    const p = Pr.normalizePrefs({serverOn: false, serverUrl: ' http://localhost:8790 ', serverTeam: '  TTT   Rollers ',
-                                 serverEtag: '"S91T6D-1"', serverTeamName: 'Rollers', serverSig: 'S91T6D',
+    const p = Pr.normalizePrefs({serverOn: false, serverUrl: ' http://localhost:8790 ', serverUrlSet: true,
+                                 serverEtag: '"S91T6D-1"', serverSig: 'S91T6D', serverLabel: 'Rollers fast',
+                                 serverClub: 'Kettenfett RC', serverNotice: 'Update Paceline', serverFits: 2,
+                                 serverOpensAt: 1763578800000, serverOpensLabel: 'Rollers fast',
                                  serverOkAt: 5, serverError: 'offline', serverCheckedAt: 6});
-    assert.deepEqual(p, {targetUnit: 'Wkg', targetUnitSet: false, serverOn: false, serverUrl: 'http://localhost:8790', serverTeam: 'TTT Rollers',
-                         serverEtag: '"S91T6D-1"', serverTeamName: 'Rollers', serverSig: 'S91T6D', serverOkAt: 5,
+    assert.deepEqual(p, {targetUnit: 'Wkg', targetUnitSet: false, serverOn: false, serverUrl: 'http://localhost:8790',
+                         serverUrlSet: true, serverEtag: '"S91T6D-1"', serverSig: 'S91T6D', serverLabel: 'Rollers fast',
+                         serverClub: 'Kettenfett RC', serverNotice: 'Update Paceline', serverFits: 2,
+                         serverOpensAt: 1763578800000, serverOpensLabel: 'Rollers fast', serverOkAt: 5,
                          serverError: 'offline', serverCheckedAt: 6, logUpload: false, logUploadSince: null,
-                         demoUntil: null, showNext: false, restInAction: true, showRotation: false, tttOnly: true,
+                         demoUntil: null, showNext: false, showRotation: false, tttOnly: true,
                          recordWithoutPlan: false});
-    const bad = Pr.normalizePrefs({serverOn: 'yes', serverUrl: '  ', serverTeam: 3, serverEtag: 7, serverError: 'boom',
-                                   serverOkAt: 'x'});
+    const bad = Pr.normalizePrefs({serverOn: 'yes', serverUrl: '  ', serverUrlSet: true, serverEtag: 7,
+                                   serverError: 'boom', serverOkAt: 'x'});
     assert.equal(bad.serverOn, true);
-    assert.equal(bad.serverUrl, 'https://ttt.mafl.net');
-    assert.equal(bad.serverTeam, '');
+    assert.equal(bad.serverUrl, DEFAULT_SERVER_URL);
+    assert.equal(bad.serverUrlSet, false);
     assert.equal(bad.serverEtag, null);
     assert.equal(bad.serverError, null);
     assert.equal(bad.serverOkAt, null);
 });
 
-test('serverConfigChange: a new team or server starts over, no change gives null', () => {
-    const cur = Pr.normalizePrefs({serverTeam: 'Rollers', serverEtag: '"A"', serverSig: 'S91T6D',
-                                   serverTeamName: 'Rollers', serverOkAt: 5, serverCheckedAt: 6});
-    assert.equal(Pr.serverConfigChange(cur, {serverTeam: ' Rollers ', serverUrl: 'https://ttt.mafl.net',
-                                             serverOn: true}), null);
-    const ch = Pr.serverConfigChange(cur, {serverTeam: 'Others'});
-    assert.deepEqual(ch, {serverOn: true, serverUrl: 'https://ttt.mafl.net', serverTeam: 'Others', serverEtag: null,
-                          serverTeamName: null, serverSig: null, serverOkAt: null, serverError: null,
-                          serverCheckedAt: null});
-    assert.equal(Pr.serverConfigChange(cur, {serverOn: false}).serverOn, false);
+test('serverUrlSet: only a typed URL is kept', () => {
+    // Without the flag (0.2 stored the URL without it) the default applies, whatever the URL.
+    for (const url of ['https://ttt.mafl.net', 'https://ttt.mafl.net/', 'https://other.example.org']) {
+        const old = Pr.normalizePrefs({serverUrl: url});
+        assert.equal(old.serverUrl, DEFAULT_SERVER_URL, url);
+        assert.equal(old.serverUrlSet, false, url);
+        assert.equal(Pr.normalizePrefs({serverUrl: url, serverUrlSet: 'yes'}).serverUrlSet, false, url);
+    }
+    const old = Pr.normalizePrefs({serverUrl: 'https://ttt.mafl.net'});
+    const typed = Pr.normalizePrefs({serverUrl: 'https://other.example.org', serverUrlSet: true});
+    assert.equal(typed.serverUrl, 'https://other.example.org');
+    assert.equal(typed.serverUrlSet, true);
+    // The flag says no: the default.
+    const unset = Pr.normalizePrefs({serverUrl: 'https://x.example.org', serverUrlSet: false});
+    assert.equal(unset.serverUrl, DEFAULT_SERVER_URL);
+    assert.equal(unset.serverUrlSet, false);
+    // The flag says yes: kept, even for the release URL.
+    const set = Pr.normalizePrefs({serverUrl: 'https://x.example.org', serverUrlSet: true});
+    assert.equal(set.serverUrl, 'https://x.example.org');
+    assert.equal(set.serverUrlSet, true);
+    // A store round trip keeps the decision.
+    const again = Pr.normalizePrefs(JSON.parse(JSON.stringify(old)));
+    assert.equal(again.serverUrl, DEFAULT_SERVER_URL);
+    assert.equal(again.serverUrlSet, false);
+    assert.equal(Pr.normalizePrefs(JSON.parse(JSON.stringify(typed))).serverUrl, 'https://other.example.org');
+});
+
+test('serverConfigChange: a typed URL sets the flag, the default or empty clears it', () => {
+    const cur = Pr.normalizePrefs({serverEtag: '"A"', serverSig: 'S91T6D', serverLabel: 'Rollers fast',
+                                   serverClub: 'Kettenfett RC', serverNotice: 'n', serverFits: 2, serverOpensAt: 7,
+                                   serverOpensLabel: 'Rollers fast', serverOkAt: 5, serverCheckedAt: 6});
+    assert.equal(Pr.serverConfigChange(cur, {serverUrl: DEFAULT_SERVER_URL, serverOn: true}), null);
+    assert.equal(Pr.serverConfigChange(cur, {serverUrl: `  ${DEFAULT_SERVER_URL}/ `, serverOn: true}), null);
     assert.equal(Pr.serverConfigChange(cur, {serverUrl: ''}), null);    // empty means the default
+    const ch = Pr.serverConfigChange(cur, {serverUrl: ' https://other.example.org ', serverOn: true});
+    assert.deepEqual(ch, {serverOn: true, serverUrl: 'https://other.example.org', serverUrlSet: true,
+                          serverEtag: null, serverSig: null, serverLabel: null, serverClub: null, serverNotice: null,
+                          serverFits: null, serverOpensAt: null, serverOpensLabel: null, serverOkAt: null,
+                          serverError: null, serverCheckedAt: null});
+    const typed = Pr.normalizePrefs({...cur, ...ch});
+    assert.equal(Pr.serverConfigChange(typed, {serverUrl: 'https://other.example.org'}), null);
+    // Back to the default, by typing it or by emptying the field: the flag goes.
+    for (const url of [DEFAULT_SERVER_URL, '  ']) {
+        const back = Pr.serverConfigChange(typed, {serverUrl: url});
+        assert.equal(back.serverUrl, DEFAULT_SERVER_URL, url);
+        assert.equal(back.serverUrlSet, false, url);
+    }
+    assert.equal(Pr.serverConfigChange(cur, {serverOn: false}).serverOn, false);
+    assert.equal(Pr.serverConfigChange(cur, {serverOn: false}).serverUrlSet, false);
+    // Switching off keeps a typed URL.
+    assert.equal(Pr.serverConfigChange(typed, {serverOn: false}).serverUrl, 'https://other.example.org');
+    assert.equal(Pr.serverConfigChange(typed, {serverOn: false}).serverUrlSet, true);
+});
+
+test('serverTeam is gone', () => {
+    assert.equal('serverTeam' in Pr.normalizePrefs({serverTeam: 'x'}), false);
+    assert.equal('serverTeamName' in Pr.normalizePrefs({serverTeamName: 'x'}), false);
+    assert.equal('serverTeam' in Pr.defaultPrefs(), false);
+    assert.equal('serverTeamName' in Pr.defaultPrefs(), false);
+});
+
+test('normalizePrefs: the new status fields', () => {
+    const d = Pr.defaultPrefs();
+    for (const k of ['serverNotice', 'serverLabel', 'serverClub', 'serverOpensLabel', 'serverFits', 'serverOpensAt']) {
+        assert.equal(d[k], null, k);
+    }
+    for (const k of ['serverNotice', 'serverLabel', 'serverClub', 'serverOpensLabel']) {
+        assert.equal(Pr.normalizePrefs({[k]: 'Rollers fast'})[k], 'Rollers fast', k);
+        for (const v of [3, null, {}, [], true, '']) {
+            assert.equal(Pr.normalizePrefs({[k]: v})[k], null, `${k} ${JSON.stringify(v)}`);
+        }
+    }
+    for (const k of ['serverFits', 'serverOpensAt']) {
+        assert.equal(Pr.normalizePrefs({[k]: 2})[k], 2, k);
+        for (const v of ['2', NaN, Infinity, null, {}, []]) {
+            assert.equal(Pr.normalizePrefs({[k]: v})[k], null, `${k} ${String(v)}`);
+        }
+    }
 });
 
 test('normalizePrefs: recording upload is off by default, true kept, non-booleans ignored', () => {
@@ -66,7 +138,7 @@ test('normalizePrefs: recording upload is off by default, true kept, non-boolean
     }
     // a server change keeps the choice
     const cur = Pr.normalizePrefs({logUpload: true});
-    assert.equal(Object.hasOwn(Pr.serverConfigChange(cur, {serverTeam: 'Others'}), 'logUpload'), false);
+    assert.equal(Object.hasOwn(Pr.serverConfigChange(cur, {serverUrl: 'https://other.example.org'}), 'logUpload'), false);
 });
 
 test('normalizePrefs: logUploadSince is a time while upload is on, null otherwise', () => {
@@ -80,7 +152,7 @@ test('normalizePrefs: logUploadSince is a time while upload is on, null otherwis
     }
     // a server change keeps it
     const cur = Pr.normalizePrefs({logUpload: true, logUploadSince: 5});
-    assert.equal(Object.hasOwn(Pr.serverConfigChange(cur, {serverTeam: 'Others'}), 'logUploadSince'), false);
+    assert.equal(Object.hasOwn(Pr.serverConfigChange(cur, {serverUrl: 'https://other.example.org'}), 'logUploadSince'), false);
 });
 
 test('logUploadChange: ticking keeps the time, unticking clears it', () => {
@@ -123,10 +195,10 @@ test('demoChange and demoOn: the demo runs DEMO_MS from the click, stop ends it'
 });
 
 
-test('normalizePrefs: restInAction (countdown in the Action window) is on by default, booleans kept', () => {
-    assert.equal(Pr.defaultPrefs().restInAction, true);
-    assert.equal(Pr.normalizePrefs({restInAction: false}).restInAction, false);
-    assert.equal(Pr.normalizePrefs({restInAction: 'no'}).restInAction, true);
+test('normalizePrefs: no restInAction pref (the Rest window decides); an old stored value is dropped', () => {
+    assert.equal('restInAction' in Pr.defaultPrefs(), false);
+    assert.equal('restInAction' in Pr.normalizePrefs({restInAction: false}), false);
+    assert.equal('restInAction' in Pr.normalizePrefs({restInAction: true}), false);
 });
 
 

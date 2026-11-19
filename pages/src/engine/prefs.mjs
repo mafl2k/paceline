@@ -5,8 +5,10 @@
 //   targetUnitSet    boolean              the rider picked the unit; before 0.2.17 a stored 'W' was
 //                                         just the old default, so it only counts with this set
 //   serverOn         boolean              poll the plan server
-//   serverUrl        string               plan server base URL
-//   serverTeam       string               team name typed by the rider ('' = find me by athlete id)
+//   serverUrl        string               plan server base URL: the typed one, else the build's
+//                                         DEFAULT_SERVER_URL (spec §10)
+//   serverUrlSet     boolean              the rider typed serverUrl. A stored URL counts only with
+//                                         it (true); without it (0.2) the default applies
 //   logUpload        boolean              upload finished recordings to the plan server (opt-in)
 //   logUploadSince   number | null        when the rider ticked that box (ms); only rides started
 //                                         since then go up on their own. null while it is off.
@@ -17,18 +19,21 @@
 //                                         events, from the start pen to the finish (default on)
 //   recordWithoutPlan boolean             in a TTT event also record without a plan that has me in it
 //                                         (default off: such a recording never goes up)
-//   restInAction     boolean              action window: also the countdown to my pull (else only my
-//                                         pull; the Rest window shows the countdown)
 //   demoUntil        number | null        the overlay windows show a made-up ride until then (ms),
 //                                         set by the settings window's Demo button
 // Plan server status, written by the polling overlay window and shown in settings:
-//   serverEtag       string | null        ETag of the last plan taken from the server
-//   serverTeamName   string | null        that plan's team name on the server (record.team)
+//   serverEtag       string | null        etag of the last plan taken from the server
 //   serverSig        string | null        that plan's code
+//   serverLabel      string | null        that plan's label (record.label)
+//   serverClub       string | null        that plan's club name (record.circle.name)
+//   serverNotice     string | null        the server's notice for this Paceline version (answer.notice)
+//   serverFits       number | null        2 or more: that many clubs' plans fit, the pen rule picks
+//   serverOpensAt    number | null        no plan yet, one opens then (ms, a body-less record's opensAt)
+//   serverOpensLabel string | null        that record's label
 //   serverOkAt       number | null        last successful check (ms)
 //   serverError      string | null        last check failed: one of SERVER_ERRORS
 //   serverCheckedAt  number | null        last check attempt by any window (ms)
-import {DEFAULT_SERVER_URL, MAX_TEAM_NAME} from './planserver.mjs';
+import {DEFAULT_SERVER_URL, serverBase} from './planserver.mjs';
 
 export const TARGET_UNITS = ['W', 'Wkg'];
 export const SERVER_ERRORS = ['offline', 'notfound', 'http', 'invalid', 'badurl'];
@@ -41,10 +46,15 @@ export function defaultPrefs() {
         targetUnitSet: false,
         serverOn: true,
         serverUrl: DEFAULT_SERVER_URL,
-        serverTeam: '',
+        serverUrlSet: false,
         serverEtag: null,
-        serverTeamName: null,
         serverSig: null,
+        serverLabel: null,
+        serverClub: null,
+        serverNotice: null,
+        serverFits: null,
+        serverOpensAt: null,
+        serverOpensLabel: null,
         serverOkAt: null,
         serverError: null,
         serverCheckedAt: null,
@@ -52,7 +62,6 @@ export function defaultPrefs() {
         logUploadSince: null,
         demoUntil: null,
         showNext: false,
-        restInAction: true,
         showRotation: false,
         tttOnly: true,
         recordWithoutPlan: false,
@@ -76,15 +85,19 @@ export function normalizePrefs(raw) {
     if (typeof raw.serverOn === 'boolean') {
         p.serverOn = raw.serverOn;
     }
-    if (typeof raw.serverUrl === 'string' && raw.serverUrl.trim()) {
-        p.serverUrl = raw.serverUrl.trim();
-    }
-    if (typeof raw.serverTeam === 'string') {
-        p.serverTeam = raw.serverTeam.trim().replace(/\s+/g, ' ').slice(0, MAX_TEAM_NAME);
+    const url = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
+    if (url && raw.serverUrlSet === true) {
+        p.serverUrl = url;
+        p.serverUrlSet = true;
     }
     p.serverEtag = str(raw.serverEtag);
-    p.serverTeamName = str(raw.serverTeamName);
     p.serverSig = str(raw.serverSig);
+    p.serverLabel = str(raw.serverLabel);
+    p.serverClub = str(raw.serverClub);
+    p.serverNotice = str(raw.serverNotice);
+    p.serverFits = time(raw.serverFits);
+    p.serverOpensAt = time(raw.serverOpensAt);
+    p.serverOpensLabel = str(raw.serverOpensLabel);
     p.serverOkAt = time(raw.serverOkAt);
     p.serverError = SERVER_ERRORS.includes(raw.serverError) ? raw.serverError : null;
     p.serverCheckedAt = time(raw.serverCheckedAt);
@@ -104,9 +117,6 @@ export function normalizePrefs(raw) {
     }
     if (typeof raw.recordWithoutPlan === 'boolean') {
         p.recordWithoutPlan = raw.recordWithoutPlan;
-    }
-    if (typeof raw.restInAction === 'boolean') {
-        p.restInAction = raw.restInAction;
     }
     return p;
 }
@@ -138,17 +148,24 @@ export function logUploadSinceFix(prefs, now) {
 }
 
 
-// The changes to store when the rider edits the server settings, or null when nothing changed. A
-// changed server, team or on/off starts over (no ETag, no status, check right away), so the new
-// choice is fetched and activated.
+// The changes to store when the rider edits the server settings ({serverOn, serverUrl}), or null
+// when nothing changed. A URL counts as typed unless it is empty or the build's default. A changed
+// server or on/off starts over (no etag, no status, check right away).
 export function serverConfigChange(prefs, changes) {
-    const next = normalizePrefs({...prefs, ...changes});
+    const merged = {...prefs, ...changes};
+    if (typeof changes?.serverUrl === 'string') {
+        const trimmed = changes.serverUrl.trim();
+        merged.serverUrl = trimmed;
+        merged.serverUrlSet = trimmed !== '' && serverBase(trimmed) !== serverBase(DEFAULT_SERVER_URL);
+    }
+    const next = normalizePrefs(merged);
     const same = next.serverOn === prefs.serverOn && next.serverUrl === prefs.serverUrl &&
-        next.serverTeam === prefs.serverTeam;
+        next.serverUrlSet === prefs.serverUrlSet;
     if (same) {
         return null;
     }
-    return {serverOn: next.serverOn, serverUrl: next.serverUrl, serverTeam: next.serverTeam,
-            serverEtag: null, serverTeamName: null, serverSig: null, serverOkAt: null, serverError: null,
+    return {serverOn: next.serverOn, serverUrl: next.serverUrl, serverUrlSet: next.serverUrlSet,
+            serverEtag: null, serverSig: null, serverLabel: null, serverClub: null, serverNotice: null,
+            serverFits: null, serverOpensAt: null, serverOpensLabel: null, serverOkAt: null, serverError: null,
             serverCheckedAt: null};
 }

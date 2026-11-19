@@ -61,7 +61,6 @@ html.settings-page #pl-root {
     letter-spacing: 0.08em;
 }
 html.pl-for-action .pl-info-only, html.pl-for-rest .pl-info-only { display: none !important; }
-html:not(.pl-for-action) .pl-action-only { display: none !important; }
 .pl-opacity { display: flex; align-items: center; gap: 8px; }
 .pl-opacity input[type="range"] { flex: 1; min-width: 0; }
 .pl-opacity input[type="number"] { width: 4.5em; }
@@ -150,6 +149,40 @@ html:not(.pl-for-action) .pl-action-only { display: none !important; }
     font: inherit;
 }
 #pl-server-status { font-weight: 600; color: inherit; }
+/* Settings lines that keep their place when empty (status, error, waiting, code message). */
+.pl-slot { min-height: 1lh; margin: 4px 0; }
+.pl-error.pl-slot:empty { visibility: hidden; padding-top: 0; padding-bottom: 0; }
+#pl-server-next { font-weight: 600; }
+.pl-file-mark { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-weight: 600; }
+.pl-file-mark button { margin-left: auto; }
+
+/* "Load a plan from a file instead": collapsed with a server; without one open and summary-less. */
+#pl-file-box { margin-top: 10px; }
+#pl-file-box > summary { cursor: pointer; color: var(--pl-dim); margin-bottom: 6px; }
+#pl-file-box.pl-files-only > summary { display: none; }
+
+/* Clubs */
+#pl-clubs-list { list-style: none; margin: 4px 0; padding: 0; }
+.pl-club { padding: 4px 0; border-bottom: 1px solid var(--pl-line); }
+.pl-club .pl-check { margin: 0; }
+.pl-club-name { font-weight: 600; overflow-wrap: anywhere; }
+.pl-club-note { margin: 0 0 0 1.6em; }
+.pl-club-note:empty { display: none; }
+.pl-clubs-several { margin: 6px 0; font-weight: 600; }
+.pl-club-code input { font-family: ui-monospace, Menlo, Consolas, monospace; text-transform: uppercase; }
+.pl-club-code button { flex: none; }
+#pl-club-code-msg { font-weight: 600; }
+
+/* Advanced: server address, upload, recording without a plan, the recordings. */
+#pl-advanced { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--pl-line); }
+#pl-advanced > summary {
+    cursor: pointer;
+    margin-bottom: 8px;
+    color: var(--pl-dim);
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
 
 #pl-msg, .pl-error {
     margin: 8px 0;
@@ -453,12 +486,17 @@ html.pl-rest { --pl-clock: max(18px, min(17vw, 50vh)); }    /* room for the "+12
 }
 .pl-act-dash { color: var(--pl-dim); }
 .pl-act-over.pl-gap-warn { color: var(--pl-amber); }    /* I lost the wheel, or the team needs them */
+.pl-act-over.pl-gap-closing { color: var(--pl-ok); }    /* the same gap, closing (user, 17 Nov 2026) */
 /* The wheel to drop in behind (user, 14 Nov 2026): "Wheel ■ DANA", the name bright, amber when it
    is not the plan's wheel. */
 .pl-act-over .pl-over-lbl { font-weight: 400; margin-right: 0.15em; }
 .pl-act-over .pl-swatch { width: 0.7em; height: 0.7em; margin: 0 0.4em 0 0.3em; vertical-align: 0; }
 .pl-act-over.pl-cue #pl-act-overtxt { color: var(--pl-fg); font-weight: 700; }
 .pl-act-over.pl-cue-swap #pl-act-overtxt { color: var(--pl-amber); }
+/* A correction of the countdown (expert panel, 18 Nov 2026): bold, dim when my pull comes later,
+   amber when sooner (and "READY off"); never green or red (closing gap, Sauce's red theme). */
+.pl-act-over.pl-corr #pl-act-overtxt { font-weight: 700; }
+.pl-act-over.pl-corr.pl-corr-sooner { color: var(--pl-amber); }
 /* A gap in the line during my pull, in the bar's place (user, 13 Nov 2026): red with white text and a
    white edge when the team needs the riders cut off (the edge keeps it apart from the red default
    theme), amber for riders it can spare. */
@@ -479,6 +517,9 @@ html.pl-rest { --pl-clock: max(18px, min(17vw, 50vh)); }    /* room for the "+12
     color: hsl(0 0% 7%);
 }
 .pl-gap-band[data-critical="1"] { background: hsl(0 85% 46%); color: #fff; box-shadow: 0 0 0 2px #fff; }
+/* Closing (user, 17 Nov 2026: the rider behind closes it himself): the theme's positive colour, the
+   white edge stays on a critical gap. */
+.pl-gap-band[data-closing="1"] { background: var(--pl-ok); color: hsl(0 0% 7%); }
 .pl-act-time { font-size: var(--pl-mid); margin-left: 0.3em; }
 .pl-act-row .pl-warn { color: var(--pl-amber); }
 
@@ -539,6 +580,7 @@ html.pl-rest { --pl-clock: max(18px, min(17vw, 50vh)); }    /* room for the "+12
 .pl-bar.pl-gapped { display: none; }    /* the gap band takes its place, same height */
 .pl-bar.pl-gap-early { box-shadow: 0 0 0 2px hsl(0 0% 0% / 0.55), 0 0 0 5px var(--pl-amber); }    /* the gap's early stage, outside the dark edge */
 .pl-tri-unit.pl-gap-warn { color: var(--pl-amber); }
+.pl-tri-unit.pl-gap-warn.pl-gap-closing { color: var(--pl-ok); }    /* closing: only the label, the bar stays plain */
 /* A pull without target watts: a neutral grey track, no zones, no marker. */
 .pl-bar.pl-neutral { background: hsl(0 0% 60% / 0.55); }
 .pl-bar.pl-neutral .pl-bar-tick { display: none; }

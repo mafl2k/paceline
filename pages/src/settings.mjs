@@ -1,12 +1,18 @@
-// Settings window: import the planner files, choose the pull target unit and the plan server,
-// show who you are in the plan, list recordings.
-// Plain DOM; rider names come from files, so they only ever go in through textContent.
+// Settings window: the plan server and its Clubs table, import the planner files, choose the pull
+// target unit, show who you are in the plan, list recordings.
+// Plain DOM; rider names come from files and club names from the plan server, so they only ever go
+// in through textContent.
 import {importFiles, findMe, PlanError} from './engine/plan.mjs';
-import {addPlan} from './engine/library.mjs';
+import {addPlan, fileEntry, activeEntry, fileActive, endFilePlan} from './engine/library.mjs';
+import {serverBase, checkUrl, checkHeaders} from './engine/planserver.mjs';
+import {settingsCheckResult, setJoined, joinedIds, sameJoined, sameCodes, normalizeCode, formatCode,
+        codesToSend, addByCode, MAX_CODES} from './engine/clubs.mjs';
+import {readClubs, writeClubs, onClubsChange, initClubs as initSharedClubs} from './clubs.mjs';
+import {VERSION} from './version.mjs';
 import {emptyPending, mergePending, markImported} from './engine/pending.mjs';
 import {recordingFileName} from './engine/recording.mjs';
 import {serverConfigChange, logUploadChange, logUploadSinceFix, demoChange, demoOn} from './engine/prefs.mjs';
-import {sessionSlug, autoUploadState} from './engine/logupload.mjs';
+import {sessionTarget, autoUploadState} from './engine/logupload.mjs';
 import {readLibrary, writeLibrary, activePlan, initFlush, onLibraryChange, readPrefs, writePrefs,
         onPrefsChange, liveSessionId, REC_STATE_KEY, LEASE_KEY} from './store.mjs';
 import {listSessions, exportSession, deleteSession} from './recdb.mjs';
@@ -19,10 +25,17 @@ const $ = sel => document.querySelector(sel);
 const ERROR_KEYS = {'no-json': 'noJson', 'not-a-plan': 'notAPlan', 'unreadable': 'unreadable'};
 const SELF_POLL_MS = 3000;
 const LIVE_POLL_MS = 5000;
-const UPLOAD_ERROR_KEYS = {offline: 'upErrOffline', notfound: 'upErrNotfound', toolarge: 'upErrToolarge',
+const UPLOAD_ERROR_KEYS = {offline: 'upErrOffline', forbidden: 'upErrForbidden', notfound: 'upErrNotfound',
+                           exists: 'upErrExists', refused: 'upErrRefused', toolarge: 'upErrToolarge',
                            full: 'upErrFull', http: 'upErrHttp', local: 'upErrLocal'};
+const FETCH_TIMEOUT_MS = 15000;   // a plan server request that takes longer counts as not reachable
+const MAX_RECHECKS = 3;           // answers that ask for another check at once, in a row
+// What a pasted code may carry besides what normalizeCode ignores (server/api.mjs readCodes): any
+// white space (tab, NBSP) and the Unicode dashes.
+const CODE_JUNK_RE = /[\s\u2010-\u2015\u2212]/g;
 
 let Common = null;
+let clubsReady = false;          // the shared Clubs copy is merged (or Sauce didn't answer in time)
 let selfId = null;
 let liveWeight = null;            // my weight from Sauce (kg), for W/kg; the plan weight is the fallback
 let shown = null;                 // {plan, warnings} currently on screen
@@ -33,6 +46,16 @@ let listKey = null;               // identity of the recordings list on screen
 let livePoll = null;
 let shownLogUpload = null;        // the upload choice (and its tick time) the recordings list was last asked for
 const uploadingIds = new Set();   // sessions with an Upload button press under way
+// This window's settings check (spec §7.1): it never activates a plan, so what it found stays here.
+let checkQueue = Promise.resolve();
+let queuedPlain = null;           // a plain check that waits in the queue (ticks share it)
+let openingDone = false;          // the check when the window opens has run
+let checkError = null;            // {kind, at} of the last settings check that failed, or null
+let nextPlan = null;              // {label, startAt}: what the joined clubs have waiting
+let several = false;              // several clubs list the rider and none was joined
+let shownServerOn = null;         // the server on/off the file box was last set for
+let shownClubs = null;            // identity of the Clubs rows on screen
+let adding = false;               // an "Add club by code" under way
 
 
 // ---------- static copy ----------
@@ -69,6 +92,9 @@ function showMessage(text) {
 function warningText(w) {
     if (w.code === 'pull-mismatch') {
         return fmt('pullMismatch', {name: w.name});
+    }
+    if (w.code === 'watts-mismatch') {
+        return fmt('wattsMismatch', {name: w.name});
     }
     if (w.code === 'unmatched-text-row') {
         return fmt('unmatched', {name: w.name});
@@ -148,6 +174,7 @@ function renderYou() {
 function renderFromLibrary() {
     shown = activePlan();
     renderPlan();
+    renderServer(readPrefs());
 }
 
 
@@ -176,10 +203,11 @@ function importTexts(texts) {
     }
     const {plan, warnings} = res;
     pending = markImported(cand);
-    writeLibrary(addPlan(readLibrary(), {sig: plan.sig, json: cand.json, text: cand.text, loadedAt: Date.now()}));
+    writeLibrary(addPlan(readLibrary(), fileEntry({sig: plan.sig, json: cand.json, text: cand.text, now: Date.now()})));
     const saved = activePlan();
     shown = {plan, warnings};
     renderPlan();
+    renderServer(readPrefs());    // the file mark
     showMessage(saved && saved.plan.sig === plan.sig ? '' : S.saveFailed);
     return true;
 }
@@ -263,11 +291,12 @@ function renderPrefs(prefs) {
     // The rotation table during the ride is part of captain mode: only with it on.
     $('#pl-show-rotation').checked = prefs.showRotation;
     $('#pl-show-rotation').disabled = !prefs.showNext;
-    $('#pl-rest-in-action').checked = prefs.restInAction;
     $('#pl-ttt-only').checked = prefs.tttOnly;
     $('#pl-rec-no-plan').checked = prefs.recordWithoutPlan;
     $('#pl-rec-no-plan').disabled = !prefs.tttOnly;
     renderServer(prefs);
+    renderClubs();
+    openingCheck();
     renderDemo(prefs);
     renderYou();
     const upload = JSON.stringify([prefs.logUpload, prefs.logUploadSince]);
@@ -290,13 +319,22 @@ function hhmm(ms) {
 }
 
 
-// The plan server's status as the polling overlay window left it in the preferences.
-function serverErrorText(p) {
-    const time = p.serverCheckedAt === null ? '' : hhmm(p.serverCheckedAt);
-    switch (p.serverError) {
+// "12 Nov", and "Thu 19 Nov 19:30" (local time), as the spec writes them.
+function dayMonth(ms) {
+    return new Date(ms).toLocaleDateString('en-GB', {day: 'numeric', month: 'short'});
+}
+
+
+function weekdayTime(ms) {
+    return `${new Date(ms).toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'})} ${hhmm(ms)}`;
+}
+
+
+function errorText(kind, at) {
+    const time = at === null ? '' : hhmm(at);
+    switch (kind) {
     case 'offline': return fmt('serverErrOffline', {time});
-    case 'notfound': return p.serverTeam ? fmt('serverErrNotFoundTeam', {time, team: p.serverTeam}) :
-        fmt('serverErrNotFoundMe', {time});
+    case 'notfound': return S.serverErrNotFound;
     case 'http': return fmt('serverErrHttp', {time});
     case 'invalid': return fmt('serverErrInvalid', {time});
     case 'badurl': return S.serverErrBadUrl;
@@ -305,29 +343,56 @@ function serverErrorText(p) {
 }
 
 
+// The status line (spec §7.6): the server plan as the polling overlay window left it in the
+// preferences ("Rollers fast · RE5CFQ · Kettenfett RC · checked 19:02"), or "Plan opens …" while a
+// body-less record waits and no server plan is active; the notice after it.
+function statusText(p) {
+    if (!p.serverOn) {
+        return S.serverOff;
+    }
+    let text;
+    if (activeEntry(readLibrary())?.source !== 'server' && Number.isFinite(p.serverOpensAt)) {
+        text = fmt('opensLine', {time: hhmm(p.serverOpensAt), label: p.serverOpensLabel ?? ''});
+    } else if (p.serverSig) {
+        const at = p.serverCheckedAt ?? p.serverOkAt;
+        text = fmt('serverStatus', {label: p.serverLabel ?? S.noWattsCell, sig: p.serverSig,
+                                    club: p.serverClub ?? S.noWattsCell, time: at === null ? S.noWattsCell : hhmm(at)});
+        if (p.serverFits !== null) {
+            text = [text, fmt('serverFits', {n: p.serverFits})].join(S.joiner);
+        }
+    } else {
+        text = p.serverError ? '' : S.serverWaiting;
+    }
+    return [text, p.serverNotice].filter(Boolean).join(S.joiner);
+}
+
+
 function renderServer(p) {
     $('#pl-server-on').checked = p.serverOn;
     $('#pl-log-upload').checked = p.logUpload;
     // Never overwrite what the rider is typing.
-    for (const [sel, value] of [['#pl-server-team', p.serverTeam], ['#pl-server-url', p.serverUrl]]) {
-        const el = $(sel);
-        if (document.activeElement !== el) {
-            el.value = value;
-        }
+    const urlEl = $('#pl-server-url');
+    if (document.activeElement !== urlEl) {
+        urlEl.value = p.serverUrl;
     }
-    let status = S.serverOff;
-    if (p.serverOn) {
-        status = p.serverSig ?
-            fmt('serverStatus', {team: p.serverTeamName || S.serverNoTeam, sig: p.serverSig, time: hhmm(p.serverOkAt ?? Date.now())}) :
-            p.serverError ? '' : S.serverWaiting;
+    setText($('#pl-server-status'), statusText(p));
+    // This window's own failed check, unless the overlay has checked since; else the overlay's last
+    // in-event check.
+    const own = checkError && !(p.serverCheckedAt > checkError.at);
+    const errText = !p.serverOn ? '' : own ? errorText(checkError.kind, checkError.at) :
+        errorText(p.serverError, p.serverCheckedAt);
+    setText($('#pl-server-err'), errText);
+    setText($('#pl-server-next'), p.serverOn && nextPlan ? fmt('serverNext', {
+        label: String(nextPlan.label ?? ''), when: weekdayTime(Date.parse(nextPlan.startAt))}) : '');
+    $('#pl-file-mark').hidden = !(p.serverOn && fileActive(readLibrary(), {now: Date.now(), serverOn: p.serverOn}));
+    // With a server the files are the exception: collapsed. Without one the drop zone is open, as
+    // before, and can't be closed. Only a change of on/off moves it, never a re-render.
+    if (p.serverOn !== shownServerOn) {
+        shownServerOn = p.serverOn;
+        const box = $('#pl-file-box');
+        box.open = !p.serverOn;
+        box.classList.toggle('pl-files-only', !p.serverOn);
     }
-    const st = $('#pl-server-status');
-    st.textContent = status;
-    st.hidden = !status;
-    const err = $('#pl-server-err');
-    const errText = p.serverOn ? serverErrorText(p) : '';
-    err.textContent = errText;
-    err.hidden = !errText;
 }
 
 
@@ -335,9 +400,279 @@ function saveServer() {
     const changes = serverConfigChange(readPrefs(), {
         serverOn: $('#pl-server-on').checked,
         serverUrl: $('#pl-server-url').value,
-        serverTeam: $('#pl-server-team').value,
     });
+    if (changes) {
+        // Another server (or on again) starts over, like a freshly opened window.
+        openingDone = false;
+        checkError = null;
+        nextPlan = null;
+        several = false;
+    }
     renderPrefs(changes ? writePrefs(changes) : readPrefs());
+    if (changes) {
+        initSharedClubs(Common, clubsBase());    // the shared copy follows the new server
+    }
+}
+
+
+// ---------- clubs and the settings check ----------
+
+function clubsBase() {
+    return serverBase(readPrefs().serverUrl);
+}
+
+
+// "lists you · your club since 12 Nov · private · code 7Q4MZ-2KX9B"
+function clubNote(r) {
+    const parts = [];
+    if (r.lists) {
+        parts.push(S.clubListsYou);
+    }
+    if (r.joined && Number.isFinite(r.joinedAt)) {
+        parts.push(fmt('clubSince', {date: dayMonth(r.joinedAt)}));
+    }
+    if (r.codeState === 'ok' && r.code !== null) {
+        parts.push(fmt('clubPrivate', {code: formatCode(r.code)}));
+    } else if (r.codeState === 'bad') {
+        parts.push(S.clubCodeBad);
+    } else if (r.codeState === 'needed') {
+        parts.push(S.clubCodeNeeded);
+    }
+    return parts.join(S.joiner);
+}
+
+
+function onTick(id, joined) {
+    const base = clubsBase();
+    writeClubs(setJoined(readClubs(base), id, joined, Date.now(), 'rider'));
+    renderClubs();
+    settingsCheck();
+}
+
+
+function renderClubs() {
+    const p = readPrefs();
+    $('#pl-clubs').hidden = !p.serverOn;
+    const {clubs} = readClubs(serverBase(p.serverUrl));
+    const ul = $('#pl-clubs-list');
+    const key = JSON.stringify(clubs.map(r => [r.id, r.name, r.joined, clubNote(r)]));
+    if (key !== shownClubs) {
+        shownClubs = key;
+        ul.replaceChildren(...clubs.map(r => {
+            const li = document.createElement('li');
+            li.className = 'pl-club';
+            const label = document.createElement('label');
+            label.className = 'pl-check';
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = r.joined;
+            box.addEventListener('change', () => onTick(r.id, box.checked));
+            const name = document.createElement('span');
+            name.className = 'pl-club-name';
+            name.textContent = r.name;
+            label.append(box, name);
+            const note = document.createElement('div');
+            note.className = 'pl-note pl-club-note';
+            note.textContent = clubNote(r);
+            li.append(label, note);
+            return li;
+        }));
+    }
+    const empty = $('#pl-clubs-empty');
+    empty.hidden = clubs.length > 0;
+    setText(empty, selfId === null ? S.clubsEmptyNoId : fmt('clubsEmpty', {id: selfId}));
+    $('#pl-clubs-several').hidden = !(several && clubs.length > 0 && !clubs.some(r => r.joined));
+}
+
+
+// The codes a check carries: the table's (codesToSend) plus `extra`, at most MAX_CODES. When the
+// table already fills them, the extra code takes the last place, which is an unticked club's
+// whenever there is one.
+function codesWith(codes, extra) {
+    if (extra === null || codes.includes(extra)) {
+        return codes;
+    }
+    return [...codes.slice(0, MAX_CODES - 1), extra];
+}
+
+
+// The settings check (spec §7.1): without start and event, and its answer never activates a plan.
+// It fills the Clubs table (auto-join included) and shows what is waiting. Checks run one after
+// the other; ticks made while one waits share it. Resolves to {answer, base} on a 200 answer, else
+// {status} (429), {error} or {skipped}.
+export function settingsCheck({extraCode = null} = {}) {
+    return enqueue(extraCode, 0);
+}
+
+
+function enqueue(extraCode, depth) {
+    if (extraCode === null && queuedPlain) {
+        return queuedPlain;
+    }
+    const run = checkQueue.then(() => {
+        if (extraCode === null) {
+            queuedPlain = null;
+        }
+        return runCheck(extraCode, depth);
+    });
+    checkQueue = run.catch(e => console.error('Paceline: settings check failed', e));
+    if (extraCode === null) {
+        queuedPlain = run;
+    }
+    return run;
+}
+
+
+function setCheckError(kind) {
+    checkError = kind ? {kind, at: Date.now()} : null;
+    renderServer(readPrefs());
+}
+
+
+async function runCheck(extraCode, depth) {
+    const p = readPrefs();
+    if (!p.serverOn || selfId === null) {
+        return {skipped: true};
+    }
+    const base = serverBase(p.serverUrl);
+    if (!base) {
+        setCheckError('badurl');
+        return {error: 'badurl'};
+    }
+    const clubs = readClubs(base);
+    const codes = codesWith(codesToSend(clubs), extraCode);
+    // The active plan's code goes along as in the overlay (spec §7.1 "Sent"), so the club's "has the
+    // plan" stays true for a rider who opens settings.
+    const sig = activePlan()?.plan.sig ?? null;
+    const url = checkUrl({url: p.serverUrl, selfId, mod: VERSION, joined: joinedIds(clubs), sig});
+    if (!url) {
+        return {skipped: true};
+    }
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+    let res = null;
+    let answer = null;
+    let error = null;
+    try {
+        res = await fetch(url, {cache: 'no-store', headers: checkHeaders(codes), signal: ctl.signal});
+        if (res.status === 200) {
+            answer = await res.json();
+        }
+    } catch(e) {
+        error = res && !ctl.signal.aborted ? 'invalid' : 'offline';
+    } finally {
+        clearTimeout(timer);
+    }
+    // The rider changed the server or switched it off meanwhile: the answer no longer counts.
+    const cur = readPrefs();
+    if (cur.serverUrl !== p.serverUrl || !cur.serverOn) {
+        return {skipped: true};
+    }
+    if (!error && res.status === 429 && extraCode !== null) {
+        return {status: 429};    // "Add club by code" says it
+    }
+    if (!error && res.status !== 200) {
+        error = 'http';
+    }
+    if (!error && (!answer || typeof answer !== 'object' || Array.isArray(answer))) {
+        error = 'invalid';
+    }
+    if (error) {
+        setCheckError(error);
+        return {error};
+    }
+    checkError = null;
+    // Into a fresh read (spec §7.2 "Lost update"). When the ticks or codes changed while it ran,
+    // what it says is waiting belongs to the old ticks: keep the clubs part and ask again.
+    const fresh = readClubs(base);
+    const lost = !sameJoined(fresh, clubs) || !sameCodes(fresh, clubs);
+    const out = settingsCheckResult(fresh, answer, {now: Date.now(), sentCodes: codes});
+    if (JSON.stringify(out.clubs) !== JSON.stringify(fresh)) {
+        writeClubs(out.clubs);
+    }
+    several = out.several;
+    if (!lost) {
+        nextPlan = out.next;
+    }
+    renderServer(readPrefs());
+    renderClubs();
+    if ((lost || out.recheck) && depth < MAX_RECHECKS) {
+        enqueue(null, depth + 1);
+    }
+    return {answer, base};
+}
+
+
+// Opening the window checks once, as soon as the Zwift ID is known and the server is on and usable.
+function openingCheck() {
+    const p = readPrefs();
+    if (!clubsReady || openingDone || selfId === null || !p.serverOn || !serverBase(p.serverUrl)) {
+        return;
+    }
+    openingDone = true;
+    settingsCheck();
+}
+
+
+function codeMessage(text) {
+    setText($('#pl-club-code-msg'), text);
+}
+
+
+// "Add club by code" (spec §7.2): a settings check carrying the code; the club is added (ticked)
+// only when the answer echoes it. Nothing is stored for a code that didn't work.
+async function addClubByCode() {
+    const field = $('#pl-club-code');
+    const code = normalizeCode(field.value.replace(CODE_JUNK_RE, ''));
+    if (code === null) {
+        codeMessage(S.clubCodeMalformed);
+        return;
+    }
+    if (adding) {
+        return;
+    }
+    adding = true;
+    $('#pl-club-code-add').disabled = true;
+    codeMessage('');
+    try {
+        const r = await settingsCheck({extraCode: code});
+        if (r.status === 429) {
+            codeMessage(S.clubCodeBusy);
+        } else if (r.answer) {
+            const {state, added} = addByCode(readClubs(r.base), r.answer, code, Date.now());
+            if (added) {
+                writeClubs(state);
+                codeMessage(fmt('clubCodeAdded', {club: added.name}));
+                field.value = '';
+                renderClubs();
+                settingsCheck();
+            } else {
+                codeMessage(S.clubCodeUnknown);
+            }
+        } else if (r.skipped && selfId === null) {
+            codeMessage(S.noSelf);
+        }
+    } finally {
+        adding = false;
+        $('#pl-club-code-add').disabled = false;
+    }
+}
+
+
+function initClubs() {
+    $('#pl-club-code-add').addEventListener('click', addClubByCode);
+    $('#pl-club-code').addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            addClubByCode();
+        }
+    });
+    $('#pl-file-remove').addEventListener('click', () => {
+        writeLibrary(endFilePlan(readLibrary(), Date.now()));
+        renderFromLibrary();
+    });
+    onClubsChange(renderClubs);
+    renderClubs();
 }
 
 
@@ -352,7 +687,7 @@ function initPrefs() {
         });
     }
     // Text fields save on Enter or when they lose focus.
-    for (const sel of ['#pl-server-on', '#pl-server-team', '#pl-server-url']) {
+    for (const sel of ['#pl-server-on', '#pl-server-url']) {
         $(sel).addEventListener('change', saveServer);
     }
     $('#pl-log-upload').addEventListener('change', () => {
@@ -369,9 +704,6 @@ function initPrefs() {
     });
     $('#pl-rec-no-plan').addEventListener('change', () => {
         renderPrefs(writePrefs({recordWithoutPlan: $('#pl-rec-no-plan').checked}));
-    });
-    $('#pl-rest-in-action').addEventListener('change', () => {
-        renderPrefs(writePrefs({restInAction: $('#pl-rest-in-action').checked}));
     });
     $('#pl-demo-btn').addEventListener('click', () => {
         const now = Date.now();
@@ -391,6 +723,8 @@ async function refreshSelf() {
         selfId = id;
         liveWeight = w ?? liveWeight;
         renderPlan();
+        renderClubs();
+        openingCheck();
     }
     return id;
 }
@@ -398,6 +732,12 @@ async function refreshSelf() {
 
 function initSelf() {
     if (!Common) {
+        // Plain-browser preview only: ?athlete=<Zwift ID> stands in for Zwift (like ?demo).
+        const id = new URLSearchParams(location.search).get('athlete');
+        selfId = id !== null && /^\d{1,12}$/.test(id) ? id : null;
+        renderPlan();
+        renderClubs();
+        openingCheck();
         return;
     }
     refreshSelf();
@@ -633,7 +973,9 @@ async function uploadRow(btn, row) {
         return;
     }
     const p = readPrefs();
-    const opts = {url: p.serverUrl, slug: sessionSlug(row.meta, p, shown ? shown.plan : null),
+    // no club to send it to: slug and circle stay undefined, and uploadSession answers 'badurl'
+    const target = sessionTarget(row.meta);
+    const opts = {url: p.serverUrl, slug: target?.slug, circle: target?.circle,
                   athleteId: row.meta.selfId ?? selfId, now: Date.now()};
     uploadingIds.add(id);
     btn.disabled = true;
@@ -675,6 +1017,12 @@ export async function settingsMain() {
     }
     $('#pl-done').addEventListener('click', () => window.close());
     initImport();
+    initClubs();
+    // The table shared by all window profiles first: no opening check before it is merged.
+    initSharedClubs(Common, serverBase(readPrefs().serverUrl)).then(() => {
+        clubsReady = true;
+        openingCheck();
+    });
     initPrefs();
     $('#pl-rec-list').addEventListener('click', onRecordingAction);
 

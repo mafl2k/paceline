@@ -71,16 +71,59 @@ test('trackFront chaos rule: within CHAOS_WINDOW_MS of a change a new front ride
     assert.equal(R.resumeFront({...R.initialFront(), puller: 'A', since: 0}, {now: 5000, frontId: 'A'}).changedAt, 5000);
 });
 
+test('trackFront: the rider who pulled before the puller takes the front back only after BACK_HOLD_MS', () => {
+    assert.equal(R.BACK_HOLD_MS, 30000);
+    // B pulls since 0 (the last change long ago); A, who pulled before him, is in front from 100 s.
+    let s = {...R.initialFront(), puller: 'B', since: 0, changedAt: 0};
+    for (let t = 100; t < 130; t++) {
+        s = R.trackFront(s, {now: t * 1000, frontId: 'A', backId: 'A'});
+    }
+    assert.equal(s.puller, 'B');                          // 29 s: still B (12 Nov race: 15 s, then B again)
+    s = R.trackFront(s, {now: 130000, frontId: 'A', backId: 'A'});
+    assert.equal(s.puller, 'A'); assert.equal(s.since, 100000);    // he really pulls on: backdated
+    // Back to B within the hold: B keeps his since, the clock never moved.
+    let f = {...R.initialFront(), puller: 'B', since: 0, changedAt: 0};
+    for (let t = 100; t < 115; t++) {
+        f = R.trackFront(f, {now: t * 1000, frontId: 'A', backId: 'A'});
+    }
+    f = R.trackFront(f, {now: 115000, frontId: 'B', backId: 'A'});
+    assert.deepEqual([f.puller, f.since, f.cand], ['B', 0, null]);
+    // Anyone else keeps the normal hold.
+    let g = {...R.initialFront(), puller: 'B', since: 0, changedAt: 0};
+    for (const t of [100, 101, 102, 103]) {
+        g = R.trackFront(g, {now: t * 1000, frontId: 'C', backId: 'A'});
+    }
+    assert.equal(g.puller, 'C');
+    // After a pause adopted B from a scrambled order, A is not held back longer than the chaos hold.
+    let h = R.resumeFront({...R.initialFront(), puller: 'A', since: 0, changedAt: 0}, {now: 50000, frontId: 'B'});
+    assert.equal(h.puller, 'B');
+    for (let t = 60; t <= 75; t++) {
+        h = R.trackFront(h, {now: t * 1000, frontId: 'A', backId: 'A'});
+    }
+    assert.equal(h.puller, 'A');                          // 15 s (chaos window after the pause)
+});
+
+
+test('riderBefore: the present rider directly before the puller in plan order', () => {
+    const plan = {riders: ['a', 'b', 'c', 'd'].map(id => ({id}))};
+    assert.equal(R.riderBefore(plan, {pullerId: 'c', presentIds: ['a', 'b', 'c', 'd']}), 'b');
+    assert.equal(R.riderBefore(plan, {pullerId: 'c', presentIds: ['a', 'c', 'd']}), 'a');      // b gone
+    assert.equal(R.riderBefore(plan, {pullerId: 'a', presentIds: ['a', 'b', 'c', 'd']}), 'd');  // wraps
+    assert.equal(R.riderBefore(plan, {pullerId: 'a', presentIds: ['a']}), null);
+    assert.equal(R.riderBefore(plan, {pullerId: 'x', presentIds: ['a']}), null);
+});
+
+
 test('rotationView: time to my pull skips absent riders', () => {
     const {plan} = P.importFiles([json, txt]);
     const front = {puller: '5100004', since: 0};           // Bodo pulling 60 s
     const all = plan.riders.map(r => r.id);
     let v = R.rotationView(plan, {selfId: '5100002', chainIds: all, wheelId: '5100003', front, now: 20000});
-    assert.equal(v.toMyPullS, 40 + 60 + R.CHANGE_ALLOWANCE_S);        // rest of Bodo + Kim (and the allowance)
+    assert.equal(v.toMyPullS, 40 + R.CHANGE_ALLOWANCE_S + 60);        // rest of Bodo (and the allowance) + Kim (before me)
     assert.equal(v.place, 3);                             // Bodo 1, Kim 2, me 3
     assert.equal(v.next.id, '5100003'); assert.equal(v.wheel.colorName, 'Yellow'); assert.equal(v.mine, false);
     v = R.rotationView(plan, {selfId: '5100002', chainIds: all.filter(id => id !== '5100003'), wheelId: null, front, now: 20000});
-    assert.equal(v.toMyPullS, 40);                        // Kim absent
+    assert.equal(v.toMyPullS, 40);                        // Kim absent: Bodo is before me, his plan alone
     assert.equal(v.place, 2);
     assert.equal(v.next.id, '5100002');
 });
@@ -130,32 +173,64 @@ function planAll() {
     return {plan, all: plan.riders.map(r => r.id)};
 }
 
-test('rotationView: past his end the countdown runs on RUN_ON_S, then only riders in between', () => {
+test('rotationView: past his expected end the countdown runs on RUN_ON_S, then waits for the change', () => {
     const {plan, all} = planAll();
     assert.equal(R.RUN_ON_S, 3);
-    // Bodo (60 s) pulling; me Dario, Kim (60 s) between.
+    // Bodo (60 s) pulling, expected to end at 60 + K; me Dario, Kim (60 s, directly before me) between.
     const at = s => R.rotationView(plan, {selfId: '5100002', chainIds: all, wheelId: null,
                                           front: {puller: '5100004', since: 0}, now: s * 1000});
-    const K = R.CHANGE_ALLOWANCE_S;                          // Kim's pull counts K longer
-    assert.equal(at(59).toMyPullS, 61 + K);
-    assert.equal(at(60).toMyPullS, 60 + K);
-    assert.equal(at(62).toMyPullS, 58 + K);                  // runs on through the hold of a change
-    assert.equal(at(63).toMyPullS, 57 + K);
-    assert.equal(at(64).toMyPullS, 57 + K);                  // then waits for the change
+    const K = R.CHANGE_ALLOWANCE_S;
+    assert.equal(at(59).toMyPullS, 60 + K + 1);
+    assert.equal(at(60).toMyPullS, 60 + K);                  // his plan is over: the clock runs on
+    assert.equal(at(60 + K).toMyPullS, 60);
+    assert.equal(at(60 + K + 3).toMyPullS, 57);              // runs on through the hold of a change
+    assert.equal(at(60 + K + 4).toMyPullS, 57);              // then waits for the change
     const v = at(90);
-    assert.equal(v.remainingS, -30);
-    assert.equal(v.toMyPullS, 57 + K);
+    assert.equal(v.remainingS, -30);                         // his own clock still counts his plan
+    assert.equal(v.toMyPullS, 57);
 });
 
 
-test('rotationView: every pull between the puller and me counts CHANGE_ALLOWANCE_S more than planned', () => {
+test('rotationView: no jump at a change, the rider before me at plan, the puller expected at plan + 10 s', () => {
+    const {plan, all} = planAll();
+    const K = R.CHANGE_ALLOWANCE_S;
+    assert.equal(K, 10);
+    assert.equal(R.expectedPullS(60, false), 70); assert.equal(R.expectedPullS(60, true), 60);
+    const view = (puller, since, s) => R.rotationView(plan, {selfId: '5100002', chainIds: all, wheelId: null,
+                                                             front: {puller, since: since * 1000}, now: s * 1000});
+    // Arvid (120 s) pulls from 0: his expected end is 120 + K, then Bodo 60 + K, then Kim (before
+    // me) 60.
+    assert.equal(view('5100005', 0, 0).toMyPullS, 120 + K + 60 + K + 60);
+    assert.equal(view('5100005', 0, 120 + K).toMyPullS, 60 + K + 60);
+    assert.equal(view('5100005', 0, 120 + K).standing, false);
+    // He changes at his expected end, Bodo takes over: the clock goes on 1 s a second, no jump.
+    const before = view('5100005', 0, 120 + K - 1).toMyPullS;
+    const after = view('5100004', 120 + K, 120 + K).toMyPullS;
+    assert.equal(before - after, 1);
+    // Bodo's change to Kim at Bodo's expected end: no jump either.
+    assert.equal(view('5100004', 0, 60 + K - 1).toMyPullS - view('5100003', 60 + K, 60 + K).toMyPullS, 1);
+    // Kim, directly before me, counts only his plan: between and while he pulls.
+    assert.equal(view('5100004', 0, 0).toMyPullS, 60 + K + 60);
+    assert.equal(view('5100003', 0, 20).toMyPullS, 40);
+    assert.equal(view('5100003', 0, 60).toMyPullS, 0);       // 0 at his plan end: READY until he swings off
+    // Kim absent: Bodo is before me now and counts only his plan.
+    assert.equal(R.rotationView(plan, {selfId: '5100002', chainIds: all.filter(id => id !== '5100003'), wheelId: null,
+                                       front: {puller: '5100004', since: 0}, now: 0}).toMyPullS, 60);
+    // The start bonus stays part of the start puller's plan: expected at plan + bonus + K.
+    const b = R.rotationView(plan, {selfId: '5100002', chainIds: all, wheelId: null, now: 0,
+                                    front: {puller: '5100004', since: 0, bonus: {id: '5100004', since: 0, s: 20}}});
+    assert.equal(b.toMyPullS, 60 + 20 + K + 60);
+});
+
+
+test('rotationView: every pull counts CHANGE_ALLOWANCE_S more than planned but the one before mine', () => {
     const {plan, all} = planAll();
     assert.equal(R.CHANGE_ALLOWANCE_S, 10);
-    // Bodo (60 s) pulling from 0; me Dario, Kim (60 s) between: Bodo's 60 s + Kim's 60 + 10.
+    // Bodo (60 s) pulling from 0; me Dario, Kim (60 s, before me) between: Bodo's 60 + 10 s + Kim's 60.
     const v = R.rotationView(plan, {selfId: '5100002', chainIds: all, wheelId: null,
                                     front: {puller: '5100004', since: 0}, now: 0});
-    assert.equal(v.toMyPullS, 60 + 60 + R.CHANGE_ALLOWANCE_S);
-    // Next in line: only the puller's own time, no allowance.
+    assert.equal(v.toMyPullS, 60 + R.CHANGE_ALLOWANCE_S + 60);
+    // Next in line: only the puller's own time (he is before me), no allowance.
     const n = R.rotationView(plan, {selfId: '5100003', chainIds: all, wheelId: null,
                                     front: {puller: '5100004', since: 0}, now: 0});
     assert.equal(n.toMyPullS, 60);
@@ -164,12 +239,16 @@ test('rotationView: every pull between the puller and me counts CHANGE_ALLOWANCE
 
 test('rotationView: the standing clock (standing, overS) once the run-on is used up', () => {
     const {plan, all} = planAll();
+    const K = R.CHANGE_ALLOWANCE_S;
     const at = (s, selfId = '5100002', puller = '5100004') => R.rotationView(plan,
         {selfId, chainIds: all, wheelId: null, front: {puller, since: 0}, now: s * 1000});
     assert.equal(at(59).standing, false); assert.equal(at(59).overS, 0);
-    assert.equal(at(63).standing, false);                     // still running on
-    assert.equal(at(64).standing, true); assert.equal(at(64).overS, 4);
+    assert.equal(at(64).standing, false); assert.equal(at(64).overS, 4);    // over his plan, still expected
+    assert.equal(at(60 + K + 3).standing, false);             // still running on
+    assert.equal(at(60 + K + 4).standing, true); assert.equal(at(60 + K + 4).overS, K + 4);
     assert.equal(at(90).overS, 30);
+    // Next in line (Bodo is before Kim): his plan end plus the run-on.
+    assert.equal(at(63, '5100003').standing, false); assert.equal(at(64, '5100003').standing, true);
     // Not while I pull myself, nor when I am off the rotation view's path.
     assert.equal(at(90, '5100004').standing, false);
 });
@@ -183,7 +262,7 @@ test('rotationView: cyclic wrap from the last rider', () => {
     v = R.rotationView(plan, {selfId: '5100005', chainIds: all, wheelId: null, front, now: 5000});
     assert.equal(v.toMyPullS, 10);
     v = R.rotationView(plan, {selfId: '5100004', chainIds: all, wheelId: null, front, now: 20000});
-    assert.equal(v.toMyPullS, 117 + R.CHANGE_ALLOWANCE_S);   // Arvid 120 s (+ allowance) in between, Fritz 5 s over (3 s run on)
+    assert.equal(v.toMyPullS, 120 + 5);                      // Fritz 15 + 10 s, 20 s in; Arvid 120 s (before me)
     assert.equal(v.next.id, '5100005');
 });
 
@@ -558,6 +637,23 @@ test('resumeFront: the same front rider keeps his clock, another one is adopted 
     assert.equal(R.resumeFront(front, {now: 90000, frontId: null}).puller, 'A');
 });
 
+test('resumeFront: the puller from before the pause keeps the pull while less than RESUME_NEAR_M behind the front rider', () => {
+    // 17 Nov 2026 (ZRL): at the end of a descent the front rider was 0.2 m ahead of the puller, side
+    // by side at 67 km/h, and was adopted in one tick. On his wheel (2–5 m) the front really changed.
+    assert.equal(R.RESUME_NEAR_M, 2);
+    const front = {...R.initialFront(), puller: 'A', since: 1000};
+    const near = [{id: 'B', x: 10}, {id: 'A', x: 9}, {id: 'me', x: 6, self: true}];
+    assert.deepEqual(R.resumeFront(front, {now: 90000, frontId: 'B', chain: near}), {...front, changedAt: 90000});
+    for (const x of [7, 2]) {      // 3 m (on his wheel) and 8 m behind
+        const far = [{id: 'B', x: 10}, {id: 'A', x}, {id: 'me', x: 0, self: true}];
+        const s = R.resumeFront(front, {now: 90000, frontId: 'B', chain: far});
+        assert.equal(s.puller, 'B', `adopted from ${10 - x} m`); assert.equal(s.since, 90000); assert.equal(s.prev, null);
+    }
+    // The puller is not in my chain (or no chain is given): the front rider is adopted as before.
+    assert.equal(R.resumeFront(front, {now: 90000, frontId: 'B', chain: [{id: 'B', x: 10}, {id: 'me', x: 8}]}).puller, 'B');
+    assert.equal(R.resumeFront(front, {now: 90000, frontId: 'B'}).puller, 'B');
+});
+
 test('presence: a rider seen in my chain counts as present for PRESENT_GRACE_MS', () => {
     assert.equal(R.PRESENT_GRACE_MS, 20000);
     let p = R.presence({}, {now: 0, chainIds: ['A', 'me', 'B']});
@@ -654,11 +750,36 @@ test('finishMode: the last 500 m of a distance event', () => {
     assert.equal(R.finishMode(null), false);
 });
 
+test('finishStep: once on, finish mode stays on past the line until I stand still or another event shows', () => {
+    const ev = (remaining, remainingMetric = 'distance', remainingType = 'event') =>
+        ({remaining, remainingMetric, remainingType});
+    const step = (prev, entry, {live = true, still = false} = {}) => R.finishStep(prev, {live, entry, still});
+    assert.equal(step(false, ev(800)), false);
+    assert.equal(step(false, ev(500)), true);
+    assert.equal(step(false, {}), false);
+    // Past the line Sauce drops the event's `remaining` or shows the route's: still on.
+    assert.equal(step(true, {}), true);
+    assert.equal(step(true, null), true);
+    assert.equal(step(true, ev(3000, 'distance', 'route')), true);
+    assert.equal(step(true, ev(0)), true);
+    // Standing still ends it, also with the last metres still shown.
+    assert.equal(step(true, {}, {still: true}), false);
+    // Another event clearly before its finish ends it at once; only a distance counts.
+    assert.equal(step(true, ev(20000)), false);
+    assert.equal(step(true, ev(501)), false);
+    assert.equal(step(true, ev(1200, 'time')), true);
+    // A step without live data keeps the previous value, either way.
+    assert.equal(step(true, null, {live: false}), true);
+    assert.equal(step(false, ev(300), {live: false}), false);
+    assert.equal(step(undefined, {}), false);
+});
+
 
 // ---------- rotationStep: scenarios through the whole pure step ----------
 
-// Synthetic 1 Hz rides with the rollers plan. scenario(s) -> {me: {power, draft, grade}, others:
-// [{idx, dx}]} with dx = metres ahead of me. Returns per second {s, self, puller, since (s), view}.
+// Synthetic 1 Hz rides with the rollers plan. scenario(s) -> {me: {power, draft, grade, speed, age,
+// top}, others: [{idx, dx}]} with dx = metres ahead of me; `top` adds fields at the top level of my
+// entry (e.g. `remaining`). Returns per second {s, self, puller, since (s), view, finish}.
 function ride(scenario, {selfIdx = 0, from = 0, dur = 60, quietStart = false, terrain = () => undefined} = {}) {
     const {plan} = P.importFiles([json, txt]);
     const riderIds = new Set(plan.riders.map(r => r.id));
@@ -672,7 +793,7 @@ function ride(scenario, {selfIdx = 0, from = 0, dur = 60, quietStart = false, te
         const sc = scenario(s);
         const wt = 1e12 + s * 1000;
         const nearby = [
-            {athleteId: Number(selfId), self: true, age: 300, gapDistance: 0,
+            {athleteId: Number(selfId), self: true, age: sc.me.age ?? 300, gapDistance: 0, ...sc.me.top,
              state: {power: sc.me.power, draft: sc.me.draft, speed: sc.me.speed ?? 45, worldTime: wt, grade: (sc.me.grade ?? 0) / 100}},
             ...sc.others.map(o => ({athleteId: Number(plan.riders[o.idx].id), age: 800, gapDistance: -o.dx,
                                     state: {power: o.power ?? 250, draft: 50, speed: sc.me.speed ?? 45, worldTime: wt}})),
@@ -685,7 +806,8 @@ function ride(scenario, {selfIdx = 0, from = 0, dur = 60, quietStart = false, te
         const {view, reason} = R.rotationStatus(rot, {now, plan, selfId, live: true, quietStart});
         const kind = view ? (view.mine ? 'pull' : 'rest') : reason;
         out.push({s, self: r.self, puller: name(rot.front.puller),
-                  since: rot.front.since === null ? null : (rot.front.since - T0) / 1000, view: kind});
+                  since: rot.front.since === null ? null : (rot.front.since - T0) / 1000, view: kind,
+                  finish: rot.finish});
     }
     return out;
 }
@@ -918,8 +1040,8 @@ test('carryRotation: puller still in the new plan -> front, climb and presence k
 
 test('carryRotation: riders who left the plan are dropped from the kept state', () => {
     const {plan} = P.importFiles([json, txt]);
-    const noKim = {...plan, riders: plan.riders.filter(r => r.id !== '5100003')};
-    const next = R.carryRotation(midRace(), noKim);
+    const noKai = {...plan, riders: plan.riders.filter(r => r.id !== '5100003')};
+    const next = R.carryRotation(midRace(), noKai);
     assert.equal(next.front.puller, '5100004');
     assert.equal(next.front.since, 40000);
     assert.equal(next.front.cand, null);
@@ -1300,6 +1422,76 @@ test('rotationStep: a real descent pauses the rotation; a rider sprinting up mea
     }
     assert.equal(at(rows, 70).puller, 'Bodo');
     assert.ok(at(rows, 70).since >= 60, 'Bodo starts a fresh clock after the descent');
+});
+
+
+test('rotationStep: after a descent the puller from before it keeps the pull while 1 m behind the front rider', () => {
+    // I am Kim (#3). Arvid pulls from 0; a descent (route profile) from 40 to 60. From 48 Bodo is in
+    // front with Arvid beside him, 1 m back (17 Nov 2026: 0.2 m at 67 km/h); in the other rides
+    // Arvid is on his wheel, 3 m back, or 8 m back.
+    const descent = {hill: {kind: 'descent', roller: false}}, flat = {hill: null};
+    const run = behindM => ride(t => {
+        const grade = t >= 40 && t < 60 ? -5 : 0;
+        const bentFront = t >= 48;
+        return {me: {power: 150, draft: 80, grade},
+                others: [{idx: 0, dx: bentFront ? 5 - behindM : 6}, {idx: 1, dx: bentFront ? 5 : 3}]};
+    }, {selfIdx: 2, dur: 100, terrain: t => t >= 40 && t < 60 ? descent : flat});
+    const near = run(1);
+    for (let s = 60; s < 75; s++) {
+        assert.equal(at(near, s).puller, 'Arvid', `Arvid keeps the pull at ${s}`);
+    }
+    assert.ok(at(near, 70).since < 40, 'with his clock from before the descent');
+    // Bodo stays in front: he takes over after the chaos hold (the end of the descent was a change).
+    assert.equal(at(near, 90).puller, 'Bodo');
+    for (const m of [3, 8]) {
+        const far = run(m);
+        assert.equal(at(far, 61).puller, 'Bodo', `adopted at once from ${m} m`);
+        assert.equal(at(far, 61).since, 60);
+    }
+});
+
+
+test('rotationStep: finish mode stays on past the line, through a data gap, until I stand still', () => {
+    // I am Kim (#3) behind Arvid and Bodo. 800 m to go at 0 (20 m a second), the line at 40. Past
+    // it Sauce drops the event's remaining (41-49), then shows the route's (50-59); no data of mine
+    // 60-64; I stop from 70 and ride on from 85 (12 Nov and 17 Nov 2026: finish mode went off just
+    // past the line and the rotation ran on for 28 s).
+    const rows = ride(t => {
+        let top = {};
+        if (t <= 40) {
+            top = {remaining: 800 - 20 * t, remainingMetric: 'distance', remainingType: 'event'};
+        } else if (t >= 50 && t < 60) {
+            top = {remaining: 3000, remainingMetric: 'distance', remainingType: 'route'};
+        }
+        return {me: {power: 200, draft: 80, top, age: t >= 60 && t < 65 ? 20000 : 300,
+                     speed: t >= 70 && t < 85 ? 0 : 45},
+                others: [{idx: 0, dx: 6}, {idx: 1, dx: 3}]};
+    }, {selfIdx: 2, dur: 100});
+    assert.equal(at(rows, 14).finish, false);
+    for (let s = 15; s < 75; s++) {
+        assert.equal(at(rows, s).finish, true, `finish mode at ${s}`);
+    }
+    assert.equal(at(rows, 45).view, 'finish');
+    assert.equal(at(rows, 55).view, 'finish');
+    // Standing still for STOP_MS (a rotation was running) ends it; riding on does not bring it back.
+    assert.equal(at(rows, 75).finish, false);
+    assert.equal(at(rows, 95).finish, false);
+});
+
+
+test('rotationStep: finish mode ends when a new event shows 20 km to go', () => {
+    const rows = ride(t => {
+        let top = {};
+        if (t <= 40) {
+            top = {remaining: 800 - 20 * t, remainingMetric: 'distance', remainingType: 'event'};
+        } else if (t >= 50) {
+            top = {remaining: 20000, remainingMetric: 'distance', remainingType: 'event'};
+        }
+        return {me: {power: 200, draft: 80, top}, others: [{idx: 0, dx: 6}, {idx: 1, dx: 3}]};
+    }, {selfIdx: 2, dur: 60});
+    assert.equal(at(rows, 49).finish, true);
+    assert.equal(at(rows, 50).finish, false);
+    assert.equal(at(rows, 50).view, 'rest');
 });
 
 

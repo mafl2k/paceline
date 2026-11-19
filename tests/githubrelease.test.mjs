@@ -164,3 +164,77 @@ test('a manifest without a usable version is refused', async () => {
     const bad = path => JSON.stringify({version: 'dev'});
     await assert.rejects(run({env: env(), fetchFn: stub([]).fn, readFile: bad, log() {}}), /no usable version/);
 });
+
+
+// ---- pre-releases (GITHUB_PRERELEASE=1, the github-sync-beta job on branch next) ----
+
+const BETA = '1.3.0-beta.2';
+const betaFile = (path, enc) => {
+    if (path === 'manifest.json') {
+        return JSON.stringify({version: BETA});
+    }
+    if (path === `dist/paceline-${BETA}.zip`) {
+        return ZIP;
+    }
+    throw new Error(`ENOENT ${path}`);
+};
+const isBetaLookup = (url, init) => init.method === 'GET' && url === `https://api.github.com/repos/o/r/releases/tags/v${BETA}`;
+
+test('pre-release request: prerelease, never latest, the text says beta', () => {
+    assert.deepEqual(createRequest('o/r', BETA, SHA, '', {prerelease: true}), {
+        url: 'https://api.github.com/repos/o/r/releases',
+        method: 'POST',
+        body: {tag_name: `v${BETA}`, target_commitish: SHA, name: `Paceline ${BETA}`, body: `Paceline ${BETA} (beta)`,
+               draft: false, prerelease: true, make_latest: 'false'},
+    });
+    assert.equal(createRequest('o/r', BETA, SHA, 'mod: something', {prerelease: true}).body.body,
+        `Paceline ${BETA} (beta)\n\nmod: something`);
+    // a stable release keeps exactly its body: no make_latest, so GitHub makes it latest as before
+    assert.deepEqual(createRequest('o/r', '1.2.3', SHA, '', {prerelease: false}).body,
+        {tag_name: 'v1.2.3', target_commitish: SHA, name: 'Paceline 1.2.3', body: 'Paceline 1.2.3', draft: false, prerelease: false});
+});
+
+test('GITHUB_PRERELEASE=1: creates the pre-release on the snapshot commit, then uploads the zip', async () => {
+    const {fn, calls} = stub([
+        [isBetaLookup, reply(404, {message: 'Not Found'})],
+        [isCreate, reply(201, {id: 8, upload_url: UPLOAD, assets: []})],
+        [isUpload, reply(201, {})],
+    ]);
+    const logs = [];
+    const status = await run({env: env({GITHUB_PRERELEASE: '1', RELEASE_NOTES: 'mod: beta 2'}), fetchFn: fn,
+        readFile: betaFile, log: m => logs.push(m)});
+    assert.equal(status, 'created');
+    assert.deepEqual(calls.map(c => c.method), ['GET', 'POST', 'POST']);
+    assert.equal(calls[0].url, `https://api.github.com/repos/o/r/releases/tags/v${BETA}`);
+    assert.deepEqual(JSON.parse(calls[1].body), {tag_name: `v${BETA}`, target_commitish: SHA, name: `Paceline ${BETA}`,
+        body: `Paceline ${BETA} (beta)\n\nmod: beta 2`, draft: false, prerelease: true, make_latest: 'false'});
+    assert.equal(calls[2].url, `https://uploads.github.com/repos/o/r/releases/7/assets?name=paceline-${BETA}.zip`);
+    assert.equal(calls[2].body, ZIP);
+    assert.match(logs.join('\n'), new RegExp(`Created pre-release v${BETA.replace(/\./g, '\\.')} on aaaaaaaa`));
+});
+
+test('GITHUB_PRERELEASE=1: an existing pre-release with the zip means nothing happens', async () => {
+    const {fn, calls} = stub([[isBetaLookup, reply(200, {prerelease: true, upload_url: UPLOAD, assets: [{name: `paceline-${BETA}.zip`}]})]]);
+    assert.equal(await run({env: env({GITHUB_PRERELEASE: '1'}), fetchFn: fn, readFile: betaFile, log() {}}), 'exists');
+    assert.equal(calls.length, 1);
+});
+
+test('a beta never becomes a normal release, a plain version never a pre-release', async () => {
+    const {fn, calls} = stub([]);
+    await assert.rejects(run({env: env(), fetchFn: fn, readFile: betaFile, log() {}}),
+        /1\.3\.0-beta\.2 is a beta: set GITHUB_PRERELEASE=1/);
+    await assert.rejects(run({env: env({GITHUB_PRERELEASE: '1'}), fetchFn: fn, readFile, log() {}}),
+        /GITHUB_PRERELEASE=1 needs a beta version with a suffix, got 1\.2\.3/);
+    await assert.rejects(run({env: env({DRY_RUN: '1'}), fetchFn: fn, readFile: betaFile, log() {}}), /is a beta/);
+    assert.equal(calls.length, 0);
+});
+
+test('DRY_RUN with GITHUB_PRERELEASE=1: says it would create a pre-release, creates nothing', async () => {
+    const {fn, calls} = stub([[isBetaLookup, reply(404, '')]]);
+    const logs = [];
+    const status = await run({env: {GITHUB_REPO: 'o/r', DRY_RUN: '1', GITHUB_PRERELEASE: '1'}, fetchFn: fn,
+        readFile: betaFile, log: m => logs.push(m)});
+    assert.equal(status, 'dry-run');
+    assert.deepEqual(calls.map(c => c.method), ['GET']);
+    assert.match(logs.join('\n'), new RegExp(`Dry run: would create pre-release v${BETA.replace(/\./g, '\\.')} .* \\(dist/paceline-${BETA.replace(/\./g, '\\.')}\\.zip: 9 bytes\\)`));
+});

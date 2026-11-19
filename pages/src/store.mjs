@@ -5,9 +5,13 @@ import {importFiles, PlanError} from './engine/plan.mjs';
 import {normalizeLibrary, activeEntry} from './engine/library.mjs';
 import {LEASE_STALE_MS} from './engine/recording.mjs';
 import {normalizePrefs} from './engine/prefs.mjs';
+import {normalizeLock, normalizePending} from './engine/planserver.mjs';
 
 export const PLANS_KEY = 'paceline:plans:v1';
 export const PREFS_KEY = 'paceline:prefs:v1';
+// The ride lock and the latest in-event answer (spec §7.4), written by the poll lease owner.
+export const LOCK_KEY = 'paceline:lock:v1';
+export const PENDING_KEY = 'paceline:pending:v1';
 const FLUSH_EVERY_MS = 60000;
 
 let Common = null;    // Sauce common module, null when opened outside Sauce (standalone preview)
@@ -131,6 +135,64 @@ export function onPrefsChange(cb) {
     addEventListener('storage', ev => {
         if (ev.key === PREFS_KEY) {
             cb(readPrefs());
+        }
+    });
+}
+
+
+// ---- Ride lock and pending answer ----
+
+function readKey(key, normalize) {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw == null ? null : normalize(JSON.parse(raw));
+    } catch(e) {
+        return null;
+    }
+}
+
+
+function writeKey(key, value) {
+    try {
+        if (value === null) {
+            localStorage.removeItem(key);
+        } else {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+    } catch(e) {
+        console.error('Paceline: saving', key, 'failed', e);
+    }
+    schedFlush();
+}
+
+
+// null, {state: 'empty', eventKey} or {state: 'bound', circle, slug, eventKey}; malformed: null.
+export function readLock() {
+    return readKey(LOCK_KEY, normalizeLock);
+}
+
+
+export function writeLock(lock) {
+    writeKey(LOCK_KEY, normalizeLock(lock));
+}
+
+
+// {eventKey, at, plans, hint} or null; malformed: null.
+export function readPending() {
+    return readKey(PENDING_KEY, normalizePending);
+}
+
+
+export function writePending(p) {
+    writeKey(PENDING_KEY, normalizePending(p));
+}
+
+
+// Fires when another window changed `key` (the storage event never fires in the writer).
+export function onKeyChange(key, cb) {
+    addEventListener('storage', ev => {
+        if (ev.key === key) {
+            cb();
         }
     });
 }

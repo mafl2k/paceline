@@ -35,10 +35,6 @@
                     <strong id="pl-this-head" data-s="thisWindowInfo"></strong>
                     <button id="pl-done" type="button" data-s="done" data-s-title="close"></button>
                 </div>
-                <div class="pl-action-only">
-                    <label class="pl-check"><input id="pl-rest-in-action" type="checkbox"/> <span data-s="restInActionLabel"></span></label>
-                    <div class="pl-note" data-s="restInActionHelp"></div>
-                </div>
                 <div class="pl-info-only">
                     <label class="pl-check"><input id="pl-show-next" type="checkbox"/> <span data-s="showNextLabel"></span></label>
                     <label class="pl-check pl-sub"><input id="pl-show-rotation" type="checkbox"/> <span data-s="showRotationLabel"></span></label>
@@ -70,31 +66,25 @@
             <section id="pl-event">
                 <label class="pl-check"><input id="pl-ttt-only" type="checkbox"/> <span data-s="tttOnlyLabel"></span></label>
                 <div class="pl-note" data-s="tttOnlyHelp"></div>
-                <label class="pl-check pl-sub"><input id="pl-rec-no-plan" type="checkbox"/> <span data-s="recNoPlanLabel"></span></label>
-                <div class="pl-note" data-s="recNoPlanHelp"></div>
             </section>
 
+            <!-- The plan: from the plan server (status, what waits, the file mark), else from files. -->
             <section id="pl-plan">
                 <div class="pl-head"><strong data-s="planHeading"></strong></div>
                 <div class="pl-note"><span data-s="planCredit"></span>
                     <a href="https://zwiftgopher.com/TTT/" target="_blank" rel="noopener">zwiftgopher.com/TTT</a></div>
 
-                <div id="pl-drop" class="pl-drop">
-                    <div class="pl-help" data-s="planHelp"></div>
-                    <label class="pl-pick">
-                        <input id="pl-file" type="file" multiple accept=".json,.txt,.csv"/>
-                        <span class="pl-btn" data-s="pickFiles"></span>
-                    </label>
-                    <div class="pl-drop-hint" data-s="dropHint"></div>
+                <label class="pl-check"><input id="pl-server-on" type="checkbox"/> <span data-s="serverOnLabel"></span></label>
+                <div id="pl-server-notice-line" class="pl-note" data-s="serverNoticeLine"></div>
+                <!-- Both lines keep their place, empty when there is nothing to say. -->
+                <div id="pl-server-status" class="pl-slot"></div>
+                <div id="pl-server-err" class="pl-error pl-slot"></div>
+                <div id="pl-server-next" class="pl-slot"></div>
+
+                <div id="pl-file-mark" class="pl-file-mark" hidden>
+                    <span data-s="fileMark"></span>
+                    <button id="pl-file-remove" type="button" data-s="fileRemove"></button>
                 </div>
-
-                <details id="pl-paste">
-                    <summary data-s="pasteSummary"></summary>
-                    <textarea id="pl-paste-text" rows="5" spellcheck="false" data-s-placeholder="pastePlaceholder"></textarea>
-                    <button id="pl-paste-go" type="button" data-s="pasteImport"></button>
-                </details>
-
-                <div id="pl-msg" role="alert" hidden></div>
 
                 <div id="pl-result" hidden>
                     <div id="pl-team" class="pl-team"></div>
@@ -109,25 +99,40 @@
                 </div>
                 <div id="pl-noplan" class="pl-note"></div>
 
-                <div class="pl-unit" role="radiogroup" aria-labelledby="pl-unit-label">
-                    <span id="pl-unit-label" data-s="targetUnitLabel"></span>
-                    <label><input type="radio" name="pl-unit" value="W"/> <span data-s="unitW"></span></label>
-                    <label><input type="radio" name="pl-unit" value="Wkg"/> <span data-s="unitWkg"></span></label>
-                </div>
+                <!-- Collapsed while the plan server is on; open, without its summary, while it is off. -->
+                <details id="pl-file-box">
+                    <summary data-s="fileBoxSummary"></summary>
+                    <div id="pl-drop" class="pl-drop">
+                        <div class="pl-help" data-s="planHelp"></div>
+                        <label class="pl-pick">
+                            <input id="pl-file" type="file" multiple accept=".json,.txt,.csv"/>
+                            <span class="pl-btn" data-s="pickFiles"></span>
+                        </label>
+                        <div class="pl-drop-hint" data-s="dropHint"></div>
+                    </div>
+
+                    <details id="pl-paste">
+                        <summary data-s="pasteSummary"></summary>
+                        <textarea id="pl-paste-text" rows="5" spellcheck="false" data-s-placeholder="pastePlaceholder"></textarea>
+                        <button id="pl-paste-go" type="button" data-s="pasteImport"></button>
+                    </details>
+
+                    <div id="pl-msg" role="alert" hidden></div>
+                </details>
             </section>
 
-            <section id="pl-server">
-                <div class="pl-head"><strong data-s="serverHeading"></strong></div>
-                <label class="pl-check"><input id="pl-server-on" type="checkbox"/> <span data-s="serverOnLabel"></span></label>
-                <label class="pl-field"><span data-s="serverTeamLabel"></span>
-                    <input id="pl-server-team" type="text" maxlength="80" spellcheck="false" autocomplete="off" data-s-placeholder="serverTeamPlaceholder"/></label>
-                <div class="pl-note" data-s="serverTeamHelp"></div>
-                <label class="pl-field"><span data-s="serverUrlLabel"></span>
-                    <input id="pl-server-url" type="url" spellcheck="false" autocomplete="off"/></label>
-                <div id="pl-server-status" class="pl-note"></div>
-                <div id="pl-server-err" class="pl-error" hidden></div>
-                <label class="pl-check"><input id="pl-log-upload" type="checkbox"/> <span data-s="logUploadLabel"></span></label>
-                <div class="pl-note" data-s="logUploadHelp"></div>
+            <!-- Club names come from the plan server: they only ever go in through textContent. -->
+            <section id="pl-clubs">
+                <div class="pl-head"><strong data-s="clubsHeading"></strong></div>
+                <div class="pl-note" data-s="clubsHelp"></div>
+                <ul id="pl-clubs-list"></ul>
+                <div id="pl-clubs-empty" class="pl-note" hidden></div>
+                <div id="pl-clubs-several" class="pl-clubs-several" data-s="clubsSeveral" hidden></div>
+                <label class="pl-field pl-club-code"><span data-s="clubCodeLabel"></span>
+                    <input id="pl-club-code" type="text" autocomplete="off" spellcheck="false"/>
+                    <button id="pl-club-code-add" type="button" data-s="clubCodeAdd"></button></label>
+                <div class="pl-note" data-s="clubCodeHelp"></div>
+                <div id="pl-club-code-msg" class="pl-slot" role="status"></div>
             </section>
 
             <section id="pl-demo">
@@ -136,11 +141,31 @@
                 <div id="pl-demo-status" class="pl-note"></div>
             </section>
 
-            <section id="pl-rec">
-                <div class="pl-head"><strong data-s="recHeading"></strong></div>
-                <div id="pl-rec-err" class="pl-error" hidden></div>
-                <ul id="pl-rec-list"></ul>
+            <section id="pl-unit-box">
+                <div class="pl-unit" role="radiogroup" aria-labelledby="pl-unit-label">
+                    <span id="pl-unit-label" data-s="targetUnitLabel"></span>
+                    <label><input type="radio" name="pl-unit" value="W"/> <span data-s="unitW"></span></label>
+                    <label><input type="radio" name="pl-unit" value="Wkg"/> <span data-s="unitWkg"></span></label>
+                </div>
             </section>
+
+            <details id="pl-advanced">
+                <summary data-s="advanced"></summary>
+                <section id="pl-server">
+                    <label class="pl-field"><span data-s="serverUrlLabel"></span>
+                        <input id="pl-server-url" type="url" spellcheck="false" autocomplete="off"/></label>
+                    <label class="pl-check"><input id="pl-log-upload" type="checkbox"/> <span data-s="logUploadLabel"></span></label>
+                    <div class="pl-note" data-s="logUploadHelp"></div>
+                    <label class="pl-check"><input id="pl-rec-no-plan" type="checkbox"/> <span data-s="recNoPlanLabel"></span></label>
+                    <div class="pl-note" data-s="recNoPlanHelp"></div>
+                </section>
+
+                <section id="pl-rec">
+                    <div class="pl-head"><strong data-s="recHeading"></strong></div>
+                    <div id="pl-rec-err" class="pl-error" hidden></div>
+                    <ul id="pl-rec-list"></ul>
+                </section>
+            </details>
 
         </div>
     </body>

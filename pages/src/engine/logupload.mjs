@@ -1,46 +1,100 @@
 // Pure logic (no DOM, no Sauce imports): uploading finished recordings to the plan server
-// (POST {server}/api/log/<slug>?session=<ms>&athlete=<id>, raw gzip body, see server/server.mjs).
+// (POST {server}/api/log/<slug>?circle=<cid>&session=<ms>&athlete=<id>&mod=<x.y.z>, raw gzip body,
+// see server/logs.mjs). A recording goes up under one club and team (spec §7.7): the ride lock's,
+// else the active server plan's, else, for a file plan, the ticked club that has a team with the
+// plan's slug in the plan library; without a club it stays local.
 // The lease-owning overlay window sweeps the recordings now and then and uploads one at a time;
 // each session row keeps uploadedAt, or uploadTriedAt and uploadError after a failed attempt.
 // Only rides started after the rider ticked the upload box (prefs.logUploadSince) go up on their
 // own; the Upload button in settings sends any finished one.
-import {serverBase, teamSlug} from './planserver.mjs';
+import {serverBase, teamSlug, staleForEvent} from './planserver.mjs';
+import {CID_RE} from './clubs.mjs';
 
 export const UPLOAD_MIN_TICKS = 60;             // shorter recordings are no ride worth sending
 export const UPLOAD_RETRY_MS = 300000;          // a failed session is tried again after this
-export const NOTFOUND_RETRY_MS = 3600000;       // ... or after this when the team had no plan
 export const UPLOAD_MAX_AGE_MS = 7 * 864e5;     // older recordings are left alone
 export const SWEEP_MS = 60000;                  // how often the overlay looks for pending ones
+// The server's rule for `mod` (server/ids.mjs MOD_RE).
+export const MOD_RE = /^\d{1,3}(\.\d{1,3}){2}(-beta\.\d{1,3})?$/;
 
 
-// The team slug a recording goes under: the typed team name, else the server plan's team name,
-// else the active plan's team; null when none gives a slug.
-export function logSlug(prefs, plan) {
-    return teamSlug(prefs?.serverTeam) || teamSlug(prefs?.serverTeamName) || teamSlug(plan?.team) || null;
+// The server's slug rule (server/ids.mjs isSlug).
+function isSlug(s) {
+    return typeof s === 'string' && s.length <= 48 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s);
 }
 
 
-// The team a recording is filed under: the slug stored when it started (so a ride with team A
-// goes to team A even after the rider's plan switched to team B), else, for recordings made
-// before 0.2.12, the current one.
-export function sessionSlug(meta, prefs, plan) {
-    return teamSlug(meta?.slug) || logSlug(prefs, plan);
+const isCircle = c => typeof c === 'string' && CID_RE.test(c);
+
+
+// The club (circle id) whose team `slug` the plan library knows from a server plan, among the
+// ticked clubs (`joined`); null when none. Slugs are unique on a server, so at most one club
+// should match; with several, the newest entry wins.
+export function libraryCircleFor(slug, lib, joined) {
+    if (!isSlug(slug) || !Array.isArray(joined) || !lib || typeof lib.plans !== 'object' || !lib.plans) {
+        return null;
+    }
+    const hit = Object.values(lib.plans)
+        .filter(e => e && e.source === 'server' && e.slug === slug && isCircle(e.circleId) && joined.includes(e.circleId))
+        .sort((a, b) => (Number(b.loadedAt) || 0) - (Number(a.loadedAt) || 0))[0];
+    return hit ? hit.circleId : null;
+}
+
+
+// The team of a plan by its name, filed under the ticked club the library knows it from.
+function byTeam(name, lib, joined) {
+    const slug = teamSlug(name);
+    const circle = libraryCircleFor(slug, lib, joined);
+    return circle ? {slug, circle} : null;
+}
+
+
+// Where a recording goes up ({slug, circle}), or null (it stays local): a bound ride lock's key;
+// else the active server entry's team and club; else the plan's team (a file plan) under the
+// ticked club the library has that team from.
+export function uploadTarget({lock, entry, plan, lib, joined} = {}) {
+    if (lock?.state === 'bound' && isSlug(lock.slug) && isCircle(lock.circle)) {
+        return {slug: lock.slug, circle: lock.circle};
+    }
+    if (entry?.source === 'server' && isSlug(entry.slug) && isCircle(entry.circleId)) {
+        return {slug: entry.slug, circle: entry.circleId};
+    }
+    return byTeam(plan?.team, lib, joined);
+}
+
+
+// uploadTarget for a ride in event `eventKey` (null: none known yet), at its start and at my
+// roll-off: a server plan from another event, or any server plan while no event is known, is no
+// target at all (its plan's team is not looked up either: that would find its club again). A
+// bound lock still wins, and a file plan goes by its team as in uploadTarget.
+export function rideTarget({eventKey = null, entry, plan, ...rest} = {}) {
+    const stale = entry?.source === 'server' && (eventKey === null || staleForEvent(entry, eventKey));
+    return uploadTarget({...rest, entry: stale ? null : entry, plan: stale ? null : plan});
+}
+
+
+// Where a stored recording goes up: the club and team stored with it (at the start, set again at
+// roll-off), else null: it stays local. A 0.2 recording has no `circle` and stays local too.
+export function sessionTarget(meta) {
+    const m = meta && typeof meta === 'object' ? meta : {};
+    return isSlug(m.slug) && isCircle(m.circle) ? {slug: m.slug, circle: m.circle} : null;
 }
 
 
 const idOf = v => v === null || v === undefined ? '' : String(v);
 
 
-// The upload URL, or null when the server URL, the slug or an id is unusable.
-export function logUploadUrl({url, slug, sessionId, athleteId}) {
+// The upload URL, or null when the server URL, the slug, the club, an id or the version is
+// unusable (each checked by the server's own rule).
+export function logUploadUrl({url, slug, circle, sessionId, athleteId, mod}) {
     const base = serverBase(url);
     const session = idOf(sessionId);
     const athlete = idOf(athleteId);
-    if (!base || typeof slug !== 'string' || !/^[a-z0-9-]+$/.test(slug) ||
+    if (!base || !isSlug(slug) || !isCircle(circle) || typeof mod !== 'string' || !MOD_RE.test(mod) ||
         !/^\d{1,16}$/.test(session) || !/^\d{1,12}$/.test(athlete)) {
         return null;
     }
-    return `${base}/api/log/${slug}?session=${session}&athlete=${athlete}`;
+    return `${base}/api/log/${slug}?circle=${circle}&session=${session}&athlete=${athlete}&mod=${mod}`;
 }
 
 
@@ -50,17 +104,22 @@ function startOf(s) {
 }
 
 
+// Error kinds a retry cannot fix (spec §7.7): not in this team, no such team, a different copy
+// already there, refused by the content check, too large. Only the Upload button sends those again.
+const FINAL_ERRORS = new Set(['forbidden', 'notfound', 'exists', 'refused', 'toolarge']);
+
+
 // How long after a failed attempt the sweep tries a session again, by the attempt's error kind:
-// a missing plan an hour later, a too large one never (its size won't change), else UPLOAD_RETRY_MS.
+// never after a final one, else UPLOAD_RETRY_MS.
 export function retryAfterMs(kind) {
-    return kind === 'notfound' ? NOTFOUND_RETRY_MS : kind === 'toolarge' ? Infinity : UPLOAD_RETRY_MS;
+    return FINAL_ERRORS.has(kind) ? Infinity : UPLOAD_RETRY_MS;
 }
 
 
 // What becomes of a recording on its own: 'uploaded', 'waiting' (the sweep sends it, perhaps after
 // a retry delay) or 'manual' (only the Upload button sends it: too short, too old, started before
-// the box was ticked (`since`, null when it is not), too large for the server, or the plan server
-// is switched off (`serverOn` false; left out counts as on)).
+// the box was ticked (`since`, null when it is not), a final upload error (retryAfterMs), or the
+// plan server is switched off (`serverOn` false; left out counts as on)).
 export function autoUploadState(s, {now, since, serverOn = true}) {
     const meta = s.meta || {};
     if (Number.isFinite(meta.uploadedAt)) {
@@ -99,20 +158,26 @@ export function uploadError(status) {
     if (status === 201) {
         return null;
     }
-    return status === 404 ? 'notfound' : status === 413 ? 'toolarge' : status === 507 ? 'full' : 'http';
+    return {403: 'forbidden', 404: 'notfound', 409: 'exists', 413: 'toolarge', 422: 'refused', 507: 'full'}[status] ?? 'http';
 }
 
 
 // Rider fields never uploaded: heart rate (health data) and cadence (not used by the analysis).
 export const UPLOAD_DROP_FIELDS = ['heartrate', 'cadence'];
 // Plan rider fields never uploaded: the captain has them already, and they are personal data.
-export const UPLOAD_DROP_PLAN_FIELDS = ['weight', 'ftp', 'adjustment'];
+// wkg (the plan's pull_wkg) goes with weight: watts / wkg gives the weight, and the consent text
+// says "no weight or FTP". The recording on the rider's PC keeps it.
+export const UPLOAD_DROP_PLAN_FIELDS = ['weight', 'ftp', 'adjustment', 'wkg'];
 
 
 // The recording as uploaded, cut down to what the analysis needs:
-// - head line: the plan's riders lose weight, FTP and adjustment;
-// - ticks: only my own row and the rows of riders in the plan (starters and bench) stay, so a
-//   watched rider outside the team is left out; every row loses heart rate and cadence.
+// - head line: the plan's riders lose weight, FTP, adjustment and wkg;
+// - ticks: only my own row, the rows of riders in the head plan (starters and bench) and the rows
+//   marked `inPlan: true` (a rider of the plan loaded at that tick, makeTick) stay, so a watched
+//   rider outside the team is left out; every row loses heart rate and cadence. The flag exists
+//   since 17 Nov 2026 (ZRL): the plan changed mid-race (7AA3FX -> Y8EAQW), and keeping only the
+//   head plan's riders lost the new plan's. A recording from before the flag strips as before. The
+//   server drops a row it cannot match to me, the head plan or the tick's plan (det.planSig).
 // Lines that are no JSON object, or no tick, pass through untouched. The local export is unchanged.
 export function stripForUpload(jsonl) {
     const lines = String(jsonl).split('\n');
@@ -153,7 +218,7 @@ export function stripForUpload(jsonl) {
             return line;
         }
         const kept = obj.riders.filter(row => row && typeof row === 'object' &&
-            (row.self === true || ids.has(String(row.id))));
+            (row.self === true || ids.has(String(row.id)) || row.inPlan === true));
         let changed = kept.length !== obj.riders.length;
         for (const row of kept) {
             for (const f of UPLOAD_DROP_FIELDS) {

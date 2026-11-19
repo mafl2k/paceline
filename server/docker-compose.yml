@@ -1,4 +1,6 @@
-# Plan server behind Traefik. Copy .env.example to .env and set UPLOAD_PASS first.
+# Plan server behind Traefik. Copy .env.example to .env and set what you need; every variable is
+# optional except PACELINE_HOST, which you must set to your own host. UPLOAD_PASS is only the admin
+# fallback; a change-me password stops the start.
 # Names that depend on your Traefik setup are variables with defaults (see README.md).
 name: paceline
 
@@ -10,10 +12,33 @@ services:
     image: paceline-server:local
     restart: unless-stopped
     environment:
-      UPLOAD_USER: ${UPLOAD_USER:?set UPLOAD_USER in server/.env}
-      UPLOAD_PASS: ${UPLOAD_PASS:?set UPLOAD_PASS in server/.env}
+      UPLOAD_USER: ${UPLOAD_USER:-}
+      UPLOAD_PASS: ${UPLOAD_PASS:-}
       DATA_DIR: /data
       PORT: "8080"
+      PACELINE_HOST: ${PACELINE_HOST:-ttt.example.org}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_MAX_PER_DAY: ${MAIL_MAX_PER_DAY:-}
+      REGISTRATION: ${REGISTRATION:-}
+      PACELINE_TZ: ${PACELINE_TZ:-}
+      PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
+      PRIVACY_WHERE: ${PRIVACY_WHERE:-}
+      ADMIN_USER: ${ADMIN_USER:-}
+      ADMIN_PASS: ${ADMIN_PASS:-}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-}
+      CODE_SECRET: ${CODE_SECRET:-}
+      MAX_CIRCLES: ${MAX_CIRCLES:-}
+      LOG_MAX_CIRCLE_MB: ${LOG_MAX_CIRCLE_MB:-}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-}
+      BACKUP_RETENTION_MONTHS: ${BACKUP_RETENTION_MONTHS:-}
+      MOD_MIN_VERSION: ${MOD_MIN_VERSION:-}
+      MOD_NOTICE: ${MOD_NOTICE:-}
       LOG_MAX_FILE_MB: ${LOG_MAX_FILE_MB:-20}
       LOG_MAX_TOTAL_MB: ${LOG_MAX_TOTAL_MB:-2000}
     volumes:
@@ -23,7 +48,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
-      - traefik.http.routers.paceline.rule=Host(`${PACELINE_HOST:-ttt.mafl.net}`)
+      - traefik.http.routers.paceline.rule=Host(`${PACELINE_HOST:-ttt.example.org}`)
       - traefik.http.routers.paceline.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.paceline.tls=true
       - traefik.http.routers.paceline.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}

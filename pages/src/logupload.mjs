@@ -3,6 +3,7 @@
 // outsiders), gzip it and POST it to the plan server, then note the outcome on the session row. Used by the overlay's sweep and by the Upload button in settings.
 import {logUploadUrl, uploadError, stripForUpload} from './engine/logupload.mjs';
 import {exportSession, markUpload} from './recdb.mjs';
+import {VERSION} from './version.mjs';
 
 export const UPLOAD_TIMEOUT_MS = 60000;
 
@@ -13,13 +14,14 @@ async function gzip(text) {
 }
 
 
-// {ok: true} or {ok: false, error}. error is an uploadError kind ('offline', 'notfound',
-// 'toolarge', 'full', 'http'), 'local' when the recording could not be read or packed here (then
-// `cause` holds the exception), or 'badurl' when the URL cannot be built (nothing is noted on the
-// row then: it is a settings problem, not this recording's). Throws only when the row cannot be
-// updated.
-export async function uploadSession(sessionId, {url, slug, athleteId, now = Date.now()}) {
-    const target = logUploadUrl({url, slug, sessionId, athleteId});
+// {ok: true} or {ok: false, error}. error is an uploadError kind ('offline', 'forbidden',
+// 'notfound', 'exists', 'refused', 'toolarge', 'full', 'http'), 'local' when the recording could
+// not be read or packed here (then `cause` holds the exception), or 'badurl' when the URL cannot be built (nothing is noted on the
+// row then: it is a settings problem, or no club to send it to, not this recording's). slug and
+// circle: the recording's target (sessionTarget). Sends this build's VERSION as `mod`. Throws only
+// when the row cannot be updated.
+export async function uploadSession(sessionId, {url, slug, circle, athleteId, now = Date.now()}) {
+    const target = logUploadUrl({url, slug, circle, sessionId, athleteId, mod: VERSION});
     if (!target) {
         return {ok: false, error: 'badurl'};
     }
