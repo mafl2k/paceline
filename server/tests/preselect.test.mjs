@@ -415,3 +415,42 @@ test('assignChoices: a special team without a plan has no default date', () => {
     assert.equal(later.date, '2026-12-06');
     assert.equal(later.dateRequired, false);
 });
+
+
+test('assignChoices: a special team\'s start time (user, 19 Nov 2026)', () => {
+    const c = club({teams: {...teams(), cogs: {name: 'Kettenfett Cogs', start: null, live: null, kind: 'special', weekday: null}}});
+    const e = entry({team: 'cogs', name: 'Kettenfett Cogs'});
+    // nothing to go by: empty
+    const none = assignChoices(c, e, params(''), NOW);
+    assert.deepEqual([none.special, none.start], [true, '']);
+    // the team's start time (a team that was weekly before)
+    c.teams.cogs.start = '19:30';
+    assert.equal(assignChoices(c, e, params(''), NOW).start, '19:30');
+    // a time typed and redrawn for this very date (startFor) stays; for another plan choice or
+    // another date it goes: no carry-over
+    const q = 'team=cogs&as=new&drawn=cogs:new&date=2026-12-06&start=20:45';
+    assert.equal(assignChoices(c, e, params(`${q}&startFor=2026-12-06`), NOW).start, '20:45');
+    assert.equal(assignChoices(c, e, params(`${q}&startFor=2026-11-29`), NOW).start, '19:30');
+    assert.equal(assignChoices(c, e, params(q), NOW).start, '19:30');
+    assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=rollers:new&date=2026-12-06&start=20:45&startFor=2026-12-06'), NOW).start, '19:30');
+    // the race's stored start for that date
+    c.sheets.cc0001 = {...ver({team: 'cogs', date: '2026-12-06', jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs', type: 'fast'}), plan: 'cc0001'};
+    c.teams.cogs.raceStarts = {'2026-12-06': '20:15'};
+    assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new&date=2026-12-06'), NOW).start, '20:15');
+    // typed over it for that date: the typed one (the newest upload sets the race's start)
+    const typed = assignChoices(c, e, params(`${q}&startFor=2026-12-06`), NOW);
+    assert.deepEqual([typed.date, typed.start], ['2026-12-06', '20:45']);
+    // another date: the team's
+    assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new&date=2026-12-13&start=20:15&startFor=2026-12-06'), NOW).start, '19:30');
+    // a version: the plan's date, the race's start, editable
+    const v = assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001&date=2026-12-13'), NOW);
+    assert.deepEqual([v.date, v.dateFixed, v.start], ['2026-12-06', true, '20:15']);
+    const vt = assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001&start=21:00&startFor=2026-12-06'), NOW);
+    assert.equal(vt.start, '21:00');
+    // a race without a start of its own (0.3.0): the team's
+    delete c.teams.cogs.raceStarts;
+    assert.equal(assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001'), NOW).start, '19:30');
+    // a weekly team never has one
+    const w = assignChoices(c, entry(), params('team=rollers&as=new&drawn=rollers:new&start=20:45&startFor=2026-11-19'), NOW);
+    assert.deepEqual([w.special, w.start], [false, '']);
+});

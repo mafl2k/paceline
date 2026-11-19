@@ -10,7 +10,7 @@ import {planOfId, racePlans, previousVersion} from './plans.mjs';
 import {localLabel, localHHMM} from './time.mjs';
 import {captainPage, flashBlock, hidden, postForm, sevLine, backBar} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {nameOf, atLabel, pullTarget, liveWords, backAsk} from './team-view.mjs';
+import {nameOf, atLabel, pullTarget, liveWords, backAsk, dateDay, andList, quote} from './team-view.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
 
 // The result page and the assign page show this many import warnings, then "and N more".
@@ -21,7 +21,7 @@ const uploadPath = slug => `/manage/upload?team=${slug}`;
 const planPath = (slug, plan) => `/manage/team/${slug}/plan/${plan}`;
 
 // The icon of each line's severity (the assign page's and the result page's lists).
-export const SEV_ICON = {ok: 'checkCircle', info: 'swap', warn: 'alert', err: 'x'};
+export const SEV_ICON = {ok: 'checkCircle', info: 'swap', neutral: 'info', warn: 'alert', err: 'x'};
 
 
 // The team's live version {id, sheet}, used up or not, or null.
@@ -102,7 +102,9 @@ export function hintLine(club, hint, {link = true} = {}) {
 
 
 // The warnings of a stored plan, for the assign page and the result page alike, in this order: no
-// start time (err); the hint that the plan looks like another team's, with the way to upload it there
+// start time (err: a weekly team without one, a version of a special team's plan stored without
+// one); a special race whose start time this Store changed (`result.startMoved`), with the other
+// plans of that date that move with it (info); the hint that the plan looks like another team's, with the way to upload it there
 // (warn; the assign page puts it first itself and passes none); a change since the page was drawn
 // (`base`); no pull watts (every rider's watts null after the import, as the mod warns: no usable
 // pull_power and no text row); the import warnings, at most MAX_IMPORT_WARNINGS of them, then how many
@@ -111,8 +113,19 @@ export function hintLine(club, hint, {link = true} = {}) {
 export function uploadWarnings(club, slug, {result, hint = null, importWarnings = [], importMore = 0}) {
     const team = club.teams[slug];
     const out = [];
-    if (team.start == null) {
-        out.push({sev: 'err', text: t('result-no-start', {team: team.name})});
+    const sheet = club.sheets[result.id];
+    if (sheet !== undefined && plannedStart(club, sheet) === null) {
+        out.push({sev: 'err', text: team.kind === 'special' ? t('result-no-start-plan') : t('result-no-start', {team: team.name})});
+    }
+    const moved = result.startMoved ?? null;
+    if (moved !== null) {
+        const day = dateDay(moved.date, club.tz);
+        const parts = [moved.was === null ? t('result-race-set', {day, start: moved.start}) : t('result-race-moved', {day, start: moved.start, was: moved.was})];
+        if (moved.others.length) {
+            parts.push(t(moved.others.length === 1 ? 'result-race-moves-one' : 'result-race-moves', {labels: andList(moved.others.map(quote))}));
+        }
+        // other plans that move with it are news; the plan's own race is what was asked for
+        out.push({sev: moved.others.length ? 'warn' : 'info', text: parts.join(' ')});
     }
     const h = hintLine(club, hint);
     if (h !== null) {

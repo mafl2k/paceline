@@ -114,6 +114,13 @@ export function readConfig(env) {
         throw new Error('MAIL_FROM has control characters: use one line of plain text');
     }
 
+    // Where the operator's notice of every Remove a rider goes (erasures.mjs): a plain address.
+    // Unset: the first address in PRIVACY_CONTACT (mail-content.mjs operatorAddress).
+    const operatorEmail = get('OPERATOR_EMAIL')?.trim() || null;
+    if (operatorEmail !== null && !isAddress(operatorEmail)) {
+        fail('OPERATOR_EMAIL', 'an address');
+    }
+
     // Key of the rider-code hashes. Unset: private clubs are off. Never logged; the
     // message names the variable only. Changing it ends every club's code.
     const codeSecret = get('CODE_SECRET');
@@ -150,6 +157,7 @@ export function readConfig(env) {
         mailMaxPerDay: int('MAIL_MAX_PER_DAY', 200),
         registration: oneOf('REGISTRATION', ['open', 'closed'], 'open'),
         privacyContact: get('PRIVACY_CONTACT'),
+        operatorEmail,
         privacyWhere,
         admin: op.login,
         adminFallback: op.fallback,

@@ -15,14 +15,56 @@ export const PLAN_OPEN_MS = 30 * 60000;
 export const STILL_TO_RACE_MS = 2 * 3600000;
 
 
-// Planned start S in ms: the sheet's date at the team's local start time. Null without a team,
-// without a start time, or with a bad date.
-export function plannedStart(club, sheet) {
-    const team = Object.hasOwn(club.teams, sheet.team) ? club.teams[sheet.team] : null;
-    if (!team || typeof team.start !== 'string' || !HHMM_RE.test(team.start) || !isDate(sheet.date)) {
+const validStart = v => typeof v === 'string' && HHMM_RE.test(v);
+
+
+// A special team's race start on `date` ('HH:MM'), from team.raceStarts, or null. The newest Store
+// for a date sets it (user, 19 Nov 2026: the time belongs to the race, team and date, and the
+// newest upload wins).
+export function storedRaceStart(team, date) {
+    const starts = team?.raceStarts;
+    if (starts === null || typeof starts !== 'object' || typeof date !== 'string' || !Object.hasOwn(starts, date)) {
         return null;
     }
-    return zonedToUtc(sheet.date, team.start, club.tz);
+    return validStart(starts[date]) ? starts[date] : null;
+}
+
+
+// The local start time 'HH:MM' of a sheet (a stored version, or {team, date}): a special team races
+// at the start stored for the sheet's date (team.raceStarts, "special has no fixed times at all"),
+// else at the team's start time (plans stored by 0.3.0); a weekly team (any kind but 'special')
+// always at the team's. Null without a team or a time.
+export function startOf(club, sheet) {
+    const team = Object.hasOwn(club.teams, sheet.team) ? club.teams[sheet.team] : null;
+    if (!team) {
+        return null;
+    }
+    const own = team.kind === 'special' ? storedRaceStart(team, sheet.date) : null;
+    return own ?? (validStart(team.start) ? team.start : null);
+}
+
+
+// Planned start S in ms, the one place every race time comes from: the sheet's date at its local
+// start time (startOf). Null without a team, without a start time, or with a bad date.
+export function plannedStart(club, sheet) {
+    const start = startOf(club, sheet);
+    if (start === null || !isDate(sheet.date)) {
+        return null;
+    }
+    return zonedToUtc(sheet.date, start, club.tz);
+}
+
+
+// The start time 'HH:MM' of team `slug`'s race on `date` (a team races once a date), or null.
+export function raceStart(club, slug, date) {
+    return startOf(club, {team: slug, date});
+}
+
+
+// S of team `slug`'s race on `date` (raceStart), or null.
+export function raceStartAt(club, slug, date) {
+    const start = raceStart(club, slug, date);
+    return start === null || !isDate(date) ? null : zonedToUtc(date, start, club.tz);
 }
 
 
@@ -44,10 +86,10 @@ export function teamWeekday(club, slug) {
 }
 
 
-// True while team `slug`'s race on `date` is still to race: until its S + STILL_TO_RACE_MS; without
-// a start time, while `date` is today or later in the club's zone.
+// True while team `slug`'s race on `date` is still to race: until its S (raceStartAt) +
+// STILL_TO_RACE_MS; without a start time, while `date` is today or later in the club's zone.
 export function stillToRace(club, slug, date, now) {
-    const S = plannedStart(club, {team: slug, date});
+    const S = raceStartAt(club, slug, date);
     return S === null ? date >= localDate(now, club.tz) : now <= S + STILL_TO_RACE_MS;
 }
 

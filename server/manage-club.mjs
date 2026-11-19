@@ -5,19 +5,22 @@
 // manage-page.mjs), a refusal on the club settings, or a page of its own (settings-page.mjs).
 import {html} from './http.mjs';
 import {t} from './pages.mjs';
-import {checkClubName, zoneOk, redirect} from './web.mjs';
+import {checkClubName, zoneOk, redirect, RIDER_REMOVALS_PER_DAY} from './web.mjs';
 import {codePage} from './settings-page.mjs';
-import {removeRider, setRiderCode, clearRiderCode, isPrivate, addLog} from './club.mjs';
+import {removeRider, setRiderCode, clearRiderCode, isPrivate, addLog, clubListsBefore} from './club.mjs';
 import {teamWeekday} from './select.mjs';
 import {isSlug, newRiderCode, riderCodeHash, ZWIFT_RE} from './ids.mjs';
 import {LOG_NAME_RE} from './logs.mjs';
 import {field, placePath, done, refuse, attempt, frameOf} from './manage-page.mjs';
+import {entryLine} from './erasures.mjs';
+import {operatorAddress, operatorRemovalMail} from './mail-content.mjs';
 
 // A new rider code is drawn at most this often while its hash belongs to another club (50 bits:
 // a second draw already never happens in practice).
 const CODE_DRAWS = 5;
 
 const iso = ms => new Date(ms).toISOString();
+const DAY_MS = 24 * 3600 * 1000;
 
 // where every form here goes back to, and where its refusals are drawn
 const SETTINGS = {page: 'settings'};
@@ -72,18 +75,51 @@ function clubAction(req, res, ctx, cid, form) {
 }
 
 
-// POST /manage/rider/remove (zwiftId): out of every archived version of the club (the archive
-// table, deleted teams' rows too), out of every version and inbox entry of the club and out of the
-// checks (seen), all in the club change's one transaction: a refused write anywhere leaves all
-// three as they were. The club change archives nothing (archive: false): the versions it drops
-// would go to the archive with the rider in them, and the archive is rewritten in the same
-// transaction.
-function riderAction(req, res, ctx, cid, form) {
+// POST /manage/rider/remove (zwiftId). When the rider's newest entry on the erasure list is still
+// live and nothing of his was stored since (no version, inbox entry, archived version or check lists
+// him, no recording of the club began since), there is no new line and no mail: an entry applied in
+// full means nothing to do at all; one that left failures is run again (steps 3 and 4) and marked
+// then. Otherwise a new removal. Both run at most RIDER_REMOVALS_PER_DAY a day per club (each costs a
+// pass over the club's recordings; 429 beyond):
+// 1. onto the erasure list (erasures.mjs, appended and synced: a restore applies it again, and the
+//    uploads leave him out of rides from before it); when it cannot be written nothing changes and
+//    the captain is told to tell the operator;
+// 2. the operator's mail with the entry's line (notifyOperator);
+// 3. out of every archived version of the club (deleted teams' too), every version and inbox entry
+//    and the checks (seen), in the club change's one transaction (archive: false: the versions it
+//    drops would go to the archive with him in them, and the archive is rewritten in it);
+// 4. the club's recordings, one pass (logs.eraseRider): his own uploads deleted, every other one
+//    rewritten without him. What failed is counted in the flash; Remove again (or the next start)
+//    finishes it. Marked applied once nothing failed.
+async function riderAction(req, res, ctx, cid, form) {
     const aid = field(form, 'zwiftId').trim();
     if (!ZWIFT_RE.test(aid)) {
         refuse(res, ctx, cid, t('rider-bad'), {place: SETTINGS});
         return;
     }
+    const prior = ctx.erasures.latestEntry(cid, aid);
+    const again = prior !== null && !heldSince(ctx, cid, aid, Date.parse(prior.at));
+    if (again && ctx.erasures.isApplied(prior)) {
+        done(res, ctx, cid, SETTINGS, t('rider-removed-already'));
+        return;
+    }
+    // counted once it is recorded: a removal refused for an unwritable list costs nothing
+    if (ctx.web.riderRemovals.count(cid, ctx.now, DAY_MS) >= RIDER_REMOVALS_PER_DAY) {
+        refuse(res, ctx, cid, t('rider-remove-limit'), {status: 429, place: SETTINGS});
+        return;
+    }
+    const entry = again ? prior : {cid, aid, at: iso(ctx.now)};
+    if (!again) {
+        try {
+            ctx.erasures.list.append(entry);
+        } catch (e) {
+            console.error(`paceline-server: club ${cid}: a removal not recorded in erasures.jsonl, nothing changed: ${e?.code ?? e?.name ?? 'error'}`);
+            refuse(res, ctx, cid, t('rider-not-recorded'), {status: 503, place: SETTINGS});
+            return;
+        }
+        notifyOperator(ctx, ctx.store.get(cid), entry);
+    }
+    ctx.web.riderRemovals.add(cid, ctx.now);
     let archived = 0;
     const removed = attempt(res, ctx, cid, c => removeRider(c, aid, ctx.now), {
         place: SETTINGS, archive: false,
@@ -92,16 +128,74 @@ function riderAction(req, res, ctx, cid, form) {
             ctx.store.forget(cid, aid);
         },
     });
-    if (removed) {
-        const n = removed.result;
-        // the archived versions too, so an erasure request visibly reached them
-        const text = archived === 0 ? (n === 1 ? t('rider-removed-one') : t('rider-removed', {n}))
-            : t('rider-removed-both', {
-                plans: n === 1 ? t('rider-plans-one') : t('rider-plans', {n}),
-                archived: archived === 1 ? t('rider-archived-one') : t('rider-archived', {n: archived}),
-            });
-        done(res, ctx, cid, SETTINGS, text);
+    if (!removed) {
+        return;
     }
+    const recs = await ctx.logs.eraseRider(cid, aid);
+    if (!recs.failed && !recs.unreadable) {
+        try {
+            ctx.erasures.markApplied(entry);
+        } catch (e) {
+            console.error(`paceline-server: club ${cid}: a removal applied but not marked: ${e?.code ?? e?.name ?? 'error'}`);
+        }
+    }
+    done(res, ctx, cid, SETTINGS, riderRemovedText(removed.result, archived, recs), recs.failed || recs.unreadable ? 'err' : 'ok');
+}
+
+
+// Whether anything of rider `aid` in club `cid` may be stored since `since` (epoch ms): a version or
+// inbox entry, an archived version or a check lists him, or a recording of the club began since.
+function heldSince(ctx, cid, aid, since) {
+    const club = ctx.store.get(cid);
+    return clubListsBefore(club, aid, Infinity) || ctx.logs.archiveLists(cid, aid) || Object.hasOwn(ctx.store.seenOf(cid), aid)
+        || ctx.logs.list(cid).some(r => r.session >= since);
+}
+
+
+// Mails the operator (operatorAddress: OPERATOR_EMAIL, else the address in PRIVACY_CONTACT) the
+// removal with its erasure-list line, for a full restore of the data folder (erasures.mjs). Sent
+// when the entry is written, before the removal itself. Nothing without a mailer or an address; a
+// mail refused or failing never touches the removal, and is logged without the ID.
+function notifyOperator(ctx, club, entry) {
+    const to = operatorAddress(ctx.cfg);
+    if (!ctx.mailer || !to) {
+        return;
+    }
+    let sent = false;
+    try {
+        sent = ctx.mailer.send({kind: 'rider-removed', to, budget: 'operator',
+            ...operatorRemovalMail({club: club?.name ?? entry.cid, ...entry, line: entryLine(entry)}, ctx.cfg)});
+    } catch (e) {
+        sent = false;
+    }
+    if (!sent) {
+        console.warn(`paceline-server: club ${entry.cid}: the operator mail of a removal was not sent`);
+    }
+}
+
+
+// The flash of Remove a rider: what he was removed from (plans, archived versions, recordings),
+// his own recordings deleted, then those that could not be changed or read; only the parts that are
+// not zero, and a sentence of its own when there was nothing at all.
+export function riderRemovedText(plans, archived, {changed = 0, deleted = 0, failed = 0, unreadable = 0} = {}) {
+    const count = (key, n) => n === 1 ? t(`${key}-one`) : t(key, {n});
+    const from = [[plans, 'rider-plans'], [archived, 'rider-archived'], [changed, 'rider-recordings']].filter(([n]) => n > 0).map(([n, key]) => count(key, n));
+    const parts = [];
+    if (from.length) {
+        const list = from.length === 1 ? from[0] : from.length === 2 ? t('rider-list-two', {a: from[0], b: from[1]})
+            : t('rider-list-three', {a: from[0], b: from[1], c: from[2]});
+        parts.push(t('rider-removed', {list}));
+    }
+    if (deleted) {
+        parts.push(count('rider-own-deleted', deleted));
+    }
+    if (failed) {
+        parts.push(count('rider-recs-failed', failed));
+    }
+    if (unreadable) {
+        parts.push(count('rider-recs-unreadable', unreadable));
+    }
+    return parts.length ? parts.join(' ') : t('rider-removed-none');
 }
 
 

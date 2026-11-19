@@ -15,6 +15,8 @@
 //   select.mjs   which sheet a rider gets, event match, the 30-minute gate, effects (pure)
 //   api.mjs      the plan check GET /api/v3/rider/<zwiftId>
 //   logs.mjs     recordings per club: POST /api/log/<slug>, content check, quotas, retention
+//   erasures.mjs the erasure list (DATA_DIR/erasures.jsonl): every Remove a rider, applied again at
+//                start to data a restore brought back
 //   dump.mjs     nightly VACUUM INTO dump of paceline.db in DATA_DIR/dumps, the newest 7 kept
 //   limits.mjs   client address, public-address check, in-memory rate limits
 //   mail.mjs     message builder and SMTP client; mailer.mjs: the queue with budgets and retries
@@ -48,6 +50,7 @@
 //   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS   mail needs SMTP_HOST, MAIL_FROM and PUBLIC_URL;
 //                       without them: no mail, no registration
 //   MAIL_FROM (an address, 'Name <address>' allowed), MAIL_MAX_PER_DAY (200), REGISTRATION (open), PRIVACY_CONTACT
+//   OPERATOR_EMAIL      the notice of every Remove a rider (erasures.mjs); default the address in PRIVACY_CONTACT
 //   ADMIN_USER, ADMIN_PASS        default the UPLOAD_USER/UPLOAD_PASS pair
 //   TRUSTED_PROXY_HOPS            default 1
 //
@@ -70,6 +73,7 @@ import {importFiles} from './import-files.mjs';
 import {handleRider, handleOldPlan, CODE_FAILS_MAX} from './api.mjs';
 import {makeLimiter} from './limits.mjs';
 import {makeLogStore, makeUploadState, handleLogUpload, LOG_BODY_MS} from './logs.mjs';
+import {openErasures, makeEraser, expiryCutoff} from './erasures.mjs';
 import {makeDumpJob, leftoverFolders, LEFTOVER_DAYS} from './dump.mjs';
 import {makeMailer} from './mailer.mjs';
 import {handleWeb, makeWebState} from './web.mjs';
@@ -124,16 +128,50 @@ function serve({cfg, now, injected, db}) {
         console.warn(`paceline-server: ${name}/ is still in the data dir; delete it by hand within ${LEFTOVER_DAYS} days of ${date} (see server/README.md)`);
     }
     const mailer = injected ?? (mailOn(cfg) ? makeMailer({cfg, now}) : null);
-    // the log store first: the store archives into it the versions a recording used
-    const logs = makeLogStore(cfg.dataDir, {db, now});
+    // the erasure list first (the uploads consult it), then the log store: the store archives into
+    // it the versions a recording used
+    const erasureList = openErasures(cfg.dataDir);
+    const logs = makeLogStore(cfg.dataDir, {db, now, erasures: erasureList});
     const store = openStore({db, now, archive: logs});
+    const erasures = makeEraser({list: erasureList, db, store, logs, now});
     console.log('paceline-server: ' + modeLine(cfg));
     store.sweep();
     const logUploads = makeUploadState();
+    // The log sweep, then (in the background) the files its reconcile held back or found changed,
+    // against the erasure list (a restore of logs/ brings back what Remove a rider took out).
+    // An erasure list that could not be read is read again first: once it is, the removals this
+    // database has not applied are applied and the held files checked (erasures.mjs).
+    let checked = Promise.resolve();
+    let swept = false;    // the start's own sweep: the list was just read
     const sweepLogs = () => {
+        const readAgain = swept && erasureList.reload();
+        swept = true;
         const n = logs.sweep(now(), cfg.logRetentionDays);
         if (n > 0) {
             console.log(`paceline-server: ${n} recordings older than ${cfg.logRetentionDays} days deleted`);
+        }
+        checked = logs.checkHeld().then(r => {
+            if (r.deleted || r.changed || r.failed || r.unreadable) {
+                console.log(`paceline-server: erasure list: recordings found by the reconcile: ${r.deleted} of removed riders deleted, `
+                    + `${r.changed} rewritten without them, ${r.failed} failed and ${r.unreadable} not readable (checked again at the next sweep)`);
+            }
+            return r;
+        }, e => {
+            console.error(`paceline-server: erasure list: recordings found by the reconcile not checked: ${e?.code ?? e?.name ?? 'error'}`);
+        });
+        if (readAgain) {
+            console.log('paceline-server: erasures.jsonl can be read again');
+            erasures.applyPending().catch(e => {
+                console.error(`paceline-server: erasures.jsonl: applying again failed: ${e?.code ?? e?.name ?? 'error'}`);
+            });
+        }
+        try {
+            const gone = erasures.expire(expiryCutoff(now(), cfg.backupRetentionMonths));
+            if (gone > 0) {
+                console.log(`paceline-server: erasures.jsonl: ${gone} removals older than the backups dropped`);
+            }
+        } catch (e) {
+            console.error(`paceline-server: erasures.jsonl not swept: ${e?.code ?? e?.name ?? 'error'}`);
         }
     };
     try {
@@ -141,6 +179,11 @@ function serve({cfg, now, injected, db}) {
     } catch (e) {
         console.error(`paceline-server: log sweep: ${e.message}`);
     }
+    // Removals this paceline.db has not applied (a restore): their database parts now, before the
+    // port opens; their recordings in the background (erasures.mjs).
+    const erasuresApplied = Promise.all([checked, erasures.applyPending().catch(e => {
+        console.error(`paceline-server: erasures.jsonl: applying again failed: ${e?.code ?? e?.name ?? 'error'}`);
+    })]);
     const codeFails = makeLimiter([{ms: 3600000, max: CODE_FAILS_MAX}]);
     const web = makeWebState();
     const admin = makeAdminState();
@@ -205,7 +248,7 @@ function serve({cfg, now, injected, db}) {
         if (handleStatic(req, res, p, method, url)) {
             return;
         }
-        const pages = {store, cfg, mailer, now: now(), web, logs, admin, dumps: dumpJob};
+        const pages = {store, cfg, mailer, now: now(), web, logs, admin, dumps: dumpJob, erasures};
         if (await handleAdmin(req, res, pages, p, method) || await handleManage(req, res, pages, p, method)
             || await handleWeb(req, res, pages, p, method)) {
             return;
@@ -297,11 +340,14 @@ function serve({cfg, now, injected, db}) {
     server.store = store;
     server.cfg = cfg;
     server.logs = logs;
+    server.erasures = erasures;
+    server.erasuresApplied = erasuresApplied;
     server.mailer = mailer;
     server.logUploads = logUploads;
     server.web = web;
     server.admin = admin;
     server.sweepLimits = sweepLimits;
+    server.sweepLogs = sweepLogs;
     server.dumpJob = dumpJob;
     server.flushSync = () => store.flushSeen();
     return server;

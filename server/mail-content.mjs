@@ -6,6 +6,7 @@
 // only go to the server's own PUBLIC_URL; every value is escaped.
 import {APP_CSS} from './app-css.mjs';
 import {T, esc, t} from './pages.mjs';
+import {isAddress} from './mail.mjs';
 
 
 // mail kind (as the mailer logs it) -> the T key prefix and whether it carries a link. notYou:
@@ -161,7 +162,8 @@ const font = (size, weight = 400, line = 1.5) => `font-family:${FONT};font-size:
 // then the footer in small print. `lead` and `footer` (a list of paragraphs) are HTML already;
 // `title`, `heading`, `button` and `linkText` are raw text; `link` an already checked href or null
 // (then the link is text only and there is no button).
-export function mailHtml({title, heading, lead, link, linkText, button, footer}) {
+// `copy` labels the text to copy (default: the link's label).
+export function mailHtml({title, heading, lead, link, linkText, button, footer, copy = t('mail-copy-link')}) {
     const p = (cls, html, style) => `<p class="${cls}" style="margin:0;${style}">${html}</p>`;
     const rows = [];
     rows.push(`<h1 class="pl-text" style="margin:0 0 12px;${font(22, 700, 1.3)}color:${L.text};">${esc(heading)}</h1>`);
@@ -174,7 +176,7 @@ export function mailHtml({title, heading, lead, link, linkText, button, footer})
 </td></tr>
 </table>`);
         }
-        rows.push(p('pl-muted', esc(t('mail-copy-link')), `margin-top:24px;${font(14)}color:${L.muted};`));
+        rows.push(p('pl-muted', esc(copy), `margin-top:24px;${font(14)}color:${L.muted};`));
         const shown = link
             ? `<a href="${esc(link)}" class="pl-link" style="${linkStyle}">${esc(linkText)}</a>`
             : esc(linkText);
@@ -214,4 +216,39 @@ ${foot}
 </body>
 </html>
 `;
+}
+
+
+// ---- the operator's notice of a removal (erasures.mjs) ----
+
+// The operator's address for the notices of removals: OPERATOR_EMAIL, else the first e-mail address
+// in PRIVACY_CONTACT (the operator's contact on /privacy, free text such as "Paceline,
+// privacy@example.org"); null without either.
+export function operatorAddress(cfg) {
+    if (cfg.operatorEmail) {
+        return cfg.operatorEmail;
+    }
+    const found = String(cfg.privacyContact ?? '').match(/[^\s<>(),;:"']+@[^\s<>(),;:"']+/g) ?? [];
+    return found.map(a => a.replace(/\.$/, '')).find(a => isAddress(a)) ?? null;
+}
+
+
+// {subject, text, html} of the operator's notice of a Remove a rider: the club, the Zwift ID, the time
+// and the erasure-list line `line`, to paste into /admin after a full restore. `vars`: club (its
+// name), cid, aid, at (ISO), line.
+export function operatorRemovalMail(vars, cfg) {
+    const v = {...vars, time: vars.at.slice(0, 16).replace('T', ' ')};
+    const subject = t('mail-rider-removed-subject', v);
+    const text = [t('mail-rider-removed-lead', v), `${t('mail-rider-removed-copy')}\n${v.line}`, t('mail-rider-removed-note', v)].join('\n\n') + '\n';
+    const html = mailHtml({
+        title: subject,
+        heading: String(v.club),
+        lead: fill('mail-rider-removed-lead', v, cfg.publicUrl),
+        link: null,
+        linkText: v.line,
+        button: null,
+        copy: t('mail-rider-removed-copy'),
+        footer: [fill('mail-rider-removed-note', v, cfg.publicUrl)],
+    });
+    return {subject, text, html};
 }

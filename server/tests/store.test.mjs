@@ -7,6 +7,7 @@ import {openStore, cleanSeen} from '../store.mjs';
 import {openDb, TxAborted} from '../db.mjs';
 import {ClubError, MAX_CLUB_BYTES, newClub, addTeam, uploadSheet, makeLive, setRiderCode, clearRiderCode, addEntry, entryOf, deleteSheet, deleteTeam} from '../club.mjs';
 import {makeLogStore} from '../logs.mjs';
+import {plannedStart, servable} from '../select.mjs';
 import {riderCodeHash} from '../ids.mjs';
 import {club, sheet, planJson, T, CODE_SECRET, rows, clubJson, changes, refuseWrites} from './helpers.mjs';
 
@@ -227,6 +228,42 @@ test('load: sheets in the old format are dropped, the club stays', () => {
         assert.deepEqual(Object.keys(JSON.parse(clubJson(t.db, CID)).sheets), ['nw0001']);
         // a club in the new format logs nothing
         assert.deepEqual(captureWarn(() => t.open()).warned, []);
+    } finally {
+        cleanup(t);
+    }
+});
+
+
+test('load: a club stored by 0.3.0 (a special team, plans without a start time) keeps its planned starts', () => {
+    // 0.3.0's shape: a special team with its start time, no race starts; then a race start stored
+    // since (user, 19 Nov 2026). No migration: the row loads as it is.
+    const t = setup();
+    try {
+        const cogs = {name: 'Cogs', start: '19:00', live: 'cg0001', version: 3, changedAt: '2026-11-18T10:00:00.000Z', kind: 'special', weekday: null};
+        const old = sheet({team: 'cogs', label: 'Cogs', date: '2026-11-21', riders: ['1001'], uploadedAt: '2026-11-18T10:00:00.000Z', plan: 'cg0001'});
+        const later = sheet({team: 'cogs', label: 'Cogs · b', date: '2026-11-28', riders: ['1002'], uploadedAt: '2026-11-19T10:00:00.000Z', plan: 'cg0002', type: 'b'});
+        const data = {...club({teams: {cogs: structuredClone(cogs)}}), weekday: 4};
+        data.sheets = {cg0001: structuredClone(old), cg0002: structuredClone(later)};
+        plant(t, CID, data);
+        const json = clubJson(t.db, CID);
+        const {result: store, warned} = captureWarn(() => t.open());
+        assert.deepEqual(warned, []);
+        const c = store.get(CID);
+        assert.deepEqual(c.teams.cogs, cogs);
+        assert.deepEqual(c.sheets.cg0001, old);
+        // the same S as 0.3.0 gave: the date at the team's 19:00 (Berlin, UTC+1)
+        assert.equal(plannedStart(c, c.sheets.cg0001), T('2026-11-21T18:00:00Z'));
+        assert.equal(plannedStart(c, c.sheets.cg0002), T('2026-11-28T18:00:00Z'));
+        assert.deepEqual(servable(c, T('2026-11-21T12:00Z')).map(x => [x.id, x.S]), [['cg0001', T('2026-11-21T18:00:00Z')]]);
+        assert.equal(clubJson(t.db, CID), json, 'nothing written at load');
+        // a race start stored since: written with the row, read back after a restart
+        store.change(CID, cl => {
+            cl.teams.cogs.raceStarts = {'2026-11-28': '20:15'};
+        });
+        assert.deepEqual(JSON.parse(clubJson(t.db, CID)).teams.cogs.raceStarts, {'2026-11-28': '20:15'});
+        const back = t.open().get(CID);
+        assert.equal(plannedStart(back, back.sheets.cg0002), T('2026-11-28T19:15:00Z'));
+        assert.equal(plannedStart(back, back.sheets.cg0001), T('2026-11-21T18:00:00Z'));
     } finally {
         cleanup(t);
     }

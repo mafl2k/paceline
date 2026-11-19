@@ -7,8 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {gunzipSync, gzipSync} from 'node:zlib';
 import {LOG_NAME_RE, LOG_MAX_LINE, LOG_MAX_DEPTH, LOG_MAX_IN_FLIGHT, LOG_BODY_MS, LOG_MAX_SIGS, LOG_MAX_FILES, ARCHIVE_MAX, QUOTA_BLOCK, quotaBytes,
-    checkRecording, knownPlans, makeLogStore, writeAtomic} from '../logs.mjs';
+    checkRecording, knownPlans, makeLogStore, writeAtomic, withoutRiders} from '../logs.mjs';
 import {normalizePlan} from '../../pages/src/engine/plan.mjs';
+import {parseRecording, readPlan} from '../../tools/ride-report/load.mjs';
 import {openDb} from '../db.mjs';
 import {openStore} from '../store.mjs';
 import {club, sheet, startServer, T, rows, changes, refuseWrites} from './helpers.mjs';
@@ -1449,4 +1450,249 @@ test('recordings: a temp folder that cannot be cleaned up after a stored upload 
     assert.deepEqual(errors, []);
     // the slot is free again
     await expectStatus(await s.post('rollers', params({session: String(Number(SESSION) + 60000)})), 201);
+});
+
+
+// ---- Remove a rider: the recordings (19 Nov 2026) ----
+
+// Hugo (made up), the rider a club removes; Ben (1001) uploads, Dan (1003) and Fay (1006, bench) ride along.
+const HUGO = '7350981';
+const RACE = T('2026-11-18T18:30Z');
+const hugoHead = (selfId = '1001', selfName = 'Ben') => ({
+    kind: 'paceline-recording', v: 1, sessionId: String(RACE), startedAt: RACE, planSig: 'AAAAAA', team: 'Rollers', selfId, selfName,
+    plan: {sig: 'AAAAAA', team: 'Rollers', targetSpeed: 42, minimumFinishers: 3,
+        riders: [{id: '1001', name: 'Ben', order: 0, pullS: 30, watts: 300, color: '#ffffff'},
+            {id: HUGO, name: 'Hugo Testrider', order: 1, pullS: 40, watts: 320, color: '#ff0000'},
+            {id: '1003', name: 'Dan', order: 2, pullS: 30, watts: 280, color: '#00ff00'}],
+        bench: [{id: '1006', name: 'Fay'}, {id: HUGO, name: 'Hugo Testrider'}]},
+});
+const hugoTick = (ts, self = '1001') => ({
+    ts, wt: ts + 5, selfId: self, watchingId: HUGO,
+    riders: [{id: self, self: true, watching: false, power: 250, speed: 41.5, gap: 0},
+        {id: HUGO, self: false, watching: true, inPlan: true, power: 330, speed: 41.6, gap: 1.2},
+        {id: '1003', self: false, watching: false, inPlan: true, power: 280, speed: 41.4, gap: 2.5}],
+    det: {planSig: 'AAAAAA', puller: HUGO, since: ts - 10, frontId: HUGO, wheel: HUGO, wheelObs: '1003', wheelCue: HUGO, place: 2,
+        gap: {kind: 'drop', id: HUGO, m: 12, s: 1.5}},
+    shown: {act: {k: 'rest', t: 20, place: 2}, meanW: 250, wheel: {planned: HUGO, live: '1003'}, next: {id: HUGO, planned: true}},
+});
+const hugoRecording = (self = '1001') => [hugoHead(self, self === HUGO ? 'Hugo Testrider' : 'Ben'),
+    {...hugoTick(RACE + 1000, self), event: {sgId: 77, eventId: 5001, name: 'Made-up TTT', tags: ['ttt']}},
+    hugoTick(RACE + 2000, self), {ts: RACE + 3000, note: 'no riders'}];
+const gzLines = xs => gzipSync(xs.map(x => JSON.stringify(x)).join('\n') + '\n');
+const linesOf = file => unz(fs.readFileSync(file)).split('\n').filter(Boolean).map(l => JSON.parse(l));
+
+
+test('withoutRiders: rows, plan entries, ID fields and maps by ID go; numbers elsewhere, plan codes and other riders stay', () => {
+    const gone = new Set([HUGO]);
+    const head = hugoHead();
+    const out = withoutRiders(head, gone);
+    assert.deepEqual(out.plan.riders.map(r => r.id), ['1001', '1003']);
+    assert.deepEqual(out.plan.bench, [{id: '1006', name: 'Fay'}]);
+    assert.equal(out.selfName, 'Ben');
+    assert.deepEqual(head.plan.riders.length, 3, 'the input is not changed');
+    const tick = withoutRiders(hugoTick(1), gone);
+    assert.deepEqual(tick.riders, hugoTick(1).riders.filter(r => r.id !== HUGO));
+    assert.equal(tick.watchingId, null);
+    assert.deepEqual(tick.det, {...hugoTick(1).det, puller: null, frontId: null, wheel: null, wheelCue: null, gap: {kind: 'drop', id: null, m: 12, s: 1.5}});
+    assert.deepEqual(tick.shown, {...hugoTick(1).shown, wheel: {planned: null, live: '1003'}, next: {id: null, planned: true}});
+    // his own head: his name goes with his id
+    assert.deepEqual([withoutRiders(hugoHead(HUGO, 'Hugo Testrider'), gone).selfId, withoutRiders(hugoHead(HUGO, 'Hugo Testrider'), gone).selfName], [null, null]);
+    // a number that is no ID field stays, a numeric ID field and a map key by his ID go, a plan code
+    // stays, and so does a field that is no ID field (exact values in ID fields only: ruling N3)
+    const n = Number(HUGO);
+    assert.deepEqual(withoutRiders({power: n, puller: n, roster: {[HUGO]: {name: 'x'}, 1001: {}}, planSig: HUGO, note: HUGO}, gone),
+        {power: n, puller: null, roster: {1001: {}}, planSig: HUGO, note: HUGO});
+    // nothing of his: the very same value
+    const clean = hugoTick(1);
+    assert.equal(withoutRiders(clean, new Set(['999'])), clean);
+});
+
+
+test('remove rider: his own uploads go (deleted teams\' too), team-mates\' recordings are rewritten without him, others stay untouched', async t => {
+    const a = archiveSetup(t);
+    const at = T('2026-11-15T10:00Z');
+    const store = (slug, name, xs, codes) => {
+        a.logs.put(KF, slug, name, gzLines(xs));
+        a.logs.addSigs(KF, slug, name, codes);
+        const file = path.join(a.dir(slug), name);
+        fs.utimesSync(file, new Date(at), new Date(at));
+        return file;
+    };
+    const ben = `${RACE}-1001.jsonl.gz`, hugoOwn = `${RACE}-${HUGO}.jsonl.gz`, other = `${RACE - DAY}-1003.jsonl.gz`;
+    const benFile = store('rollers', ben, hugoRecording('1001'), ['AAAAAA', 'BBBBBB']);
+    store('rollers', hugoOwn, hugoRecording(HUGO), ['AAAAAA']);
+    store('cogs', hugoOwn, hugoRecording(HUGO), ['CCCCCC']);    // a deleted team's folder
+    const withoutHim = [{kind: 'paceline-recording', v: 1, plan: {riders: [{id: '1003', name: 'Dan'}], bench: []}},
+        {ts: 1, riders: [{id: '1003', self: true, power: 200}]}];
+    const otherFile = store('rollers', other, withoutHim, ['DDDDDD']);
+    // an archived version only his own upload in cogs used goes with it (as a captain's Delete)
+    assert.equal(a.logs.archiveVersions(KF, 'cogs', [['va0001', a.version(1, 'CCCCCC')]]), 1);
+    const row = name => rows(a.db, 'SELECT slug, bytes, stored_at FROM recordings WHERE cid = ? AND name = ? ORDER BY slug', KF, name);
+    const sigs = name => rows(a.db, 'SELECT slug, sig FROM recording_sigs WHERE cid = ? AND name = ? ORDER BY slug, sig', KF, name);
+    const benRow = row(ben)[0];
+    const otherBytes = fs.readFileSync(otherFile), otherMtime = fs.statSync(otherFile).mtimeMs;
+    const usedBefore = a.logs.circleBytes(KF);
+    a.clock.now += DAY;
+
+    assert.deepEqual(await a.logs.eraseRider(KF, HUGO), {deleted: 2, changed: 1, failed: 0, unreadable: 0});
+    // his own: blob, index row, codes, the archived version only it used, the empty folder
+    assert.ok(!fs.existsSync(path.join(a.dir('rollers'), hugoOwn)));
+    assert.ok(!fs.existsSync(a.dir('cogs')));
+    assert.deepEqual([row(hugoOwn), sigs(hugoOwn)], [[], []]);
+    assert.deepEqual(a.read('cogs'), {});
+    // Ben's: no line holds Hugo's ID or name; everything else as it was
+    const text = unz(fs.readFileSync(benFile));
+    assert.ok(!text.includes(HUGO) && !text.includes('Hugo'), text);
+    const before = hugoRecording('1001'), after = linesOf(benFile);
+    assert.equal(after.length, before.length);
+    assert.deepEqual(after[0], {...before[0], plan: {...before[0].plan, riders: before[0].plan.riders.filter(r => r.id !== HUGO), bench: [{id: '1006', name: 'Fay'}]}});
+    for (const i of [1, 2]) {
+        assert.deepEqual(after[i].riders.map(r => JSON.stringify(r)), before[i].riders.filter(r => r.id !== HUGO).map(r => JSON.stringify(r)), `tick ${i}`);
+        assert.equal(after[i].watchingId, null);
+        assert.deepEqual([after[i].det.puller, after[i].det.frontId, after[i].det.wheel, after[i].det.wheelObs, after[i].det.gap.id], [null, null, null, '1003', null]);
+        assert.deepEqual(after[i].shown.next, {id: null, planned: true});
+    }
+    assert.deepEqual(after[1].event, before[1].event);
+    assert.deepEqual(after[3], before[3]);
+    // the head still reads as a recording and its plan as an engine plan (the ride report)
+    const parsed = parseRecording(text);
+    assert.equal(parsed.ticks.length, 2);
+    const plan = readPlan(JSON.stringify(parsed.head));
+    assert.equal(plan.form, 'engine');
+    assert.deepEqual(plan.plan.riders.map(r => r.id), ['1001', '1003']);
+    // the index: bytes follow the file, the stored time and the codes stay
+    assert.deepEqual(row(ben), [{slug: 'rollers', bytes: fs.statSync(benFile).size, stored_at: benRow.stored_at}]);
+    assert.notEqual(fs.statSync(benFile).size, benRow.bytes);
+    assert.deepEqual(sigs(ben), [{slug: 'rollers', sig: 'AAAAAA'}, {slug: 'rollers', sig: 'BBBBBB'}]);
+    assert.ok(a.logs.circleBytes(KF) < usedBefore);
+    // a recording without him: not touched
+    assert.deepEqual(fs.readFileSync(otherFile), otherBytes);
+    assert.equal(fs.statSync(otherFile).mtimeMs, otherMtime);
+    assert.deepEqual(fs.readdirSync(path.join(a.dataDir, 'logs', '.incoming')), [], 'no temp file left');
+
+    // again: nothing to do, nothing written
+    const benBytes = fs.readFileSync(benFile), benMtime = fs.statSync(benFile).mtimeMs;
+    const n = changes(a.db);
+    assert.deepEqual(await a.logs.eraseRider(KF, HUGO), {deleted: 0, changed: 0, failed: 0, unreadable: 0});
+    assert.deepEqual(fs.readFileSync(benFile), benBytes);
+    assert.equal(fs.statSync(benFile).mtimeMs, benMtime);
+    assert.equal(changes(a.db), n);
+    assert.deepEqual(await a.logs.eraseRider(KF, 'abc'), {deleted: 0, changed: 0, failed: 0, unreadable: 0});
+});
+
+
+test('remove rider: a recording that cannot be rewritten stays as it was, is logged without his ID, and the next run finishes it', async t => {
+    const a = archiveSetup(t);
+    const ben = `${RACE}-1001.jsonl.gz`, dan = `${RACE}-1003.jsonl.gz`;
+    for (const name of [ben, dan]) {
+        a.logs.put(KF, 'rollers', name, gzLines(hugoRecording(LOG_NAME_RE.exec(name)[2])));
+    }
+    const benFile = path.join(a.dir('rollers'), ben);
+    const kept = fs.readFileSync(benFile);
+    const bytes = rows(a.db, 'SELECT bytes FROM recordings WHERE name = ?', ben)[0].bytes;
+    // the rename of Ben's new file fails (a full disk, a lost mount)
+    const renameSync = fs.renameSync;
+    fs.renameSync = (from, to) => {
+        if (String(to) === benFile) {
+            throw Object.assign(new Error('no space'), {code: 'ENOSPC'});
+        }
+        return renameSync(from, to);
+    };
+    let got;
+    const logged = [];
+    const error = console.error;
+    console.error = (...x) => logged.push(x.join(' '));
+    try {
+        got = await a.logs.eraseRider(KF, HUGO);
+    } finally {
+        fs.renameSync = renameSync;
+        console.error = error;
+    }
+    assert.deepEqual(got, {deleted: 0, changed: 1, failed: 1, unreadable: 0});
+    assert.deepEqual(fs.readFileSync(benFile), kept);
+    assert.equal(rows(a.db, 'SELECT bytes FROM recordings WHERE name = ?', ben)[0].bytes, bytes);
+    assert.deepEqual(logged, [`paceline-server: club ${KF}: team rollers: a recording not rewritten without a removed rider: ENOSPC`]);
+    assert.deepEqual(fs.readdirSync(path.join(a.dataDir, 'logs', '.incoming')), [], 'its temp file went');
+    // a file that is no recording cannot be read: counted apart (another run cannot fix it)
+    a.logs.put(KF, 'rollers', `${RACE}-1004.jsonl.gz`, Buffer.from('not gzip'));
+    const unread = [];
+    const quiet = console.error;
+    console.error = (...x) => unread.push(x.join(' '));
+    try {
+        assert.deepEqual(await a.logs.eraseRider(KF, HUGO), {deleted: 0, changed: 1, failed: 0, unreadable: 1});
+    } finally {
+        console.error = quiet;
+    }
+    assert.deepEqual(unread, [`paceline-server: club ${KF}: team rollers: a recording that cannot be read was not checked for removed riders`]);
+    assert.ok(!unz(fs.readFileSync(benFile)).includes(HUGO));
+    assert.equal(rows(a.db, 'SELECT bytes FROM recordings WHERE name = ?', ben)[0].bytes, fs.statSync(benFile).size);
+});
+
+
+test('remove rider: a recording deleted while it is rewritten is not brought back', async t => {
+    const a = archiveSetup(t);
+    const name = `${RACE}-1001.jsonl.gz`;
+    // large enough that the pass is still reading it when the Delete lands
+    const many = [hugoHead(), ...Array.from({length: 20000}, (_, i) => hugoTick(RACE + i))];
+    a.logs.put(KF, 'rollers', name, gzLines(many));
+    const pass = a.logs.eraseRider(KF, HUGO);
+    const inc = path.join(a.dataDir, 'logs', '.incoming');
+    for (let i = 0; i < 2000 && !(fs.existsSync(inc) && fs.readdirSync(inc).length); i++) {
+        await new Promise(r => setImmediate(r));
+    }
+    assert.equal(fs.readdirSync(inc).length, 1, 'the pass is writing its temp file');
+    // the captain's Delete lands now, mid-read
+    assert.equal(a.logs.remove(KF, 'rollers', name), true);
+    assert.deepEqual(await pass, {deleted: 0, changed: 0, failed: 0, unreadable: 0});
+    assert.ok(!fs.existsSync(path.join(a.dir('rollers'), name)), 'not brought back');
+    assert.deepEqual(a.logs.list(KF), []);
+    assert.deepEqual(fs.readdirSync(inc), [], 'its temp file went');
+});
+
+
+test('recordings: a ride from before a rider\'s removal is stored without him, even when its head plan lists him; a later ride keeps him', async t => {
+    const s = await setup(t);
+    const removedAt = Number(SESSION) + 3600000;
+    const erase = (cid, aid, at) => s.server.erasures.list.append({cid, aid, at: new Date(at).toISOString()});
+    erase(KF, HUGO, removedAt);
+    // Ben's mod still has the plan with Hugo in it: the head plan vouches for his rows
+    const body = gzLines(hugoRecording('1001'));
+    const name = `${SESSION}-1001.jsonl.gz`;
+    await expectStatus(await s.post('rollers', params(), body), 201, {ok: true, file: name});
+    const text = unz(fs.readFileSync(s.logFile(KF, 'rollers', name)));
+    assert.ok(!text.includes(HUGO) && !text.includes('Hugo'), text);
+    assert.deepEqual(linesOf(s.logFile(KF, 'rollers', name))[1].riders.map(r => r.id), ['1001', '1003']);
+    // a retry of the same body is the same file
+    await expectStatus(await s.post('rollers', params(), Buffer.from(body)), 201, {ok: true, file: name});
+    // another club does not erase him; a ride after the removal (he was listed again) keeps him
+    erase(SP, '1003', removedAt);
+    const later = String(removedAt + 60000);
+    await expectStatus(await s.post('rollers', params({session: later}), body), 201);
+    assert.ok(unz(fs.readFileSync(s.logFile(KF, 'rollers', `${later}-1001.jsonl.gz`))).includes(HUGO));
+});
+
+
+test('recordings: a removal that lands while the body is checked is applied before the file is stored', async t => {
+    const s = await setup(t);
+    // the first look finds nothing; the removal is noted while the check runs
+    const logs = s.server.logs;
+    const erasedFor = logs.erasedFor;
+    let calls = 0;
+    logs.erasedFor = (cid, session) => {
+        calls++;
+        if (calls === 1) {
+            s.server.erasures.list.append({cid: KF, aid: HUGO, at: new Date(Number(SESSION) + 1000).toISOString()});
+            return new Set();
+        }
+        return erasedFor(cid, session);
+    };
+    t.after(() => {
+        logs.erasedFor = erasedFor;
+    });
+    const name = `${SESSION}-1001.jsonl.gz`;
+    await expectStatus(await s.post('rollers', params(), gzLines(hugoRecording('1001'))), 201, {ok: true, file: name});
+    assert.ok(calls >= 3);
+    const text = unz(fs.readFileSync(s.logFile(KF, 'rollers', name)));
+    assert.ok(!text.includes(HUGO) && !text.includes('Hugo'), text);
+    assert.deepEqual(tree(path.join(s.dataDir, 'logs')), [KF, `${KF}/rollers`, `${KF}/rollers/${name}`]);
 });

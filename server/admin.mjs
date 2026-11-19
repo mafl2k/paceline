@@ -13,6 +13,7 @@ import {readBody, BODY_MS, send, html, sameOrigin, parseForm} from './http.mjs';
 import {esc, t, page} from './pages.mjs';
 import {addLink, endAllLinks} from './tokens.mjs';
 import {leftoverFolders, LEFTOVER_DAYS} from './dump.mjs';
+import {parseEntry} from './erasures.mjs';
 import {FORM_BYTES, refuseCrossSite, methodNotAllowed, mailLink} from './web.mjs';
 
 // Failed logins per client address (spec §8): 10 in 15 min, then 429 until the window has passed.
@@ -20,7 +21,7 @@ export const ADMIN_FAILS_MAX = 10;
 const FAIL_WINDOW_MS = 15 * 60 * 1000;
 const REALM = 'Basic realm="Paceline admin", charset="UTF-8"';
 const MAIL_RESULTS = 20;
-const ACTIONS = new Set(['/admin/link', '/admin/restore', '/admin/purge', '/admin/registration']);
+const ACTIONS = new Set(['/admin/link', '/admin/restore', '/admin/purge', '/admin/registration', '/admin/erasures']);
 
 const iso = ms => new Date(ms).toISOString();
 // '2026-11-16 09:30' (UTC); '' for a time that does not parse
@@ -164,6 +165,16 @@ ${rows.join('\n')}
 }
 
 
+// After a full restore of the data folder: the lines of the operator mails of every removal since
+// the backup (erasures.mjs). The form takes FORM_BYTES (64 KB, about 500 lines) at a time.
+function erasuresSection() {
+    return `<h2>${esc(t('admin-erasures-heading'))}</h2>
+${para(t('admin-erasures-intro'))}
+<form method="post" action="/admin/erasures"><label>${esc(t('admin-erasures-label'))}<br><textarea name="lines" rows="6" cols="80" spellcheck="false"></textarea></label>
+<button type="submit">${esc(t('admin-erasures-button'))}</button></form>`;
+}
+
+
 // The operator page; `flash` = {text, cls} on top after an action.
 function adminPage(req, res, ctx, {status = 200, flash = null} = {}) {
     const ip = clientIp(req, ctx.cfg.trustedProxyHops) ?? '';
@@ -173,6 +184,7 @@ function adminPage(req, res, ctx, {status = 200, flash = null} = {}) {
         registrationSection(ctx),
         clubsSection(ctx),
         databaseSection(ctx),
+        erasuresSection(),
         mailSection(ctx),
     ].filter(Boolean).join('\n')));
 }
@@ -250,6 +262,10 @@ function restore(req, res, ctx, cid) {
         return;
     }
     const club = store.get(cid);
+    // removals that waited for this club in the trash (erasures.mjs): its data now, its recordings next
+    ctx.erasures.applyPending({cid}).catch(e => {
+        console.error(`paceline-server: admin: removals of ${cid} not applied: ${e?.code ?? e?.name ?? 'error'}`);
+    });
     let mailed = false;
     try {
         mailed = mailLink(ctx, club, tk);
@@ -289,6 +305,52 @@ ${back()}`));
     }
     console.log(`paceline-server: admin: ${cid} purged`);
     adminPage(req, res, ctx, {flash: {text: t('admin-purged', {club: name}), cls: 'ok'}});
+}
+
+
+// POST /admin/erasures (lines): each line that is a removal entry and not on the erasure list yet is
+// appended there and applied to the data stored before its time (erasures.mjs); a line for a club
+// this server does not have is kept (a later restore of that club needs it). The answer counts the
+// new, the known and the lines that are none, the new ones for unknown clubs, and what failed (tried
+// again at the next start). Nothing is logged but the counts: the lines hold Zwift IDs.
+async function reapply(req, res, ctx, text) {
+    const {store, erasures} = ctx;
+    if (erasures.list.broken() !== null) {
+        adminPage(req, res, ctx, {status: 503, flash: {text: t('admin-erasures-broken'), cls: 'err'}});
+        return;
+    }
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let invalid = 0, known = 0, unknown = 0, failed = 0;
+    const fresh = [];
+    // a little clock skew allowed; a time to come would erase him from all stored until then
+    const notAfter = ctx.now + 5 * 60000;
+    for (const line of lines) {
+        const e = parseEntry(line, {notAfter});
+        if (e === null) {
+            invalid++;
+        } else if (!erasures.list.append(e)) {
+            known++;
+        } else {
+            fresh.push(e);
+            if (!store.getAny(e.cid) && !store.trashed().some(x => x.id === e.cid)) {
+                unknown++;
+            }
+        }
+    }
+    if (fresh.length) {
+        const sum = await erasures.applyAll(fresh);
+        failed = sum.failed + sum.unreadable + sum.waiting;
+    }
+    console.log(`paceline-server: admin: removals to re-apply: ${fresh.length} new, ${known} known, ${invalid} not readable`);
+    const notes = [t('admin-erasures-done', {fresh: fresh.length, known, invalid})];
+    if (unknown) {
+        notes.push(t('admin-erasures-unknown', {n: unknown}));
+    }
+    if (failed) {
+        notes.push(t('admin-erasures-failed', {n: failed}));
+    }
+    adminPage(req, res, ctx, {status: lines.length && invalid === lines.length ? 400 : 200,
+                              flash: {text: notes.join(' '), cls: invalid || failed ? 'warn' : 'ok'}});
 }
 
 
@@ -345,6 +407,8 @@ export async function handleAdmin(req, res, ctx, p, method) {
         restore(req, res, ctx, cid);
     } else if (p === '/admin/purge') {
         purge(req, res, ctx, cid, form.get('confirm') === '1');
+    } else if (p === '/admin/erasures') {
+        await reapply(req, res, ctx, String(form.get('lines') ?? ''));
     } else {
         registration(req, res, ctx, String(form.get('state') ?? ''));
     }

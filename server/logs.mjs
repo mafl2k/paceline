@@ -111,15 +111,15 @@ const checkTeam = (cid, slug) => {
 // throws on reading such an integer.
 const safeSession = name => Number.isSafeInteger(Number(LOG_NAME_RE.exec(name)[1]));
 
-// The recordings row of blob `name` of team `slug` from its fs.Stats: bytes its size, stored_at `at`
-// (epoch ms; the file's mtime unless given). null for a session past 2^53.
+// The recordings row of blob `name` of team `slug` from its fs.Stats: bytes its size, mtime its mtime,
+// stored_at `at` (epoch ms; the file's mtime unless given). null for a session past 2^53.
 export function recordingRow(cid, slug, name, stat, at = Math.floor(stat.mtimeMs)) {
     checkPath(cid, slug, name);
     if (!safeSession(name)) {
         return null;
     }
     const m = LOG_NAME_RE.exec(name);
-    return {cid, slug, name, session: Number(m[1]), athlete: m[2], bytes: stat.size, stored_at: at};
+    return {cid, slug, name, session: Number(m[1]), athlete: m[2], bytes: stat.size, stored_at: at, mtime: Math.floor(stat.mtimeMs)};
 }
 
 const str = v => typeof v === 'string' ? v : null;
@@ -157,16 +157,17 @@ const errCode = e => e?.code ?? e?.name ?? 'error';
 // total and of the sweep while it is in the trash. Every write is one db.tx (a savepoint inside a caller's
 // transaction); a blob is renamed into place before its row is written and unlinked after its row
 // is deleted, and reconcile heals what a failure in between leaves.
-export function makeLogStore(dataDir, {db, now = Date.now}) {
+// `erasures` is the erasure list (erasures.mjs openErasures) the uploads consult; null: none.
+export function makeLogStore(dataDir, {db, now = Date.now, erasures = null}) {
     const logsDir = path.join(dataDir, 'logs');
     const sql = db.sql;
     const TRASHED = 'SELECT cid FROM trash WHERE cid NOT IN (SELECT cid FROM clubs)';
     const ARCHIVE_COLS = 'cid, slug, id, plan, n, sig, rec_sig, past_sigs, label, type, date, version, bytes, archived_at';
     const q = {
-        putRec: sql.prepare(`INSERT INTO recordings (cid, slug, name, session, athlete, bytes, stored_at)
-            VALUES (:cid, :slug, :name, :session, :athlete, :bytes, :stored_at)
+        putRec: sql.prepare(`INSERT INTO recordings (cid, slug, name, session, athlete, bytes, stored_at, mtime)
+            VALUES (:cid, :slug, :name, :session, :athlete, :bytes, :stored_at, :mtime)
             ON CONFLICT (cid, slug, name) DO UPDATE SET session = excluded.session, athlete = excluded.athlete,
-            bytes = excluded.bytes, stored_at = excluded.stored_at`),
+            bytes = excluded.bytes, stored_at = excluded.stored_at, mtime = excluded.mtime`),
         hasRec: sql.prepare('SELECT 1 AS x FROM recordings WHERE cid = ? AND slug = ? AND name = ?'),
         delRec: sql.prepare('DELETE FROM recordings WHERE cid = ? AND slug = ? AND name = ?'),
         sigsOf: sql.prepare('SELECT sig FROM recording_sigs WHERE cid = ? AND slug = ? AND name = ? ORDER BY sig'),
@@ -190,7 +191,11 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
         clubArc: sql.prepare('SELECT rowid AS r, slug, id, version, archived_at FROM archive WHERE cid = ? ORDER BY slug, archived_at, rowid'),
         delClubRecs: sql.prepare('DELETE FROM recordings WHERE cid = ?'),
         delClubArc: sql.prepare('DELETE FROM archive WHERE cid = ?'),
-        allRecs: sql.prepare('SELECT cid, slug, name FROM recordings'),
+        allRecs: sql.prepare('SELECT cid, slug, name, bytes, mtime FROM recordings'),
+        clubRecs: sql.prepare('SELECT slug, name, session, athlete FROM recordings WHERE cid = ? ORDER BY slug, name'),
+        setBytes: sql.prepare('UPDATE recordings SET bytes = ?, mtime = ? WHERE cid = ? AND slug = ? AND name = ?'),
+        rowOf: sql.prepare('SELECT bytes, mtime FROM recordings WHERE cid = ? AND slug = ? AND name = ?'),
+        trashedClub: sql.prepare(`SELECT 1 AS x FROM (${TRASHED}) WHERE cid = ?`),
         old: sql.prepare(`SELECT cid, slug, name FROM recordings WHERE session < ? AND cid NOT IN (${TRASHED}) ORDER BY cid, slug, name`),
         arcTeams: sql.prepare(`SELECT DISTINCT cid, slug FROM archive WHERE cid NOT IN (${TRASHED}) ORDER BY cid, slug`),
         // a purged club: in neither clubs nor trash, with a tombstone
@@ -332,10 +337,14 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
     }
 
     // Removes `src` (from incoming()) if it is still there, then logs/.incoming once it is empty.
-    // Called while the upload slot is held, so no other upload is writing there.
+    // Called while the upload slot is held, so no other upload is writing there; while a rewrite
+    // (Remove a rider) writes there the folder stays.
     function discard(src) {
         if (src !== null) {
             fs.rmSync(src, {force: true});
+        }
+        if (writing > 0) {
+            return;
         }
         try {
             fs.rmdirSync(path.join(logsDir, INCOMING));
@@ -479,7 +488,9 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
     // Takes the rider out of every archived version of the club, deleted teams' too: riders, bench
     // and his text row. The sig follows the content, the recSig and the archive time stay; a version
     // left without riders is deleted. One transaction. Returns the number of versions changed.
-    function removeRider(cid, athleteId) {
+    // `before` (epoch ms): only versions made before it (the version's `at`; applied again after a
+    // restore, erasures.mjs).
+    function removeRider(cid, athleteId, {before = Infinity} = {}) {
         const aid = String(athleteId);
         if (!CID_RE.test(cid) || !ZWIFT_RE.test(aid)) {
             return 0;
@@ -489,7 +500,7 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
             for (const row of q.clubArc.all(cid)) {
                 const v = JSON.parse(row.version);
                 const json = isObject(v) && isObject(v.json) ? v.json : null;
-                if (!json || !['riders', 'roster'].some(k => isObject(json[k]) && Object.hasOwn(json[k], aid))) {
+                if (!json || !['riders', 'roster'].some(k => isObject(json[k]) && Object.hasOwn(json[k], aid)) || Date.parse(v.at) >= before) {
                     continue;
                 }
                 changed++;
@@ -510,6 +521,229 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
                 q.updArc.run(archiveRow(cid, row.slug, row.id, rewritten, row.archived_at));
             }
             return changed;
+        });
+    }
+
+    // ---- Remove a rider: the recordings ----
+
+    // The riders a recording of club `cid` from session `session` (epoch ms) must not hold: those
+    // removed from the club after the ride began (the erasure list, erasures.mjs; none without one).
+    const erasedFor = (cid, session) => erasures ? erasures.erasedFor(cid, session) : new Set();
+
+    // Rewrites being written: logs/.incoming holds their temp files, so discard leaves it meanwhile.
+    let writing = 0;
+    // the recordings that could not be read, logged already (key cid/slug/name)
+    const unreadableSaid = new Set();
+    // While the erasure list cannot be read the store fails closed: uploads wait (503), and the
+    // reconcile holds every file it would index or correct, checked once the list is read again.
+    const listBroken = () => (erasures?.broken?.() ?? null) !== null;
+    const sessionOf = name => Number(LOG_NAME_RE.exec(name)[1]);
+    const athleteOf = name => LOG_NAME_RE.exec(name)[2];
+    const unreadable = verdict => Object.assign(new Error(`recording not read: ${verdict}`), {code: 'unreadable'});
+
+    // Rewrites recording `name` without the riders in `gone` (withoutRiders, no row dropped for its
+    // plan): streamed through checkRecording to a new file in logs/.incoming (same file system; the
+    // log sweep deletes what a crash leaves there), synced, renamed over the old one, the folder
+    // synced; then its index row's size and mtime follow (its stored time and plan codes stay).
+    // `indexed` false: a file reconcile found without an index row, held back until this check; it
+    // gets its row here (as reconcile gives one) once it is checked. 'same' when no line changed (the
+    // file is not touched), 'gone' when the recording went meanwhile (its row went: a Delete, the
+    // retention sweep, a purge; for a file without a row, the file went), else 'changed'. Throws
+    // when the file cannot be read or written, also when its row is there but its file is not (a
+    // team folder whose mount is gone: the removal is not done until it is back), code 'unreadable'
+    // when it is no recording (bad gzip, a line no check passes); the old file then stays as it was.
+    async function rewrite(cid, slug, name, gone, {indexed = true} = {}) {
+        const file = fileOf(cid, slug, name);
+        // false when the recording went; throws when its row is there without its file
+        const there = () => {
+            if (indexed && !has(cid, slug, name)) {
+                return false;
+            }
+            if (size(file) === null) {
+                if (indexed) {
+                    throw Object.assign(new Error('recording file missing'), {code: 'ENOENT'});
+                }
+                return false;
+            }
+            return true;
+        };
+        if (!there()) {
+            return 'gone';
+        }
+        writing++;
+        try {
+            const tmp = incoming();
+            const stats = {changed: 0, dropped: 0};
+            let verdict;
+            try {
+                verdict = await checkRecording(fs.createReadStream(file), {athleteId: athleteOf(name), maxBytes: Infinity,
+                                                                           stats, file: tmp, erase: gone, vouch: false});
+            } catch (e) {
+                fs.rmSync(tmp, {force: true});
+                throw e;
+            }
+            // from here on no await: the recording must still be there when the new file replaces it
+            if (verdict !== 'ok') {
+                if (!there()) {
+                    return 'gone';
+                }
+                throw verdict === 'error' ? Object.assign(new Error('recording not read'), {code: 'EIO'}) : unreadable(verdict);
+            }
+            if (stats.changed === 0 || !there()) {
+                fs.rmSync(tmp, {force: true});
+                if (!there()) {
+                    return 'gone';
+                }
+                if (indexed) {
+                    refresh(cid, slug, name);
+                } else {
+                    addSigs(cid, slug, name, []);
+                }
+                return 'same';
+            }
+            try {
+                fs.renameSync(tmp, file);
+            } catch (e) {
+                fs.rmSync(tmp, {force: true});
+                throw e;
+            }
+            syncDir(path.dirname(file));
+            if (indexed) {
+                refresh(cid, slug, name);
+            } else {
+                addSigs(cid, slug, name, []);
+            }
+            return 'changed';
+        } finally {
+            writing--;
+        }
+    }
+
+    // The index row's size and mtime from the file, when they differ (a rewrite, a held file checked).
+    function refresh(cid, slug, name) {
+        const st = fs.statSync(fileOf(cid, slug, name), {throwIfNoEntry: false});
+        const row = st ? q.rowOf.get(cid, slug, name) : undefined;
+        if (row && (row.bytes !== st.size || row.mtime !== Math.floor(st.mtimeMs))) {
+            db.tx(() => q.setBytes.run(st.size, Math.floor(st.mtimeMs), cid, slug, name));
+        }
+    }
+
+    // One file against the erasure list: the riders removed from the club after its ride began
+    // (erasedFor), and the extra ones of `extra` (Map Zwift ID -> epoch ms: removed then). His own
+    // upload is deleted as a captain's Delete does (remove); any other is rewritten without them.
+    // 'deleted', 'changed', 'same' or 'gone'; throws as rewrite does (a failed delete with `what`).
+    async function checkFile(cid, slug, name, extra, {indexed}) {
+        const session = sessionOf(name);
+        const gone = erasedFor(cid, session);
+        for (const [aid, before] of extra) {
+            if (session < before) {
+                gone.add(aid);
+            }
+        }
+        if (gone.has(athleteOf(name))) {
+            try {
+                return remove(cid, slug, name) ? 'deleted' : 'gone';
+            } catch (e) {
+                e.what = 'delete';
+                throw e;
+            }
+        }
+        if (!gone.size) {
+            if (size(fileOf(cid, slug, name)) !== null) {
+                if (indexed) {
+                    refresh(cid, slug, name);
+                } else {
+                    addSigs(cid, slug, name, []);
+                }
+            }
+            return 'same';
+        }
+        return rewrite(cid, slug, name, gone, {indexed});
+    }
+
+    // Runs checkFile on each of `files` ({cid, slug, name, indexed}) in order, counting into
+    // {deleted, changed, failed, unreadable}. A file that fails stays as it was and is logged (the
+    // club and the team, no Zwift ID): a recording no check reads counts as unreadable (another run
+    // cannot fix it: a captain deletes it), any other failure as failed (a run again finishes it).
+    async function checkFiles(files, extra = new Map()) {
+        const out = {deleted: 0, changed: 0, failed: 0, unreadable: 0};
+        for (const f of files) {
+            try {
+                const r = await checkFile(f.cid, f.slug, f.name, extra, {indexed: f.indexed});
+                if (r === 'deleted' || r === 'changed') {
+                    out[r]++;
+                }
+            } catch (e) {
+                if (e.code === 'unreadable') {
+                    out.unreadable++;
+                    // once per file while the server runs: the reconcile finds it again every sweep
+                    const key = `${f.cid}/${f.slug}/${f.name}`;
+                    if (!unreadableSaid.has(key)) {
+                        unreadableSaid.add(key);
+                        console.error(`paceline-server: club ${f.cid}: team ${f.slug}: a recording that cannot be read was not checked for removed riders`
+                            + (f.indexed ? '' : '; it has no index row, so captains cannot delete it: the retention sweep does, or delete it by hand'));
+                    }
+                } else {
+                    out.failed++;
+                    console.error(`paceline-server: club ${f.cid}: team ${f.slug}: ${e.what === 'delete'
+                        ? 'a removed rider\'s recording not deleted' : 'a recording not rewritten without a removed rider'}: ${errCode(e)}`);
+                }
+            }
+        }
+        return out;
+    }
+
+    // One pass at a time: two passes over one file would each write it without only their rider.
+    let passes = Promise.resolve();
+    const queued = fn => {
+        const pass = passes.then(fn);
+        passes = pass.catch(() => {});
+        return pass;
+    };
+
+    // Takes the riders of `extra` ([{aid, before}]: removed at `before`, epoch ms; Infinity: now) and
+    // everyone on the erasure list out of the club's recordings, deleted teams' folders too: one pass
+    // over the indexed files, one file at a time (checkFile). Returns {deleted, changed, failed,
+    // unreadable}.
+    function eraseRiders(cid, extra = []) {
+        return queued(() => {
+            if (!CID_RE.test(cid)) {
+                return {deleted: 0, changed: 0, failed: 0, unreadable: 0};
+            }
+            const more = new Map();
+            for (const {aid, before = Infinity} of extra) {
+                const id = String(aid);
+                if (ZWIFT_RE.test(id)) {
+                    more.set(id, Math.max(more.get(id) ?? -Infinity, before));
+                }
+            }
+            return checkFiles(q.clubRecs.all(cid).map(r => ({cid, slug: r.slug, name: r.name, indexed: true})), more);
+        });
+    }
+
+    const eraseRider = (cid, aid, {before = Infinity} = {}) => eraseRiders(cid, [{aid, before}]);
+
+    // Files reconcile held back or found changed (a restore of logs/ brings back what the list took
+    // out): key -> {cid, slug, name, indexed}. checkHeld checks them in one pass.
+    const held = new Map();
+
+    function checkHeld() {
+        return queued(() => {
+            if (listBroken()) {
+                return {deleted: 0, changed: 0, failed: 0, unreadable: 0};
+            }
+            const files = [...held.values()];
+            held.clear();
+            return checkFiles(files);
+        });
+    }
+
+    // True when an archived version of the club (deleted teams' too) lists the Zwift ID.
+    function archiveLists(cid, athleteId) {
+        const aid = String(athleteId);
+        return CID_RE.test(cid) && q.clubArc.all(cid).some(row => {
+            const v = JSON.parse(row.version);
+            return isObject(v) && isObject(v.json) && ['riders', 'roster'].some(k => isObject(v.json[k]) && Object.hasOwn(v.json[k], aid));
         });
     }
 
@@ -562,8 +796,12 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
     // permission), its rows stay, and with them their codes and the archived versions they keep;
     // one line names those folders. Any other folder stays as it is: an unknown club without a
     // tombstone (its blobs are indexed), the v1 logs/<slug>/ and logs/.incoming (not walked).
+    // Remove a rider: a row whose file has another size gets the file's size, and a blob the erasure
+    // list concerns (a rider removed from the club after its ride began) is held for checkHeld when
+    // it has no row (it gets one once checked) or another size (a restore of logs/ brought it back).
     function reconcile() {
-        const rowKeys = new Map(q.allRecs.all().map(r => [`${r.cid}/${r.slug}/${r.name}`, [r.cid, r.slug, r.name]]));
+        const rowKeys = new Map(q.allRecs.all().map(r => [`${r.cid}/${r.slug}/${r.name}`, [r.cid, r.slug, r.name, r.bytes, r.mtime]]));
+        const resized = [];
         const found = new Set();
         const fresh = [];
         const purged = [];
@@ -595,11 +833,33 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
                 for (const name of team.ents.filter(d => d.isFile() && LOG_NAME_RE.test(d.name)).map(d => d.name)) {
                     const key = `${cid}/${slug}/${name}`;
                     found.add(key);
-                    if (!rowKeys.has(key) && safeSession(name)) {
-                        const st = fs.statSync(path.join(logsDir, cid, slug, name), {throwIfNoEntry: false});
-                        if (st) {
+                    if (!safeSession(name)) {
+                        continue;
+                    }
+                    const st = fs.statSync(path.join(logsDir, cid, slug, name), {throwIfNoEntry: false});
+                    const concerned = () => listBroken() || erasedFor(cid, sessionOf(name)).size > 0;
+                    if (!st) {
+                        continue;
+                    }
+                    const mtime = Math.floor(st.mtimeMs);
+                    const row = rowKeys.get(key);
+                    if (!row) {
+                        if (concerned()) {
+                            held.set(key, {cid, slug, name, indexed: false});
+                        } else {
                             fresh.push(recordingRow(cid, slug, name, st));
                         }
+                    } else if (row[3] !== st.size || (row[4] !== null && row[4] !== mtime)) {
+                        // another copy than the row describes (a restore of logs/): checked first,
+                        // its row follows once it is
+                        if (concerned()) {
+                            held.set(key, {cid, slug, name, indexed: true});
+                        } else {
+                            resized.push([st.size, mtime, cid, slug, name]);
+                        }
+                    } else if (row[4] === null) {
+                        // a row from before schema 2: its mtime, nothing else
+                        resized.push([st.size, mtime, cid, slug, name]);
                     }
                 }
             }
@@ -622,10 +882,13 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
             keptRows++;
         }
         let dropped = 0;
-        if (fresh.length || missing.length || purged.length) {
+        if (fresh.length || missing.length || purged.length || resized.length) {
             db.tx(() => {
                 for (const row of fresh) {
                     q.putRec.run(row);
+                }
+                for (const r of resized) {
+                    q.setBytes.run(...r);
                 }
                 for (const [cid, slug, name] of missing) {
                     dropped += q.delRec.run(cid, slug, name).changes;
@@ -638,6 +901,9 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
         const result = {indexed: fresh.length, dropped, removed: purged.length};
         if (result.indexed || result.dropped || result.removed) {
             console.log(`paceline-server: reconcile: ${result.indexed} recordings indexed, ${result.dropped} index rows of missing files dropped, ${result.removed} folders of purged clubs removed`);
+        }
+        if (resized.length || held.size) {
+            console.log(`paceline-server: reconcile: ${resized.length} index rows corrected from their files (size or time), ${held.size} recordings to check against the erasure list first`);
         }
         if (keptRows) {
             const folders = [...kept].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([f, code]) => code ? `${f} (${code})` : f);
@@ -678,6 +944,14 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
             } catch (e) {
                 console.error(`paceline-server: log sweep: recordings older than ${days} days not deleted: ${errCode(e)}`);
             }
+            // and the files the reconcile holds without a row (not checked yet, or not readable): by
+            // their session too, a trashed club's left as they are
+            for (const [key, f] of held) {
+                if (!f.indexed && sessionOf(f.name) < at - days * DAY && !q.trashedClub.get(f.cid)) {
+                    held.delete(key);
+                    old.push([f.cid, f.slug, f.name]);
+                }
+            }
             for (const [cid, slug, name] of old) {
                 emptied.set(`${cid}/${slug}`, [cid, slug]);
                 try {
@@ -715,6 +989,7 @@ export function makeLogStore(dataDir, {db, now = Date.now}) {
     return {
         get, has, incoming, discard, matches, put, adopt, remove, list, recordingCount, circleBytes, totalBytes, reconcile, sweep,
         addSigs, codes, archived, archiveVersions, prune, removeRider, dropClub,
+        erasedFor, rewrite, eraseRider, eraseRiders, checkHeld, archiveLists, erasuresBroken: listBroken,
     };
 }
 
@@ -784,6 +1059,69 @@ const parse = line => {
 };
 
 
+// ---- taking riders out of a recording (Remove a rider) ----
+
+// The fields of a recording line that hold a Zwift ID as a number or a string: a row's and a plan
+// entry's id, the tick's selfId and watchingId, the det fields (recording.mjs DET_ID_FIELDS, gap.id)
+// and what the windows showed (shown.wheel.planned and .live, shown.next.id).
+const ID_KEYS = new Set(['id', 'athleteId', 'selfId', 'watchingId', 'puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue', 'planned', 'live']);
+// plan codes: six characters that could be all digits, never a rider
+const CODE_KEYS = new Set(['planSig', 'sig', 'recSig']);
+const DROP = Symbol('drop');
+const idIn = (v, gone) => (typeof v === 'string' || typeof v === 'number') && gone.has(String(v));
+
+// Value `v` (parsed from a line, nesting bounded by `forbidden`) without the riders in `gone` (a Set
+// of Zwift IDs), matched only as exact values: an array loses every object whose `id` is one of them
+// (a tick's rider rows, the head plan's riders and bench) and every element that is one (a list of
+// IDs); an object loses every key that is one (a map by Zwift ID); an ID field (ID_KEYS) whose
+// whole value is one, as a number or a string, becomes null, and so does `selfName` next to a
+// `selfId` of theirs. Nothing else: no text is searched for an ID inside it (a team called
+// "Rollers 2" stays when rider 2 goes), plan codes stay, and so does a number under any other key.
+// The same value when nothing changed.
+export function withoutRiders(v, gone) {
+    if (Array.isArray(v)) {
+        let changed = false;
+        const out = [];
+        for (const x of v) {
+            if ((isObject(x) && Object.hasOwn(x, 'id') && idIn(x.id, gone)) || idIn(x, gone)) {
+                changed = true;
+                continue;
+            }
+            const y = withoutRiders(x, gone);
+            changed ||= y !== x;
+            out.push(y);
+        }
+        return changed ? out : v;
+    }
+    if (!isObject(v)) {
+        return v;
+    }
+    let out = null;
+    const theirs = Object.hasOwn(v, 'selfId') && idIn(v.selfId, gone);
+    for (const [k, x] of Object.entries(v)) {
+        let y;
+        if (gone.has(k)) {
+            y = DROP;
+        } else if (CODE_KEYS.has(k)) {
+            y = x;
+        } else if ((ID_KEYS.has(k) && idIn(x, gone)) || (theirs && k === 'selfName' && x !== null)) {
+            y = null;
+        } else {
+            y = withoutRiders(x, gone);
+        }
+        if (y !== x) {
+            out ??= {...v};
+            if (y === DROP) {
+                delete out[k];
+            } else {
+                out[k] = y;
+            }
+        }
+    }
+    return out ?? v;
+}
+
+
 // Unpacks the gzip as a stream and reads it line by line: 'ok', 'refused' (not a recording as the
 // mod uploads it: a head line that is no object, a later line that is no object, a `heartrate` or
 // `cadence` key anywhere in any line, nesting deeper than LOG_MAX_DEPTH, or a rider row that is no
@@ -804,9 +1142,15 @@ const parse = line => {
 // unpacked nor the written recording is held in memory, the unpacking waits while the file is
 // behind. One body and `known` give the same bytes (gzip writes no time). The file is synced to disk
 // on 'ok' and removed on any other verdict or an error (the promise rejects on a write error).
-export async function checkRecording(gz, {athleteId, maxBytes, sigs = null, known = null, stats = null, file = null, maxOut = Infinity}) {
+// Remove a rider: with `erase` (a Set of Zwift IDs) every line is also written withoutRiders them,
+// and `stats.changed` counts the lines that changed; with `vouch` false no row is dropped for its
+// plan (a stored recording was checked already: only the erased riders go). `gz` is the gzip as a
+// Buffer, or a readable stream of it (a stored file): a stream that fails gives 'error'.
+export async function checkRecording(gz, {athleteId, maxBytes, sigs = null, known = null, stats = null, file = null, maxOut = Infinity,
+                                          erase = null, vouch = true}) {
+    const opts = {athleteId, maxBytes, sigs, known, stats, erase: erase?.size ? erase : null, vouch};
     if (file === null) {
-        return scan(gz, {athleteId, maxBytes, sigs, known, stats, sink: null});
+        return scan(gz, {...opts, sink: null});
     }
     const sink = zlib.createGzip();
     const out = fs.createWriteStream(file, {flags: 'wx', mode: 0o640});
@@ -831,7 +1175,7 @@ export async function checkRecording(gz, {athleteId, maxBytes, sigs = null, know
         }
     });
     sink.pipe(out);
-    let verdict = await scan(gz, {athleteId, maxBytes, sigs, known, stats, sink});
+    let verdict = await scan(gz, {...opts, sink});
     if (verdict === 'ok' && failed === null) {
         sink.end();
     } else {
@@ -871,9 +1215,10 @@ export async function checkRecording(gz, {athleteId, maxBytes, sigs = null, know
 // checkRecording's reader. With a `sink` (a writable stream) each line goes there as checkRecording
 // describes; the unpacking waits while the sink is full. It stops with the verdict the sink emits
 // as 'stop', or with 'error' when the sink closes (destroyed on a write error) before the end.
-function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
+function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink, erase = null, vouch = true}) {
     return new Promise(resolve => {
         const gunzip = zlib.createGunzip();
+        const source = Buffer.isBuffer(gz) || gz instanceof Uint8Array ? null : gz;
         const decoder = new StringDecoder('utf8');
         let bytes = 0, head = null, ids = null, done = false;
         // The unfinished line as pieces with their total length, joined once when its newline
@@ -884,6 +1229,7 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
             if (!done) {
                 done = true;
                 gunzip.destroy();
+                source?.destroy();
                 resolve(result);
             }
         };
@@ -922,6 +1268,14 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
                 });
             }
         };
+        // the line as written: without the erased riders (Remove a rider), counted when it changed
+        const erased = obj => {
+            const out = erase === null ? obj : withoutRiders(obj, erase);
+            if (out !== obj && isObject(stats)) {
+                stats.changed = (stats.changed ?? 0) + 1;
+            }
+            return out;
+        };
         // false when the line is refused
         const line = text => {
             if (head === null) {
@@ -929,8 +1283,9 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
                 if (!isObject(head) || forbidden(head)) {
                     return false;
                 }
-                ids = planIds(head);
                 collect(head.planSig);
+                head = erased(head);
+                ids = planIds(head);
                 emit(head);
                 return true;
             }
@@ -944,17 +1299,17 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
             const code = isObject(obj.det) ? obj.det.planSig : undefined;
             collect(code);
             if (!Array.isArray(obj.riders)) {
-                emit(obj);
+                emit(erased(obj));
                 return true;
             }
             if (!obj.riders.every(isObject)) {
                 return false;
             }
             const tickPlan = known instanceof Map && typeof code === 'string' ? known.get(code) ?? null : null;
-            const kept = obj.riders.filter(row => mine(row) || ids.has(String(row.id)) || (tickPlan !== null && tickPlan.has(String(row.id))));
+            const kept = vouch ? obj.riders.filter(row => mine(row) || ids.has(String(row.id)) || (tickPlan !== null && tickPlan.has(String(row.id)))) : obj.riders;
             const dropped = obj.riders.length - kept.length;
             if (dropped === 0) {
-                emit(obj);
+                emit(erased(obj));
                 return true;
             }
             if (isObject(stats)) {
@@ -964,7 +1319,7 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
             if (out.watchingId != null && !kept.some(row => String(row.id) === String(out.watchingId))) {
                 out.watchingId = null;
             }
-            emit(out);
+            emit(erased(out));
             return true;
         };
         const feed = text => {
@@ -1022,7 +1377,12 @@ function scan(gz, {athleteId, maxBytes, sigs, known, stats, sink}) {
             finish('ok');
         });
         gunzip.on('error', () => finish('bad'));
-        gunzip.end(gz);
+        if (source === null) {
+            gunzip.end(gz);
+        } else {
+            source.on('error', () => finish('error'));
+            source.pipe(gunzip);
+        }
     });
 }
 
@@ -1110,6 +1470,18 @@ export async function handleLogUpload(req, res, {store, cfg, now, logs, state}, 
         answer(res, 403, {error: 'not in this team'});
         return;
     }
+    // The erasure list cannot be read (erasures.mjs): nothing is stored that it might concern; the
+    // mod tries again later.
+    if (logs.erasuresBroken()) {
+        answer(res, 503, {error: 'busy'}, {'Retry-After': '300'});
+        return;
+    }
+    // Removed from the club after this ride began (Remove a rider): his own recording is never
+    // stored. 403 as for a rider in no plan: the mod does not send it again on its own.
+    if (logs.erasedFor(cid, Number(session)).has(athlete)) {
+        answer(res, 403, {error: 'not in this team'});
+        return;
+    }
     const key = `${slug}/${athlete}`;
     // this request's day: an upload that ends after midnight must not reset the next day's counts
     const counts = today(state, now);
@@ -1149,16 +1521,36 @@ export async function handleLogUpload(req, res, {store, cfg, now, logs, state}, 
         ]);
         const sigs = [];
         const stats = {dropped: 0};
+        // riders removed from the club since this ride began (Remove a rider): never stored
+        let gone = logs.erasedFor(cid, Number(session));
         // Stored is what was checked: each line as parsed, without the rows no plan of the team
-        // vouches for, gzip'd again on the way to a temp file (checkRecording). The body goes once
-        // it is read through.
+        // vouches for and without the removed riders, gzip'd again on the way to a temp file
+        // (checkRecording). The body goes once it is read through.
         tmp = logs.incoming();
         const verdict = await checkRecording(body, {athleteId: athlete, maxBytes: LOG_UNPACK_FACTOR * cfg.logMaxFile, sigs, known, stats,
-                                                    file: tmp, maxOut: cfg.logMaxFile});
+                                                    file: tmp, maxOut: cfg.logMaxFile, erase: gone});
         body = null;
         if (verdict !== 'ok') {
             const [status, error] = {bad: [400, 'bad request'], toolarge: [413, 'too large'], refused: [422, 'refused']}[verdict];
             answer(res, status, {error});
+            return;
+        }
+        // A rider removed while the body was checked: the checked file again, without him too. A
+        // removal lists the recordings to rewrite after it noted the rider, so this file, stored
+        // after the loop with no await in between, is either rewritten here or listed there.
+        for (let now2 = logs.erasedFor(cid, Number(session)); [...now2].some(x => !gone.has(x)); now2 = logs.erasedFor(cid, Number(session))) {
+            gone = now2;
+            const next = logs.incoming();
+            const again = await checkRecording(fs.createReadStream(tmp), {athleteId: athlete, maxBytes: Infinity, file: next, erase: gone, vouch: false});
+            fs.rmSync(tmp, {force: true});
+            tmp = next;
+            if (again !== 'ok') {
+                throw new Error(`a checked recording could not be checked again: ${again}`);
+            }
+        }
+        // removed while the body came in: his own recording goes (the removal's pass may have run)
+        if (gone.has(athlete)) {
+            answer(res, 403, {error: 'not in this team'});
             return;
         }
         // From here on no await: the club may have gone while the body came in, and a deleted

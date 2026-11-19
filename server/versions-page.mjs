@@ -150,7 +150,9 @@ function actionsHtml(club, slug, p, {used}) {
     if (!used) {
         items.push(`<a class="rowlink" href="${esc(`/manage/upload?team=${slug}&plan=${p.id}&from=plan`)}">${ic('upload')}<span><strong>${esc(t('pp-new-version'))}</strong></span>${ic('right', 'chev')}</a>`);
     }
-    items.push(`<p class="menu-info"><strong>${esc(t('tp-race-date', {day: dateDay(p.date, club.tz)}))}</strong><span>${esc(t('tp-race-date-hint'))}</span></p>`);
+    // a special team's start time comes with each upload (the newest for the date sets it)
+    const hint = team.kind === 'special' ? 'tp-race-time-hint' : 'tp-race-date-hint';
+    items.push(`<p class="menu-info"><strong>${esc(t('tp-race-date', {day: dateDay(p.date, club.tz)}))}</strong><span>${esc(t(hint))}</span></p>`);
     const pinned = linkedPlan(club, p);
     if (!used && pinned !== null) {
         items.push(`<form method="post" action="/manage/sheet/unpin">${hidden({team: slug, sheet: p.live ?? id, back: 'plan'})}<button class="btn secondary small" type="submit">`

@@ -1,4 +1,4 @@
-# Paceline 0.3.0
+# Paceline 0.3.1
 
 Paceline is a mod for Sauce for Zwift that helps our team time trial. It:
 
@@ -19,7 +19,10 @@ to analyse your team's rides. The server doesn't analyse recordings automaticall
 
 **0.3 and the plan server.** Paceline 0.3 gets its plans from the plan server
 (`https://ttt.mafl.net`): your captain registers the club there and uploads the plans there. It is
-a new server: nothing from 0.2 is carried over, so the captain registers the club again. Paceline
+a new server: nothing from 0.2 is carried over, so the captain registers the club again. The
+captain gets the club link by mail: open it within 24 hours; from then on it is the club's link for
+good. Bookmark it or keep the mail: it opens the club on any device, until a new link is asked for
+with "Lost link". Paceline
 0.3 talks only to this new server, and 0.2 gets only "Update Paceline" from it, so update before
 your next race. Coming from 0.2, a plan you loaded there no longer counts while the plan server is
 on, and recordings made with 0.2 stay on your computer (export them to send them). The server
@@ -70,9 +73,9 @@ You need Sauce for Zwift already installed and working.
      `OneDrive\Documents\SauceMods` instead)
 
    If the `SauceMods` folder does not exist yet, create it.
-2. Download the newest `paceline-<version>.zip` (for example `paceline-0.3.0.zip`) from the
+2. Download the newest `paceline-<version>.zip` (for example `paceline-0.3.1.zip`) from the
    [latest release](https://github.com/mafl2k/paceline/releases/latest), under **Assets**. A beta
-   such as `paceline-0.3.1-beta.1.zip` is not the latest release: it is on the
+   such as `paceline-0.3.2-beta.1.zip` is not the latest release: it is on the
    [releases page](https://github.com/mafl2k/paceline/releases), marked **Pre-release**.
    Put the `paceline` folder from the zip into that folder. When updating, replace the old
    `paceline` folder completely; your plans and recordings are kept.

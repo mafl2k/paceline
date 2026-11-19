@@ -372,8 +372,8 @@ export function importFiles(db, dataDir, {now, tz, log = console.log, warn = con
         slug: sql.prepare('INSERT INTO retired_slugs (slug) VALUES (?)'),
         seen: sql.prepare('INSERT INTO seen (cid, athlete, sig, mod, sheet, in_event, event, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
         setting: sql.prepare('INSERT INTO settings (name, value) VALUES (?, ?)'),
-        rec: sql.prepare(`INSERT INTO recordings (cid, slug, name, session, athlete, bytes, stored_at)
-            VALUES (:cid, :slug, :name, :session, :athlete, :bytes, :stored_at)`),
+        rec: sql.prepare(`INSERT INTO recordings (cid, slug, name, session, athlete, bytes, stored_at, mtime)
+            VALUES (:cid, :slug, :name, :session, :athlete, :bytes, :stored_at, :mtime)`),
         sig: sql.prepare('INSERT INTO recording_sigs (cid, slug, name, sig) VALUES (?, ?, ?, ?)'),
         arc: sql.prepare(`INSERT INTO archive (${ARCHIVE_COLS.join(', ')}) VALUES (${ARCHIVE_COLS.map(c => ':' + c).join(', ')})`),
         meta: sql.prepare('INSERT INTO meta (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value'),

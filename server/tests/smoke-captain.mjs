@@ -39,11 +39,18 @@
 //   6.   Make live without the script: a second tab with script execution disabled posts Make
 //        live, gets the server's confirm page, and confirms; team.live changes only then;
 //   7.   Delete plan on the plan page asks in the page first.
+//   8.   (with --shots) a special team's assign page: date and time above the fold, a neutral line
+//        while they are empty, the date and then the time redraw the preview, Store sets the race's
+//        start, a version with another time says the race moves; Add a team hides the weekly
+//        fields while special is checked.
 // Each check prints `ok …` or `FAIL …`; any FAIL exits 1. With --shots it saves
 // captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen),
 // captain-team-settings-390-{light,dark}.png, captain-team-cogs-390-light.png (Cogs, no start
 // time), captain-assign-390-light.png (the assign page right after the upload) and
-// captain-plan-390-light.png (a plan page), and every captain page at 1280 (full page, so the
+// captain-plan-390-light.png (a plan page), a special team's assign page empty, filled and moving
+// its race's start (captain-assign-special-{empty,filled,move}-{390,1280}-light.png), its settings
+// (captain-team-settings-special-{390,1280}-light.png) and Add a team with special checked
+// (captain-new-team-special-390-light.png), and every captain page at 1280 (full page, so the
 // desktop frames can be laid side by side) and those not named yet at 390, and the team page with its
 // switcher open, captain-team-switch-390-light.png:
 // captain-<page>-{390,1280}-light.png for teams (1280 only), team (1280 only), team-cogs (1280
@@ -66,7 +73,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {startServer, fakeMailer, planJson, T, CODE_SECRET} from './helpers.mjs';
 import {CID, makeClub, secondClub, upload} from './manage-helpers.mjs';
-import {uploadSheet} from '../club.mjs';
+import {uploadSheet, addTeam, addEntry, discardEntry, deleteTeam} from '../club.mjs';
 import {randomId} from '../ids.mjs';
 
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -688,6 +695,79 @@ try {
         await tab.evaluate('document.querySelector("details.switch").open = true');
         await shootNow('captain-team-switch-390-light.png');
         await shoot('captain-plan-390-light.png', `/manage/team/rollers/plan/${fastPlan}`, 390, 'light', true);
+        // a special team (user, 19 Nov 2026): its settings without a start time, and the assign page of
+        // its plans with date and start time at the top: empty (a neutral line, nothing red), filled
+        // (the time redraws the preview), and a version that moves the race's start; the team goes
+        // again after the shots
+        const gears = srv.store.change(CID, cl => addTeam(cl, {name: 'Gears', kind: 'special', weekday: null},
+            {slugTaken: s2 => srv.store.slugTaken(s2), now: NOW}));
+        const gearsEntry = (riders = ['1008', '1009']) => srv.store.change(CID, cl => addEntry(cl, {source: 'upload', team: gears, json: planJson('Gears', riders), text: null},
+            {now: NOW, newId: () => randomId(6)}));
+        const what = `JSON.stringify([...document.querySelectorAll('section[aria-labelledby=wh-h] li')].map(li => [li.className, li.innerText.trim()]))`;
+        // set a field as typed and left: the page redraws itself (or not, then null after 3 s)
+        const setField = async (name, value) => {
+            const loaded = tab.once('Page.loadEventFired', 3000);
+            await tab.evaluate(`(() => { const f = document.querySelector('input[name=${name}]'); f.focus(); f.value = '${value}';
+              f.dispatchEvent(new Event('input', {bubbles: true})); f.dispatchEvent(new Event('change', {bubbles: true})); })()`);
+            const got = await loaded;
+            await sleep(300);
+            return got;
+        };
+        const first = gearsEntry();
+        await open(`/manage/inbox/${first}`);
+        const when = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const d = document.querySelector('.as-when input[name=date]'), s = document.querySelector('.as-when input[name=start]');
+          const fold = document.querySelector('details.card.fold');
+          return {date: !!d && d.required, start: !!s && s.required, above: !!s && !!fold && s.getBoundingClientRect().bottom < fold.getBoundingClientRect().top};
+        })())`));
+        report(when.date && when.start && when.above, 'a special team\'s assign page asks for date and start time above the fold', JSON.stringify(when));
+        const empty = JSON.parse(await tab.evaluate(what));
+        report(empty.length === 1 && empty[0][0] === 'neutral' && empty[0][1] === 'Choose the race date and start time.',
+            'empty date and time: a neutral line, nothing red', JSON.stringify(empty));
+        for (const w of [390, 1280]) {
+            await shoot(`captain-assign-special-empty-${w}-light.png`, `/manage/inbox/${first}`, w, 'light', true);
+        }
+        await open(`/manage/inbox/${first}`);
+        const byDate = await setField('date', '2026-11-29');
+        const afterDate = JSON.parse(await tab.evaluate(what));
+        const byTime = await setField('start', '20:15');
+        const filled = JSON.parse(await tab.evaluate(what));
+        const race = await tab.evaluate('document.querySelector(".as-row:not(:has(.kicker))")?.innerText ?? ""');
+        report(byDate !== null && afterDate[0]?.[1] === 'Choose the start time.' && byTime !== null
+            && filled.some(([, text]) => text.startsWith('New plan \'Gears\', live for Sun 29 Nov 20:15.')) && race.includes('Sun 29 Nov 20:15'),
+            'the date and then the time redraw the preview, which uses the time', JSON.stringify({afterDate, filled, race}));
+        const filledAt = await tab.evaluate('location.pathname + location.search');
+        for (const w of [390, 1280]) {
+            await shoot(`captain-assign-special-filled-${w}-light.png`, filledAt, w, 'light', true);
+        }
+        await open(filledAt);
+        await follow('document.querySelector("[data-submit]").click()');
+        const gearsPlan = Object.values(club().sheets).find(sh => sh.team === gears)?.plan;
+        report(club().teams[gears].raceStarts?.['2026-11-29'] === '20:15' && gearsPlan, 'Store sets the race\'s start', JSON.stringify(club().teams[gears].raceStarts));
+        // a new version with another time: the race moves, the preview says so
+        const second = gearsEntry(['1008']);
+        await open(`/manage/inbox/${second}?team=${gears}&as=${gearsPlan}&drawn=${gears}:${gearsPlan}&live=on`);
+        await setField('start', '21:15');
+        const moved = JSON.parse(await tab.evaluate(what));
+        report(moved.some(([, text]) => text === 'Race on Sun 29 Nov now starts at 21:15 (was 20:15).'), 'a version with another time: the preview says the race moves', JSON.stringify(moved));
+        const movedAt = await tab.evaluate('location.pathname + location.search');
+        for (const w of [390, 1280]) {
+            await shoot(`captain-assign-special-move-${w}-light.png`, movedAt, w, 'light', true);
+            await shoot(`captain-team-settings-special-${w}-light.png`, `/manage/team/${gears}/settings`, w, 'light', true);
+        }
+        // the race rhythm: the weekly fields hide while special is checked (the script)
+        await open('/manage/new-team');
+        const hide = async () => JSON.parse(await tab.evaluate('JSON.stringify(document.querySelector("[data-weekly]").hidden)'));
+        const shown = await hide();
+        await tab.evaluate('document.querySelector("input[name=kind][value=special]").click()');
+        const gone = await hide();
+        await shootNow('captain-new-team-special-390-light.png');
+        await tab.evaluate('document.querySelector("input[name=kind][value=weekly]").click()');
+        report(shown === false && gone === true && await hide() === false, 'Add a team: the weekly fields hide while special is checked', `${shown} ${gone}`);
+        srv.store.change(CID, cl => {
+            discardEntry(cl, second, NOW);
+            deleteTeam(cl, gears, NOW);
+        });
         // every captain page reached by a GET at 1280, those without a shot above at 390 as well (a
         // gone page answers 404)
         const pages = [['teams', '/manage'], ['team', '/manage/team/rollers'], ['team-cogs', '/manage/team/cogs'],

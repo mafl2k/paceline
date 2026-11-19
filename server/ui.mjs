@@ -73,7 +73,7 @@ ${main}
 // The team rows of the switcher and the sidebar, one per team in teamOrder; `view` (a page's own
 // teamView) stands in for its team instead of drawing it again.
 export function teamRows(club, {now, seen = {}}, view = null) {
-    return teamOrder(club).map(s => teamRow(view !== null && s === view.slug ? view : teamView(club, s, {now, seen})));
+    return teamOrder(club, now).map(s => teamRow(view !== null && s === view.slug ? view : teamView(club, s, {now, seen})));
 }
 
 

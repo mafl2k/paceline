@@ -187,6 +187,8 @@ details>summary::-webkit-details-marker{display:none}
 .banner,.flash{display:flex;gap:.625rem;align-items:flex-start;padding:.75rem .875rem;border-radius:var(--r2);border:1px solid}
 .banner.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
 .banner .i{color:var(--warn-icon);margin-top:.1rem}
+.banner.info{background:var(--neutral-bg);border-color:var(--neutral-bd);color:var(--neutral-fg)}
+.banner.info .i{color:var(--neutral-icon)}
 /* the note without the script (ui.mjs appPage): the page's side padding and width */
 .nojs{max-width:44rem;margin:0 auto;padding:.75rem max(1rem,env(safe-area-inset-right)) 0 max(1rem,env(safe-area-inset-left))}
 .flash.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
@@ -213,6 +215,11 @@ input[type=date]{max-width:13rem}
 .inline-form{display:flex;flex-wrap:wrap;align-items:end;gap:.5rem}
 .inline-form>label{flex:1 1 12rem}
 .inline-form>.btn{flex:none}
+.as-when{display:flex;flex-wrap:wrap;gap:.75rem}
+.as-when>label,.as-when>.as-fixed{flex:1 1 12rem}
+.as-fixed{display:grid;gap:.375rem;align-content:start;margin:0}
+.as-fixed span{min-height:var(--btn);display:flex;align-items:center}
+#weekday-hint a{display:inline-block;padding:.8125rem 0;margin:-.8125rem 0}
 input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15rem 0 0;flex:none;accent-color:var(--accent)}
 .choice{display:flex;gap:.75rem;align-items:flex-start;padding:.75rem .875rem;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);cursor:pointer;min-height:var(--btn)}
 .choice:has(:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}

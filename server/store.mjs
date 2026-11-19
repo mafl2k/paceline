@@ -822,9 +822,13 @@ export function openStore({db, now, archive = null}) {
     }
 
     // Takes the rider's entry out now, row included (Remove a rider).
-    function forget(cid, athleteId) {
+    // `before` (epoch ms): only a check from before it (Remove a rider applied again, erasures.mjs).
+    function forget(cid, athleteId, {before = Infinity} = {}) {
         const aid = String(athleteId);
         if (!CID_RE.test(cid) || !ZWIFT_RE.test(aid)) {
+            return;
+        }
+        if (Date.parse(seen.get(cid)?.get(aid)?.at) >= before) {
             return;
         }
         db.tx(() => {

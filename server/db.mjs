@@ -43,6 +43,10 @@ CREATE INDEX recording_sigs_team ON recording_sigs (cid, slug, sig);
 CREATE TABLE archive (cid TEXT NOT NULL, slug TEXT NOT NULL, id TEXT NOT NULL, plan TEXT, n INTEGER, sig TEXT,
   rec_sig TEXT, past_sigs TEXT NOT NULL, label TEXT, type TEXT, date TEXT, version TEXT NOT NULL,
   bytes INTEGER NOT NULL, archived_at INTEGER NOT NULL, PRIMARY KEY (cid, slug, id)) STRICT;`,
+    // 2 (Remove a rider, 19 Nov 2026): the file's mtime (epoch ms) when its row was last written, so
+    // the reconcile knows a restored older copy by its time as well as by its size. Rows from
+    // before are filled in by the next reconcile.
+    `ALTER TABLE recordings ADD COLUMN mtime INTEGER;`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

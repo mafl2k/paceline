@@ -417,7 +417,7 @@ test('3 pending links; opening one ends the rest and the old cookie', async () =
             assert.equal(m.budget, 'other');
             assert.equal(m.to, 'captain@example.org');
             assert.equal(m.subject, 'Paceline: new link for Kettenfett RC');
-            assert.match(m.text, /Opening it ends the old link\./);
+            assert.match(m.text, /opening it ends the old link\. From then on it is your club's link for good/);
             const urls = m.text.match(/https?:\/\/\S+/g);
             assert.equal(urls.length, 1);
             assert.ok(urls[0].startsWith('https://ttt-beta.example.org/m/'), urls[0]);
@@ -721,7 +721,8 @@ const DONE = 'Check your inbox. The link works for 24 hours.';
 const CLOSED = 'Registration is closed.';
 const RIDERS_TEXT = 'I will tell my riders that their Zwift IDs and names are in the plans.';
 const CONFIRM_SENTENCES = [
-    'Share this link only with your plan makers: anyone with it can change your club\'s plans.',
+    'From then on it is your club\'s link for good: bookmark it or keep this mail',
+    'Share it only with your plan makers: anyone with it can change your club\'s plans.',
     'Not you? Ignore this mail; nothing is kept after 24 hours.',
 ];
 

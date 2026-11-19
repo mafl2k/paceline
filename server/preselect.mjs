@@ -2,7 +2,7 @@
 // live" box and the other choices for an inbox entry. Pure: the clock is always passed in.
 import {nameKey} from './ids.mjs';
 import {localDay, zonedToUtc} from './time.mjs';
-import {nextRaceDate} from './select.mjs';
+import {nextRaceDate, raceStart} from './select.mjs';
 import {isUsed, plansOf, racePlans, planOfId, planNames, ridersShared, teamTypes} from './plans.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
 
@@ -93,6 +93,11 @@ export function liveDefault(club, slug, {as, date}, now) {
 // Everything the assign page chooses for `entry`, from the query `params` (anything with get(k))
 // and the preselection. A new plan's date defaults to the team's next race; without one (a special
 // team with nothing ahead) it is '' and `dateRequired`: the page asks for it outside the fold. A
+// special team's plan (`special`, a new plan or a version) has its race's start time `start`,
+// always editable (user, 19 Nov 2026: the newest upload for a date sets it): the time sent with an
+// unchanged team and plan choice for this very date (`startFor`, the date the field was drawn
+// for), else the race's (raceStart: the stored start of that date, else the team's), else ''. It
+// never carries over from another date. A weekly team's is always ''. A
 // redraw keeps the box, the type and the date when the team and plan choice are the ones drawn
 // (`drawn`); otherwise they go back to their defaults, except the fields the script lists in
 // `touched` (Ruling 6). The event link is always kept. `touched` comes back as it was received
@@ -141,11 +146,18 @@ export function assignChoices(club, entry, params, now) {
     const typeNeeded = team !== null && plansOf(club, team)
         .some(p => p.date === date && p.type === null && (own === null || p.id !== own.id));
 
+    const special = team !== null && teamOf(club, team).kind === 'special';
+    let start = '';
+    if (special) {
+        const typed = sentSame && params.get('startFor') === date ? params.get('start') : null;
+        start = typed ?? raceStart(club, team, date) ?? '';
+    }
+
     return {
         team,
         teams: Object.entries(club.teams).map(([slug, t]) => ({slug, name: t.name})),
         as, plans, live, liveKind: def.kind, liveVars: def.vars,
-        date, dateFixed: own !== null, dateRequired: own === null && next === '', type,
+        date, dateFixed: own !== null, dateRequired: own === null && next === '', special, start, type,
         types: team === null ? [] : teamTypes(club, team), typeNeeded,
         event: params.get('event') ?? '', drawn, touched: ['live', 'type'].filter(f => touched.has(f)).join(','),
     };

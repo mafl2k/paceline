@@ -9,6 +9,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {gzipSync} from 'node:zlib';
 import {planJson, T, CODE_SECRET, rows} from './helpers.mjs';
 import {
     CID, DATE, NOW, ROLLERS, makeClub, secondClub, upload, serve, textOf, count, flashOf, post, followPost, storeOk, VERSION_OF,
@@ -1786,7 +1787,8 @@ test('club actions answer 303 to club settings', async t => {
     upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c, {env: {CODE_SECRET}});
     const name = `${T('2026-11-12T18:31:00Z')}-1002.jsonl.gz`;
-    srv.server.logs.put(CID, 'rollers', name, Buffer.alloc(100));
+    // a recording as the server stores one (Remove a rider reads it)
+    srv.server.logs.put(CID, 'rollers', name, gzipSync('{"kind":"paceline-recording","v":1}\n'));
     const MAIL_OFF = 'No mail was sent: the server cannot send mail right now. Try again later.';
     for (const [p, fields, flash] of [
         ['/manage/club', {name: 'Kettenfett Racing', tz: 'UTC'}, {kind: 'ok', text: 'Saved.'}],
@@ -2089,14 +2091,15 @@ test('picker: first run', async t => {
     assert.match(body, /<a class="btn quiet small" href="\/manage\/settings">[\s\S]*?Club settings<\/a>/);
     const text = textOf(body);
     assert.ok(text.includes('Three steps to the first race'
-        + ' 1 Add a team Its name and its start time. A ZRL team and a WTRL team are two teams.'
+        + ' 1 Add a team Its name and its race rhythm: every week at its start time, or special, with date and time on each plan.'
+        + ' A ZRL team and a WTRL team are two teams.'
         + ' 2 Upload the team\'s plan The planner\'s JSON export, which has the pull watts as pull power; else add the text export for them.'
         + ' 3 Riders get it in Paceline 30 min before the start, in the Zwift event. Nothing to send around.'), text);
     assert.ok(text.includes('Add your first team'));
     const form = element(body, '<form class="stack" method="post" action="/manage/team">');
     assert.ok(form.includes('<input type="hidden" name="action" value="add">'), form);
     assert.match(form, /<input name="name" maxlength="40" required autocomplete="off" placeholder="e\.g\. Rollers">/);
-    assert.match(form, /<input type="time" name="start">/);
+    assert.match(form, /<input type="time" name="start" value="">/);
     assert.ok(textOf(form).includes('In Europe/Berlin. You can set it later, but riders get nothing without one.'));
     assert.ok(textOf(form).includes('Add the team'));
     assert.ok(body.includes('<a href="/privacy">Privacy</a>') && body.includes('action="/manage/logout"'));
@@ -2270,15 +2273,17 @@ test('picker: other teams fold; a special team unfolds once it has a plan', asyn
     const fold = element(body, '<details class="fold" data-keep-refresh>');
     assert.ok(fold, body);
     assert.ok(fold.startsWith('<details class="fold" data-keep-refresh><summary>Other teams (1)</summary><ul class="tiles">'), fold);
-    // no race planned is neutral, said in the status line; the time line keeps the start (Task 8c)
-    assert.deepEqual(tiles(fold).map(x => [x.href, x.time]), [['/manage/team/cogs', '19:30']]);
+    // no race planned is neutral, said in the status line; a special team has no time line then,
+    // even with a start time from its weekly days (the coordinator, 19 Nov 2026)
+    assert.deepEqual(tiles(fold).map(x => [x.href, x.time]), [['/manage/team/cogs', '']]);
     assert.ok(fold.includes('<a class="tile edge-neutral" href="/manage/team/cogs">'), fold);
-    assert.ok(textOf(fold).includes('No race planned Upload a plan with its race date'), textOf(fold));
+    assert.ok(textOf(fold).includes('No race planned Upload a plan with its date and start time'), textOf(fold));
     assert.ok(!fold.includes('No plan: riders get nothing'));
     // below the main tiles and "Add a team"
     assert.ok(body.indexOf('class="tile add"') < body.indexOf('<details class="fold"'));
     // a Cogs plan for 29 Nov: Cogs joins the main tiles, in teamOrder (19:30 like Rollers, then by name)
-    const {status, body: stored} = await storeUpload(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009'])}, {as: 'new', date: '2026-11-29'});
+    // (a special team's new plan needs its start time too, user 19 Nov 2026)
+    const {status, body: stored} = await storeUpload(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009'])}, {as: 'new', date: '2026-11-29', start: '19:30'});
     assert.equal(status, 200, stored);
     const after = await srv.body();
     assert.deepEqual(tiles(after).map(x => x.href), ['/manage/team/cogs', '/manage/team/rollers', '/manage/team/sprockets']);
@@ -2298,7 +2303,7 @@ test('team settings: race rhythm, and the club\'s race day', async t => {
     assert.ok(rhythm.includes('<input type="radio" name="kind" value="weekly" checked>'), rhythm);
     assert.ok(rhythm.includes('<input type="radio" name="kind" value="special">'), rhythm);
     assert.ok(textOf(rhythm).includes('Every week on Thursday'), textOf(rhythm));
-    assert.ok(textOf(rhythm).includes('Special: on the dates of its plans'));
+    assert.ok(textOf(rhythm).includes('Special: date and start time come with each plan'));
     assert.ok(rhythm.includes('<label class="field">Race day<select name="weekday" aria-describedby="weekday-hint">'), rhythm);
     assert.ok(rhythm.includes('<p class="hint" id="weekday-hint">Follows the club&#39;s race day in <a href="/manage/settings">Club settings</a>. '
         + 'Pick a day to fix it for this team only.</p>'), rhythm);
@@ -2312,7 +2317,7 @@ test('team settings: race rhythm, and the club\'s race day', async t => {
     const v = VERSION_OF(srv, 'cogs');
     const done = await followPost(srv, c.cookie, '/manage/team', {action: 'kind', team: 'cogs', kind: 'special', weekday: ''});
     assert.equal(done.location, '/manage/team/cogs/settings');
-    assert.deepEqual(done.flash, {kind: 'ok', text: 'Cogs: Special: on the dates of its plans.'});
+    assert.deepEqual(done.flash, {kind: 'ok', text: 'Cogs: Special: date and start time come with each plan.'});
     assert.ok(done.page.includes('<input type="radio" name="kind" value="special" checked>'), done.page);
     assert.equal(VERSION_OF(srv, 'cogs'), v + 1);
     // Sprockets: every Tuesday
@@ -2369,9 +2374,9 @@ test('team page: a special team without a race', async t => {
     // neutral, not the red "No plan: riders get nothing" (Task 8b review): the switcher and its rows
     assert.match(body, /<span class="sw-icon neutral">/);
     assert.ok(body.includes('<a class="trow neutral" href="/manage/team/cogs" aria-current="page">'), body);
-    assert.ok(textOf(element(body, '<details class="switch"')).includes('Cogs 19:30 No race planned'), textOf(element(body, '<details class="switch"')));
+    assert.ok(textOf(element(body, '<details class="switch"')).includes('Cogs No race planned'), textOf(element(body, '<details class="switch"')));
     // the empty card asks for the plan with its date; no "from ," without a gate
-    assert.ok(textOf(body).includes('and upload it here with its race date. Riders get it 30 min before the start.'), textOf(body));
+    assert.ok(textOf(body).includes('and upload it here with its date and start time. Riders get it 30 min before the start.'), textOf(body));
     assert.ok(!body.includes('<time></time>'));
     // a weekly team has its day
     assert.ok(textOf(await teamBody(srv, 'rollers')).includes('Thu 19 Nov · 19:30'));
@@ -2816,4 +2821,328 @@ test('team page: stored plans, none live', async t => {
     const sp = await teamBody(srv, 'sprockets');
     assert.ok(textOf(sp).includes('No plan for Sprockets yet'));
     assert.ok(!sp.includes('class="uplink"'));
+});
+
+
+// ---- special teams: the race rhythm at Add, the start time with each plan (user, 19 Nov 2026) ----
+
+// The race rhythm's fieldset of a page, whole.
+const rhythmOf = body => element(body, '<fieldset class="choices" data-rhythm>');
+
+
+test('new team page: the race rhythm, weekly on the club\'s day by default, the same choices as the team settings', async t => {
+    const c = kindsClub();
+    const srv = await serve(t, c);
+    const body = await pageBody(srv, '/manage/new-team');
+    const form = teamForm(body, 'add');
+    const rhythm = rhythmOf(form);
+    assert.ok(rhythm, form);
+    assert.ok(rhythm.includes('<legend>Race rhythm</legend>'), rhythm);
+    assert.ok(rhythm.includes('<input type="radio" name="kind" value="weekly" checked>'), rhythm);
+    assert.ok(rhythm.includes('<input type="radio" name="kind" value="special">'), rhythm);
+    assert.ok(textOf(rhythm).includes('Every week on Thursday'));
+    assert.ok(textOf(rhythm).includes('Special: date and start time come with each plan'));
+    assert.ok(rhythm.includes('<option value="" selected>Same as the club (Thursday)</option>'), rhythm);
+    // the start time belongs to the weekly choice: under it, before the special one
+    const weekly = element(rhythm, '<div class="stack" data-weekly>');
+    assert.ok(weekly.includes('<select name="weekday" aria-describedby="weekday-hint">'), weekly);
+    assert.ok(weekly.includes('<input type="time" name="start" value="">'), weekly);
+    assert.ok(textOf(weekly).includes('Start time In Europe/Berlin. You can set it later, but riders get nothing without one.'), textOf(weekly));
+    assert.ok(rhythm.indexOf('value="weekly"') < rhythm.indexOf('data-weekly'));
+    assert.ok(rhythm.indexOf('name="start"') < rhythm.indexOf('value="special"'));
+    assert.equal(count(form, 'name="start"'), 1);
+    // one builder: the team settings' rhythm is the same fieldset, without the start time and with
+    // the card's heading instead of the legend
+    const settings = rhythmOf(await pageBody(srv, '/manage/team/rollers/settings'));
+    const same = rhythm.replace('<legend>', '<legend class="sr">').replace(/\n\s*<label class="field">Start time[\s\S]*?<\/label>/, '');
+    assert.equal(settings, same);
+    // the first run's form is the same too
+    const first = await serve(t, makeClub({teams: []}));
+    assert.equal(rhythmOf(await first.body()), rhythm);
+});
+
+
+test('add a team: weekly on a day, special without a start time; a refusal keeps what was typed', async t => {
+    const c = makeClub();
+    const srv = await serve(t, c);
+    const add = fields => followPost(srv, c.cookie, '/manage/team', {action: 'add', ...fields});
+    let res = await add({name: 'Owls', kind: 'weekly', weekday: '3', start: '20:00'});
+    assert.equal(res.location, '/manage/team/owls');
+    assert.deepEqual(res.flash, {kind: 'ok', text: 'Added Owls.'});
+    const team = slug => srv.store.get(CID).teams[slug];
+    assert.deepEqual([team('owls').kind, team('owls').weekday, team('owls').start], ['weekly', 3, '20:00']);
+    // special: the posted start time is ignored, even one that is no time
+    res = await add({name: 'Cogs', kind: 'special', weekday: '', start: '7:3'});
+    assert.equal(res.location, '/manage/team/cogs');
+    assert.deepEqual([team('cogs').kind, team('cogs').weekday, team('cogs').start], ['special', null, null]);
+    // its page: no race planned, neutral, not "No start time"
+    assert.ok(res.page.includes('<p class="race"><span>No race planned</span></p>'), res.page);
+    assert.ok(!textOf(res.page).includes('No start time'), textOf(res.page));
+    // a form without the rhythm (a page from before): weekly on the club's day
+    await add({name: 'Wheels', start: '19:45'});
+    assert.deepEqual([team('wheels').kind, team('wheels').weekday, team('wheels').start], ['weekly', null, '19:45']);
+    const teams = Object.keys(srv.store.get(CID).teams).length;
+    for (const [fields, text, check] of [
+        [{kind: 'monthly', weekday: '2', start: '20:00'}, 'Choose weekly or special.',
+            page => page.includes('value="weekly" checked') && page.includes('<option value="2" selected>Tuesday</option>') && page.includes('name="start" value="20:00"')],
+        [{kind: 'special', weekday: '9', start: ''}, 'Choose a weekday.', page => page.includes('value="special" checked')],
+        [{kind: 'weekly', weekday: '5', start: '25:00'}, 'Enter the start time as HH:MM.',
+            page => page.includes('<option value="5" selected>Friday</option>') && page.includes('name="start" value="25:00"')],
+    ]) {
+        const bad = await post(srv, c.cookie, '/manage/team', {action: 'add', name: 'Spokes', ...fields});
+        assert.equal(bad.status, 400, bad.body);
+        assert.deepEqual(flashOf(bad.body), {kind: 'err', text});
+        assert.ok(bad.body.includes('<h1>Add a team</h1>'));
+        assert.ok(bad.body.includes('value="Spokes"'));
+        assert.ok(check(teamForm(bad.body, 'add')), `${text}: ${teamForm(bad.body, 'add')}`);
+    }
+    assert.equal(Object.keys(srv.store.get(CID).teams).length, teams);
+});
+
+
+test('team settings: a special team has no start time card, a line instead', async t => {
+    const c = kindsClub();
+    const srv = await serve(t, c);
+    const cogs = await pageBody(srv, '/manage/team/cogs/settings');
+    assert.ok(!cogs.includes('<input type="hidden" name="action" value="start">'), 'no start time form');
+    assert.ok(!cogs.includes('name="start"'));
+    const card = element(cogs, '<section class="card" aria-labelledby="start-h">');
+    assert.equal(textOf(card).trim(), 'Start time A special team gets its date and start time with each plan.');
+    // in the start time's place: after the name, before the race rhythm
+    assert.ok(cogs.indexOf('id="name-h"') < cogs.indexOf('id="start-h"') && cogs.indexOf('id="start-h"') < cogs.indexOf('id="kind-h"'));
+    // made special, Rollers loses its card and keeps its stored start; made weekly again it has it back
+    await followPost(srv, c.cookie, '/manage/team', {action: 'kind', team: 'rollers', kind: 'special', weekday: ''});
+    const sp = await pageBody(srv, '/manage/team/rollers/settings');
+    assert.ok(!sp.includes('name="start"'));
+    assert.equal(srv.store.get(CID).teams.rollers.start, '19:30');
+    await followPost(srv, c.cookie, '/manage/team', {action: 'kind', team: 'rollers', kind: 'weekly', weekday: ''});
+    assert.ok(teamForm(await pageBody(srv, '/manage/team/rollers/settings'), 'start').includes('<input type="time" name="start" value="19:30">'));
+});
+
+
+// "What happens" of an assign page as its lines: [class, text].
+const whatLines = body => [...element(body, '<section class="card" aria-labelledby="wh-h">').matchAll(/<li class="(\w+)">([\s\S]*?)<\/li>/g)]
+    .map(m => [m[1], textOf(m[2]).trim()]);
+
+
+test('assign page: a special team\'s plan needs its date and start time, at the top, and nothing red before they are typed', async t => {
+    const c = kindsClub();
+    c.club.teams.cogs.start = null;
+    const srv = await serve(t, c);
+    const id = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009'])});
+    const page = q => pageBody(srv, `/manage/inbox/${id}${q}`);
+    const body = await page('');
+    // both above the More fold, both required, both empty
+    const when = element(body, '<div class="as-when">');
+    assert.ok(when, body);
+    assert.ok(when.includes('<input type="hidden" name="startFor" value="">'), when);
+    assert.ok(when.includes('<input type="date" name="date" value="" required>'), when);
+    assert.ok(when.includes('<input type="time" name="start" value="" required>'), when);
+    assert.ok(body.indexOf('<div class="as-when">') < body.indexOf('<summary>More: event link</summary>'));
+    assert.ok(textOf(body).includes('In Europe/Berlin. It is the race\'s: every plan of Cogs for that day starts then, and the newest upload sets it.'));
+    assert.equal(count(body, 'name="start"'), 1);
+    // nothing typed yet: a neutral line, no error (the coordinator, 19 Nov 2026)
+    assert.deepEqual(whatLines(body), [['neutral', 'Choose the race date and start time.']]);
+    // the Store button still says what it does
+    assert.equal(textOf(element(body, '<button class="btn primary block" type="submit" data-submit>')).trim(), 'Store and make live');
+    const q = '?team=cogs&as=new&drawn=cogs:new&live=on&type=&date=2026-11-29';
+    assert.deepEqual(whatLines(await page(`${q}&startFor=&start=`)), [['neutral', 'Choose the start time.']]);
+    // the time redraws the preview: the race line and the preview use it
+    const filled = await page(`${q}&startFor=2026-11-29&start=20:15`);
+    assert.ok(filled.includes('<input type="time" name="start" value="20:15" required>'), filled);
+    assert.ok(textOf(filled).includes('Race Sun 29 Nov 20:15'), textOf(filled));
+    assert.deepEqual(whatLines(filled)[0], ['ok', 'New plan \'Cogs\', live for Sun 29 Nov 20:15. Riders get it from Sun 29 Nov 19:45.']);
+    // a value that is there but no time is an error
+    assert.deepEqual(whatLines(await page(`${q}&startFor=2026-11-29&start=25:00`)), [['err', 'Enter the start time as HH:MM.']]);
+    // Store without a time: refused, the form refilled, nothing stored
+    const fields = {team: 'cogs', as: 'new', live: 'on', base: String(VERSION_OF(srv, 'cogs')), drawn: 'cogs:new', date: '2026-11-29', type: '', startFor: '2026-11-29'};
+    const refused = await post(srv, c.cookie, `/manage/inbox/${id}`, {...fields, start: ''});
+    assert.equal(refused.status, 400, refused.body);
+    assert.deepEqual(flashOf(refused.body), {kind: 'err', text: 'Enter the start time as HH:MM.'});
+    assert.ok(refused.body.includes('<input type="date" name="date" value="2026-11-29" required>'), refused.body);
+    assert.equal(Object.keys(srv.store.get(CID).sheets).length, 0);
+    // with a time: stored, the race starts then
+    const stored = await post(srv, c.cookie, `/manage/inbox/${id}`, {...fields, start: '20:15'});
+    assert.equal(stored.status, 200, stored.body);
+    assert.ok(textOf(stored.body).includes('\'Cogs\' v1 is live for Sun 29 Nov 20:15.'), textOf(stored.body));
+    assert.deepEqual(srv.store.get(CID).teams.cogs.raceStarts, {'2026-11-29': '20:15'});
+    // a weekly team: no time field, and an emptied date is no error either
+    const rid = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers', ROLLERS)});
+    const rollers = await pageBody(srv, `/manage/inbox/${rid}?team=rollers&as=new&drawn=rollers:new&date=`);
+    assert.ok(!rollers.includes('name="start"'));
+    assert.deepEqual(whatLines(rollers), [['neutral', 'Choose the race date.']]);
+});
+
+
+test('assign page: the newest upload for a date sets its race\'s start; the result names the plans that move', async t => {
+    const c = kindsClub();
+    c.club.teams.cogs.start = null;
+    const srv = await serve(t, c);
+    const first = Object.keys(srv.store.get(CID).sheets).length;
+    assert.equal(first, 0);
+    const id = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009'])});
+    const base = () => String(VERSION_OF(srv, 'cogs'));
+    assert.equal((await post(srv, c.cookie, `/manage/inbox/${id}`, {
+        team: 'cogs', as: 'new', live: 'on', base: base(), drawn: 'cogs:new', date: '2026-11-29', type: '', start: '20:15', startFor: '2026-11-29',
+    })).status, 200);
+    const [plan] = Object.keys(srv.store.get(CID).sheets);
+    // a new version: the plan's date fixed, the race's time at the top and editable
+    const vid = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009', '1008'])});
+    const v = await pageBody(srv, `/manage/inbox/${vid}?team=cogs&as=${plan}&drawn=cogs:${plan}`);
+    const when = element(v, '<div class="as-when">');
+    assert.ok(textOf(when).includes('Race date Sun 29 Nov (the plan\'s date)'), textOf(when));
+    assert.ok(when.includes('<input type="time" name="start" value="20:15" required>'), when);
+    assert.ok(!v.includes('name="date"'), 'no date field for a version');
+    // the mistyped time corrected: the preview says it, the race moves
+    const moved = await pageBody(srv, `/manage/inbox/${vid}?team=cogs&as=${plan}&drawn=cogs:${plan}&startFor=2026-11-29&start=21:15`);
+    assert.ok(whatLines(moved).some(([, text]) => text === 'Race on Sun 29 Nov now starts at 21:15 (was 20:15).'), JSON.stringify(whatLines(moved)));
+    const v2 = await post(srv, c.cookie, `/manage/inbox/${vid}`, {
+        team: 'cogs', as: plan, live: 'on', base: base(), drawn: `cogs:${plan}`, type: '', start: '21:15', startFor: '2026-11-29',
+    });
+    assert.equal(v2.status, 200, v2.body);
+    assert.ok(textOf(v2.body).includes('Race on Sun 29 Nov now starts at 21:15 (was 20:15).'), textOf(v2.body));
+    assert.deepEqual(srv.store.get(CID).teams.cogs.raceStarts, {'2026-11-29': '21:15'});
+    // a second plan for 29 Nov: prefilled with the race's time; another one moves the race and names
+    // the plan that moves with it; the copy never says to pick another date
+    const sid = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs slow', ['1007'])});
+    const s2 = await pageBody(srv, `/manage/inbox/${sid}?team=cogs&as=new&drawn=cogs:new&date=2026-11-29`);
+    assert.ok(s2.includes('<input type="time" name="start" value="21:15" required>'), s2);
+    const slow = await post(srv, c.cookie, `/manage/inbox/${sid}`, {
+        team: 'cogs', as: 'new', live: '', base: base(), drawn: 'cogs:new', date: '2026-11-29', type: 'slow', start: '21:30', startFor: '2026-11-29',
+    });
+    assert.equal(slow.status, 200, slow.body);
+    assert.ok(textOf(slow.body).includes('Race on Sun 29 Nov now starts at 21:30 (was 21:15). \'Cogs\' moves with it.'), textOf(slow.body));
+    assert.ok(!textOf(slow.body).includes('another date'));
+    assert.equal(srv.store.get(CID).teams.cogs.raceStarts['2026-11-29'], '21:30');
+    // the plan page's head line has the race time; its hint says how the time is set
+    const pp = await pageBody(srv, `/manage/team/cogs/plan/${plan}`);
+    assert.ok(pp.includes('<h1>Cogs · Sun 29 Nov 21:30</h1>'), pp);
+    assert.ok(textOf(pp).includes('the newest upload for that day sets the start time of every plan of that day'), textOf(pp));
+});
+
+
+test('team page: a special team\'s race stored by 0.3.0 without any start time, and its way out', async t => {
+    const c = kindsClub();
+    c.club.teams.cogs.kind = 'weekly';
+    const id = upload(c.club, 'cogs', {riders: ['1009'], at: T('2026-11-19T10:00:00Z'), date: '2026-11-29'});
+    c.club.teams.cogs.kind = 'special';
+    c.club.teams.cogs.start = null;
+    const srv = await serve(t, c);
+    const body = await teamBody(srv, 'cogs');
+    // still red, with the way out: an upload of the race's plan with the time
+    const callout = element(body, '<section class="callout err"');
+    assert.ok(callout, body);
+    assert.ok(textOf(callout).includes('No start time: riders on this plan get nothing'), textOf(callout));
+    assert.ok(textOf(callout).includes('The race on Sun 29 Nov has none, so its plan goes to nobody: upload a new version of it with the start time.'), textOf(callout));
+    const href = /<a class="btn secondary small" href="([^"]*)">/.exec(callout)[1].replace(/&amp;/g, '&');
+    assert.equal(href, `/manage/upload?team=cogs&plan=${id}`);
+    assert.ok(!callout.includes('/settings'));
+    assert.ok(!textOf(body).includes('null'), textOf(body));
+    // that upload: a version (no type needed), the time empty; Store with a time sets it
+    const vid = await intake(srv, c.cookie, {team: 'cogs', forPlan: id, json: planJson('Cogs', ['1009', '1008'])});
+    const assign = await pageBody(srv, `/manage/inbox/${vid}`);
+    assert.ok(assign.includes(`<input type="radio" name="as" value="${id}" checked>`), assign);
+    assert.ok(assign.includes('<input type="time" name="start" value="" required>'), assign);
+    const res = await post(srv, c.cookie, `/manage/inbox/${vid}`, {
+        team: 'cogs', as: id, live: 'on', base: String(VERSION_OF(srv, 'cogs')), drawn: `cogs:${id}`, type: '', start: '20:00', startFor: '2026-11-29',
+    });
+    assert.equal(res.status, 200, res.body);
+    assert.ok(textOf(res.body).includes('Race on Sun 29 Nov now starts at 20:00.'), textOf(res.body));
+    const after = await teamBody(srv, 'cogs');
+    assert.ok(!after.includes('<section class="callout err"'), after);
+    assert.ok(textOf(/<p class="race">([\s\S]*?)<\/p>/.exec(after)[1]).includes('Sun 29 Nov · 20:00'), after);
+    // not live: still red, with its day, never "null"
+    srv.store.change(CID, cl => {
+        delete cl.teams.cogs.raceStarts;
+        cl.teams.cogs.live = null;
+    });
+    const off = await teamBody(srv, 'cogs');
+    assert.ok(textOf(off).includes('No start time for Sun 29 Nov'), textOf(off));
+    assert.ok(!textOf(off).includes('null'), textOf(off));
+});
+
+
+test('team settings: switching the race rhythm says what happens to the plans\' start', async t => {
+    const c = makeClub();
+    upload(c.club, 'rollers', {riders: ROLLERS, at: T('2026-11-19T10:00:00Z')});
+    const srv = await serve(t, c);
+    const kind = (k, team = 'rollers') => followPost(srv, c.cookie, '/manage/team', {action: 'kind', team, kind: k, weekday: ''});
+    assert.deepEqual((await kind('special')).flash, {kind: 'ok',
+        text: 'Rollers: Special: date and start time come with each plan. Its plans keep their race times; new plans bring their own.'});
+    assert.deepEqual((await kind('weekly')).flash, {kind: 'ok', text: 'Rollers: Every week on Thursday. Its plans now start at 19:30, the team\'s start time.'});
+    // no change, no word
+    assert.deepEqual((await kind('weekly')).flash, {kind: 'ok', text: 'Rollers: Every week on Thursday.'});
+    await followPost(srv, c.cookie, '/manage/team', {action: 'start', team: 'rollers', start: ''});
+    await kind('special');
+    assert.deepEqual((await kind('weekly')).flash.text, 'Rollers: Every week on Thursday. It has no start time yet: its plans go to nobody until you set one.');
+    // a team without plans: no word about them
+    assert.deepEqual((await kind('special', 'sprockets')).flash, {kind: 'ok', text: 'Sprockets: Special: date and start time come with each plan.'});
+});
+
+
+test('assign page: a time drawn for another date never moves that date\'s race; an over time is refused', async t => {
+    const c = kindsClub();
+    c.club.teams.cogs.start = null;
+    const srv = await serve(t, c);
+    const base = () => String(VERSION_OF(srv, 'cogs'));
+    const store = async (json, fields) => {
+        const id = await intake(srv, c.cookie, {team: 'cogs', json});
+        return {id, res: await post(srv, c.cookie, `/manage/inbox/${id}`, {team: 'cogs', as: 'new', live: '', base: base(), drawn: 'cogs:new', ...fields})};
+    };
+    assert.equal((await store(planJson('Cogs', ['1009']), {date: '2026-11-21', start: '20:15', startFor: '2026-11-21', type: 'a'})).res.status, 200);
+    assert.equal((await store(planJson('Cogs', ['1008']), {date: '2026-11-29', start: '21:15', startFor: '2026-11-29', type: 'b'})).res.status, 200);
+    const sheets = Object.keys(srv.store.get(CID).sheets).length;
+    // drawn for 21 Nov at 20:15, the date changed to 29 Nov and stored without a redraw: nothing moves
+    const {id, res} = await store(planJson('Cogs', ['1007']), {date: '2026-11-29', start: '20:15', startFor: '2026-11-21', type: 'c'});
+    assert.equal(res.status, 400, res.body);
+    assert.deepEqual(flashOf(res.body), {kind: 'err', text: 'Check the choices: the start time was for another date.'});
+    assert.ok(res.body.includes('<input type="date" name="date" value="2026-11-29" required>'), res.body);
+    assert.ok(res.body.includes('<input type="time" name="start" value="21:15" required>'), 'redrawn with that race\'s time');
+    assert.equal(Object.keys(srv.store.get(CID).sheets).length, sheets);
+    assert.deepEqual(srv.store.get(CID).teams.cogs.raceStarts, {'2026-11-21': '20:15', '2026-11-29': '21:15'});
+    // posted again from the redrawn page: stored at the race's time
+    const again = await post(srv, c.cookie, `/manage/inbox/${id}`, {team: 'cogs', as: 'new', live: '', base: base(), drawn: 'cogs:new',
+        date: '2026-11-29', start: '21:15', startFor: '2026-11-29', type: 'c'});
+    assert.equal(again.status, 200, again.body);
+    // a fresh date has no race time to protect: a time drawn for another date is fine there
+    assert.equal((await store(planJson('Cogs', ['1006']), {date: '2026-12-06', start: '20:15', startFor: '2026-11-21', type: 'd'})).res.status, 200);
+
+    // today's race (19 Nov) at 20:15; at 19:25 Berlin a version typed 08:15 (an AM/PM slip) is refused,
+    // also with the same content, and nothing moves
+    const today = await store(planJson('Cogs', ['1005']), {date: '2026-11-19', start: '20:15', startFor: '2026-11-19', type: 'e'});
+    assert.equal(today.res.status, 200);
+    const plan = Object.entries(srv.store.get(CID).sheets).find(([, sh]) => sh.date === '2026-11-19')[0];
+    for (const riders of [['1005', '1004'], ['1005']]) {
+        const vid = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', riders)});
+        const over = await post(srv, c.cookie, `/manage/inbox/${vid}`, {team: 'cogs', as: plan, live: '', base: base(), drawn: `cogs:${plan}`,
+            start: '08:15', startFor: '2026-11-19', type: 'e'});
+        assert.equal(over.status, 400, over.body);
+        assert.deepEqual(flashOf(over.body), {kind: 'err', text: 'The race on 2026-11-19 at 08:15 is over: check the start time, or choose a later date.'});
+        assert.ok(over.body.includes('<input type="time" name="start" value="08:15" required>'), 'the form refilled');
+    }
+    assert.equal(srv.store.get(CID).teams.cogs.raceStarts['2026-11-19'], '20:15');
+    assert.equal(Object.values(srv.store.get(CID).sheets).filter(sh => sh.date === '2026-11-19').length, 1);
+});
+
+
+test('assign page: the neutral line asks only for what is missing; other plans moving with the race is a warning', async t => {
+    const c = kindsClub();
+    c.club.teams.cogs.start = null;
+    const srv = await serve(t, c);
+    const id = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009'])});
+    const body = await pageBody(srv, `/manage/inbox/${id}?team=cogs&as=new&drawn=cogs:new&live=on&type=&date=&startFor=&start=20:15`);
+    assert.ok(body.includes('<input type="time" name="start" value="20:15" required>'), body);
+    assert.deepEqual(whatLines(body), [['neutral', 'Choose the race date.']]);
+    // a race with two plans: moving it is a warning (the other plan moves too); a race with one plan
+    // only, its own: info
+    const base = () => String(VERSION_OF(srv, 'cogs'));
+    const fields = {team: 'cogs', live: '', base: '', date: '2026-11-29', startFor: '2026-11-29'};
+    assert.equal((await post(srv, c.cookie, `/manage/inbox/${id}`, {...fields, as: 'new', drawn: 'cogs:new', base: base(), start: '20:15', type: 'fast'})).status, 200);
+    const [plan] = Object.keys(srv.store.get(CID).sheets);
+    const vid = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs', ['1009', '1008'])});
+    const own = await post(srv, c.cookie, `/manage/inbox/${vid}`, {...fields, as: plan, drawn: `cogs:${plan}`, base: base(), start: '20:45', type: 'fast'});
+    assert.match(own.body, /<li class="info">[^]*?<span>Race on Sun 29 Nov now starts at 20:45 \(was 20:15\)\.<\/span><\/li>/);
+    const sid = await intake(srv, c.cookie, {team: 'cogs', json: planJson('Cogs slow', ['1007'])});
+    const slow = await post(srv, c.cookie, `/manage/inbox/${sid}`, {...fields, as: 'new', drawn: 'cogs:new', base: base(), start: '21:00', type: 'slow'});
+    assert.match(slow.body, /<li class="warn">[^]*?<span>Race on Sun 29 Nov now starts at 21:00 \(was 20:45\)\. &#39;Cogs · fast&#39; moves with it\.<\/span><\/li>/);
 });

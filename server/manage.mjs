@@ -470,6 +470,6 @@ export async function handleManage(req, res, ctx, p, method) {
     if (!who) {
         return true;
     }
-    handler(req, res, ctx, who.circle, form);
+    await handler(req, res, ctx, who.circle, form);
     return true;
 }

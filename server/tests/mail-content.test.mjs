@@ -17,8 +17,8 @@ const VARS = {
 
 // The texts as the server sent them before the HTML part (91e0ff4), byte for byte.
 const BEFORE = {
-    'new-link': 'Here is a new link for Kettenfett RC:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nIt works for 24 hours. Opening it ends the old link.\n',
-    'confirm-club': 'Open this link and press the button to start Kettenfett RC on Paceline:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nIt works for 24 hours. Share this link only with your plan makers: anyone with it can change your club\'s plans.\n\nNot you? Ignore this mail; nothing is kept after 24 hours.\n',
+    'new-link': 'Here is a new link for Kettenfett RC:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nOpen it within 24 hours; opening it ends the old link. From then on it is your club\'s link for good: bookmark it or keep this mail, and use it on every device you manage the club from.\n',
+    'confirm-club': 'Open this link and press the button to start Kettenfett RC on Paceline:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nOpen it within 24 hours. From then on it is your club\'s link for good: bookmark it or keep this mail, and use it on every device you manage the club from. Share it only with your plan makers: anyone with it can change your club\'s plans.\n\nNot you? Ignore this mail; nothing is kept after 24 hours.\n',
     'confirm-email': 'Someone with the club link asked to change the address of Kettenfett RC on Paceline to new@example.org. To allow it, open this link and press the button:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nIt works for 24 hours. The new address then confirms itself.\n\nNot you? Ignore this mail and nothing changes. Someone else has your club link then: get a new one at https://ttt-beta.example.org/lost; opening it ends the old link.\n',
     'new-address': 'This address is to become the address of Kettenfett RC on Paceline. To confirm it, open this link and press the button:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nIt works for 24 hours. Club links then go to this address.\n\nNot you? Ignore this mail; the address is not changed.\n',
     'confirm-delete': 'Someone with the club link asked to delete Kettenfett RC on Paceline. To delete it, open this link and press the button:\n\nhttps://ttt-beta.example.org/m/LINKTOKEN\n\nIt works for 24 hours. Riders get no more plans from Kettenfett RC at once; the operator can restore it within 7 days.\n\nNot you? Ignore this mail and nothing is deleted. Someone else has your club link then: get a new one at https://ttt-beta.example.org/lost; opening it ends the old link.\n',
@@ -173,7 +173,7 @@ test('the HTML: club name as the heading, the link as a button and as text, foot
         assert.ok(html.includes(`>${VARS.link}</a>`), `${kind}: the link as text`);
         assert.match(html, /<table role="presentation"[^>]*>\s*<tr><td class="pl-btn" align="center" bgcolor="#1b5fc1"/);
         assert.ok(html.includes('Or copy this link into your browser:'));
-        assert.ok(html.includes('It works for 24 hours.'), kind);
+        assert.match(html, /Open it within 24 hours|It works for 24 hours\./, kind);
         assert.match(html, />Paceline</);
     }
     const ce = mailContent('confirm-email', VARS, cfg).html;

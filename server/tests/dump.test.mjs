@@ -67,7 +67,7 @@ test('writeDump: dumps/paceline-<local date>.db through a dot temp file; a copy 
         assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM clubs').get().n, 1);
         assert.equal(copy.prepare('SELECT cid FROM clubs').get().cid, CID);
         assert.equal(copy.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-        assert.equal(SCHEMA_VERSION, 1);
+        assert.equal(SCHEMA_VERSION, 2);
         assert.equal(copy.prepare('PRAGMA journal_mode').get().journal_mode, 'delete');
     } finally {
         copy.close();

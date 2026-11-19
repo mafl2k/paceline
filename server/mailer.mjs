@@ -9,8 +9,14 @@ const DAY_MS = 24 * HOUR_MS;
 // Mails to one address (lower-cased): 3 per hour, 10 per day.
 const ADDRESS_WINDOWS = [{ms: HOUR_MS, max: 3}, {ms: DAY_MS, max: 10}];
 // Registration confirmations ('new') have a budget of their own, so a flood of sign-ups cannot use
-// up the mail that gets a captain back into their club (and the other way round).
+// up the mail that gets a captain back into their club (and the other way round). The operator's
+// notices of removals ('operator', erasures.mjs) have one too (OPERATOR_PER_DAY) and no per-address
+// limit: every one carries a line the operator needs after a full restore, and captains removing
+// riders must not use up the club mails.
 export const NEW_PER_DAY = 50;
+// The operator's notices of removals a day (budget 'operator'): a fixed small cap on top of
+// MAIL_MAX_PER_DAY, never taken from the club mails' budget.
+export const OPERATOR_PER_DAY = 50;
 // Waits before the 2nd and 3rd attempt; after the 3rd failure the mail is dropped.
 export const RETRY_MS = [60000, 300000];
 const KEEP_RESULTS = 20;
@@ -25,6 +31,7 @@ export function makeMailer({cfg, now, transport = sendMail, schedule = (fn, ms) 
     const budgets = {
         new: {max: NEW_PER_DAY, hits: makeLimiter([{ms: DAY_MS, max: NEW_PER_DAY}])},
         other: {max: cfg.mailMaxPerDay, hits: makeLimiter([{ms: DAY_MS, max: cfg.mailMaxPerDay}])},
+        operator: {max: OPERATOR_PER_DAY, hits: makeLimiter([{ms: DAY_MS, max: OPERATOR_PER_DAY}])},
     };
     const from = addressOf(cfg.mailFrom);
     const queue = [];        // jobs waiting for the worker
@@ -107,12 +114,15 @@ export function makeMailer({cfg, now, transport = sendMail, schedule = (fn, ms) 
         const t = now();
         const key = to.toLowerCase();
         // Check every limit first and count only when all pass (a refused mail uses nothing up).
-        const allowed = ADDRESS_WINDOWS.every(w => perAddress.count(key, t, w.ms) < w.max)
+        const limited = budget !== 'operator';
+        const allowed = (!limited || ADDRESS_WINDOWS.every(w => perAddress.count(key, t, w.ms) < w.max))
             && budgets[budget].hits.count(BUDGET_KEY, t, DAY_MS) < budgets[budget].max;
         if (!allowed) {
             return false;
         }
-        perAddress.add(key, t);
+        if (limited) {
+            perAddress.add(key, t);
+        }
         budgets[budget].hits.add(BUDGET_KEY, t);
         queue.push({kind, to, data, attempt: 0});
         queueMicrotask(pump);
@@ -131,7 +141,7 @@ export function makeMailer({cfg, now, transport = sendMail, schedule = (fn, ms) 
     // Drops limit counters past their windows (addresses kept in memory at most a day); the keys dropped.
     function sweep() {
         const t = now();
-        return perAddress.sweep(t) + budgets.new.hits.sweep(t) + budgets.other.hits.sweep(t);
+        return perAddress.sweep(t) + budgets.new.hits.sweep(t) + budgets.other.hits.sweep(t) + budgets.operator.hits.sweep(t);
     }
 
     return {send, results: () => log.map(r => ({...r})), close, sweep};

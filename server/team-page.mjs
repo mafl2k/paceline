@@ -68,9 +68,13 @@ function raceLine(view, now) {
     if (when.day === null) {
         return `<p class="race"><span>${esc(t('tp-race-none'))}</span></p>`;
     }
-    if (view.start === null) {
+    if (view.noStart) {
         const none = `<span class="err-text">${esc(t('tp-no-start-time'))}</span>`;
         return `<p class="race"><span>${th('tp-race-no-start', {day: esc(when.day), none})}</span></p>`;
+    }
+    if (view.S === null) {
+        // never a missing time: the day alone
+        return `<p class="race"><span>${esc(when.day)}</span></p>`;
     }
     // one line with the opening time (spec §9): no status card repeats it; "open since" after the gate
     const open = view.gateAt !== null && now >= view.gateAt;
@@ -108,18 +112,25 @@ function notesHtml(club, view, now) {
 }
 
 
-// No start time: the status itself, red, with what a start time would change (the trap).
-function noStartHtml(view) {
+// No start time: the status itself, red, with what a start time would change (the trap). A weekly
+// team sets it in its settings; a special team's race without one (plans stored by 0.3.0) gets it
+// with any upload for that date, so its button is the upload page (for the race's plan when it
+// has one plan: a new version needs no type).
+function noStartHtml(club, view, now) {
     if (view.status.kind !== 'no-start') {
         return '';
     }
-    const body = view.live ? t('tp-no-start-body', {label: view.live.label}) : t('tp-no-start-body-none');
+    const body = view.special ? t('tp-no-start-body-special', {day: view.when.day})
+        : view.live ? t('tp-no-start-body', {label: view.live.label}) : t('tp-no-start-body-none');
+    const button = view.special
+        ? `<a class="btn secondary small" href="${esc(uploadHref(club, view.slug, view.raceDate, now))}">${ic('upload')}${esc(t('tp-upload-version'))}</a>`
+        : `<a class="btn secondary small" href="${esc(settingsPath(view.slug))}">${ic('clock')}${esc(t('tp-set-start'))}</a>`;
     return `<section class="callout err" aria-labelledby="fix-h">
       <h2 id="fix-h">${ic('x')}${esc(view.status.text)}</h2>
       <ol><li class="note err">
         <p>${esc(body)}</p>
         ${view.trap.map(x => `<p>${esc(x.text)}</p>`).join('\n        ')}
-        <a class="btn secondary small" href="${esc(settingsPath(view.slug))}">${ic('clock')}${esc(t('tp-set-start'))}</a>
+        ${button}
       </li></ol>
     </section>`;
 }
@@ -137,7 +148,7 @@ function emptyHtml(view) {
       <p>${esc(t('tp-none-live-body'))}</p>
     </section>`;
     }
-    const body = view.start === null ? esc(t('tp-empty-body-no-start')) : view.status.kind === 'no-race' ? esc(t('tp-empty-body-no-race'))
+    const body = view.noStart ? esc(t('tp-empty-body-no-start')) : view.status.kind === 'no-race' ? esc(t('tp-empty-body-no-race'))
         : th('tp-empty-body', {at: `<time>${esc(view.opens)}</time>`});
     return `<section class="card empty" aria-labelledby="empty-h">
       ${ic('noPlan', 'big')}
@@ -288,7 +299,7 @@ function ridersHtml(view) {
         riders = view.riders.map(r => `<li class="rider plan"><span class="pos">${r.pos}</span><span class="who"><span class="nm">${esc(r.name)}</span>`
             + `<span class="what">${esc(r.pull)}</span></span></li>`);
         hint = view.live.sent ? `<p class="hint">${th('tp-plan-hint', {at: `<time>${esc(view.opens)}</time>`})}</p>`
-            : `<p class="hint">${esc(t('tp-no-start-hint'))}</p>`;
+            : `<p class="hint">${esc(t(view.special ? 'tp-no-start-hint-special' : 'tp-no-start-hint'))}</p>`;
     }
     return `<section class="card riders-card" aria-labelledby="riders-h">
       <div class="card-head">${head}</div>
@@ -330,7 +341,7 @@ export function teamPage(club, slug, {now, seen = {}, others = [], flash = null,
   ${dstChangedRecently(club.tz, now) ? dstBanner() : ''}
   ${flashBlock(flash)}
   <div class="cols">
-    <div class="col-a">${notesHtml(club, view, now)}${noStartHtml(view)}${emptyHtml(view)}${plansHtml(club, view, now)}</div>
+    <div class="col-a">${notesHtml(club, view, now)}${noStartHtml(club, view, now)}${emptyHtml(view)}${plansHtml(club, view, now)}</div>
     <div class="col-b">${ridersHtml(view)}</div>
     <div class="col-c">${upload}</div>
   </div>
@@ -374,8 +385,28 @@ function linksHtml(club, view, now) {
 }
 
 
-// The settings of team `slug` (a team of the club). `typed` ({name} or {start}, as posted) is shown
-// in its form instead of the stored value after a refusal.
+// The start time card: a weekly team's form; a special team has none (user, 19 Nov 2026), only a
+// line that says where its times come from. `start` is the field's value.
+function startCard(club, view, start) {
+    if (view.special) {
+        return `<section class="card" aria-labelledby="start-h">
+    <h2 id="start-h">${esc(t('team-start-label'))}</h2>
+    <p class="hint">${esc(t('ts-start-special'))}</p>
+  </section>`;
+    }
+    return `<section class="card" aria-labelledby="start-h">
+    <h2 id="start-h">${esc(t('team-start-label'))}</h2>
+    <form class="inline-form" method="post" action="/manage/team">${hidden({action: 'start', team: view.slug})}
+      <label class="field"><span class="sr">${esc(t('team-start-label'))}</span><input type="time" name="start" value="${esc(start)}"></label>
+      <button class="btn secondary" type="submit">${esc(t('team-set-start'))}</button>
+    </form>
+    <p class="hint">${esc(t('ts-start-hint', {tz: club.tz, team: view.name}))}</p>
+  </section>`;
+}
+
+
+// The settings of team `slug` (a team of the club). `typed` ({name}, {start} or {kind, weekday}, as
+// posted) is shown in its form instead of the stored value after a refusal.
 export function teamSettingsPage(club, slug, {now, seen, others, flash = null, typed = null}) {
     const view = teamView(club, slug, {now});
     const name = typed?.name ?? view.name;
@@ -395,14 +426,7 @@ export function teamSettingsPage(club, slug, {now, seen, others, flash = null, t
     </form>
     <p class="hint">${esc(t('ts-name-hint'))}</p>
   </section>
-  <section class="card" aria-labelledby="start-h">
-    <h2 id="start-h">${esc(t('team-start-label'))}</h2>
-    <form class="inline-form" method="post" action="/manage/team">${hidden({action: 'start', team: slug})}
-      <label class="field"><span class="sr">${esc(t('team-start-label'))}</span><input type="time" name="start" value="${esc(start)}"></label>
-      <button class="btn secondary" type="submit">${esc(t('team-set-start'))}</button>
-    </form>
-    <p class="hint">${esc(t('ts-start-hint', {tz: club.tz, team: view.name}))}</p>
-  </section>
+  ${startCard(club, view, start)}
   ${rhythmCard(club, slug)}
   <section class="card" aria-labelledby="link-h">
     <h2 id="link-h">${esc(t('ts-links'))}</h2>
@@ -421,12 +445,16 @@ export function teamSettingsPage(club, slug, {now, seen, others, flash = null, t
 }
 
 
-// The team's race rhythm (plan versions spec §9, decision 11): weekly on its weekday (the club's
-// unless it has its own) or special, on the dates of its plans.
-function rhythmCard(club, slug) {
-    const team = club.teams[slug];
-    const special = team.kind === 'special';
-    const own = Number.isInteger(team.weekday) && team.weekday >= 1 && team.weekday <= 7 ? team.weekday : null;
+// The race rhythm's choices (plan versions spec §9, decision 11; user, 19 Nov 2026), one builder
+// for the team settings and Add a team so the two read alike: weekly on a weekday (`weekday` 1-7,
+// or null for the club's day), or special, with date and start time coming with each plan. With
+// `start` (a string: the field's value) the weekly choice has the team's start time too (Add a
+// team). The weekly fields sit under their choice (data-weekly); the script hides them while
+// special is checked, without it they simply show. `legend` false hides the legend (a card's
+// heading says it).
+export function rhythmFields(club, {kind, weekday, start = null, legend = true}) {
+    const special = kind === 'special';
+    const own = Number.isInteger(weekday) && weekday >= 1 && weekday <= 7 ? weekday : null;
     const day = n => t(`weekday-${n}`);
     const option = (value, text, selected) => `<option value="${value}"${selected ? ' selected' : ''}>${esc(text)}</option>`;
     const options = [option('', t('ts-weekday-club', {weekday: day(teamWeekday(club, null))}), own === null)];
@@ -435,22 +463,43 @@ function rhythmCard(club, slug) {
     }
     const choice = (value, checked, text) => `<label class="choice"><input type="radio" name="kind" value="${value}"${checked ? ' checked' : ''}>`
         + `<span><strong>${esc(text)}</strong></span></label>`;
+    const time = start === null ? '' : `
+          <label class="field">${esc(t('team-start-label'))} <span class="hint">${esc(t('nt-start-hint', {tz: club.tz}))}</span><input type="time" name="start" value="${esc(start)}"></label>`;
+    return `<fieldset class="choices" data-rhythm><legend${legend ? '' : ' class="sr"'}>${esc(t('ts-rhythm'))}</legend>
+        ${choice('weekly', !special, t('ts-weekly', {weekday: day(own ?? teamWeekday(club, null))}))}
+        <div class="stack" data-weekly>
+          <label class="field">${esc(t('ts-weekday'))}<select name="weekday" aria-describedby="weekday-hint">${options.join('')}</select></label>
+          <p class="hint" id="weekday-hint">${th('ts-weekday-hint', {settings: `<a href="/manage/settings">${esc(t('tp-club-settings'))}</a>`})}</p>${time}
+        </div>
+        ${choice('special', special, t('ts-special'))}
+      </fieldset>`;
+}
+
+
+// The team's race rhythm card (rhythmFields with the team's kind and weekday).
+function rhythmCard(club, slug) {
+    const team = club.teams[slug];
     return `<section class="card" aria-labelledby="kind-h">
     <h2 id="kind-h">${esc(t('ts-rhythm'))}</h2>
     <form class="stack" method="post" action="/manage/team">${hidden({action: 'kind', team: slug})}
-      <fieldset class="choices"><legend class="sr">${esc(t('ts-rhythm'))}</legend>
-        ${choice('weekly', !special, t('ts-weekly', {weekday: day(teamWeekday(club, slug))}))}
-        <label class="field">${esc(t('ts-weekday'))}<select name="weekday" aria-describedby="weekday-hint">${options.join('')}</select></label>
-        <p class="hint" id="weekday-hint">${th('ts-weekday-hint', {settings: `<a href="/manage/settings">${esc(t('tp-club-settings'))}</a>`})}</p>
-        ${choice('special', special, t('ts-special'))}
-      </fieldset>
+      ${rhythmFields(club, {kind: team.kind, weekday: team.weekday, legend: false})}
       <button class="btn secondary" type="submit">${esc(t('ts-rhythm-save'))}</button>
     </form>
   </section>`;
 }
 
 
-// Add a team. `typed` ({name, start}, as posted) fills the form again after a refusal.
+// The posted race rhythm as the forms send it (typed): `kind` 'weekly' or 'special' (anything else
+// draws as weekly) and `weekday` a string, '' for the club's day.
+export function typedRhythm(typed) {
+    const day = /^[1-7]$/.test(typed?.weekday ?? '') ? Number(typed.weekday) : null;
+    return {kind: typed?.kind === 'special' ? 'special' : 'weekly', weekday: day};
+}
+
+
+// Add a team: the name and the race rhythm with the weekly start time (rhythmFields); weekly on the
+// club's day by default. `typed` ({name, start, kind, weekday}, as posted) fills the form again
+// after a refusal.
 export function newTeamPage(club, {now, seen, others, flash = null, typed = null}) {
     const main = `<main class="page" id="main">
   <header class="pagehead"><p class="kicker desk">${esc(club.name)}</p><h1>${esc(t('team-add-heading'))}</h1></header>
@@ -458,7 +507,7 @@ export function newTeamPage(club, {now, seen, others, flash = null, typed = null
   <section class="card">
     <form class="stack" method="post" action="/manage/team">${hidden({action: 'add'})}
       <label class="field">${esc(t('team-name-label'))}<input name="name" value="${esc(typed?.name ?? '')}" maxlength="40" required autocomplete="off" placeholder="${esc(t('nt-placeholder'))}"></label>
-      <label class="field">${esc(t('team-start-label'))} <span class="hint">${esc(t('nt-start-hint', {tz: club.tz}))}</span><input type="time" name="start" value="${esc(typed?.start ?? '')}"></label>
+      ${rhythmFields(club, {...typedRhythm(typed), start: typed?.start ?? ''})}
       <button class="btn primary block" type="submit">${ic('plus')}${esc(t('team-add'))}</button>
     </form>
   </section>

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     LEARNED_MS, USED_UP_MS, PLAN_OPEN_MS, planOpen, plannedStart, usedUp, roleIn, matchesEvent, servable, pickForRider, datePicks,
-    effects, outdated, nextRaceDate, teamWeekday, STILL_TO_RACE_MS,
+    effects, outdated, nextRaceDate, teamWeekday, STILL_TO_RACE_MS, startOf, raceStart, raceStartAt, stillToRace,
 } from '../select.mjs';
 import {club, sheet, T} from './helpers.mjs';
 
@@ -513,4 +513,76 @@ test('nextRaceDate: a late start still racing after midnight', () => {
     const c = club({teams: {owls: {...team('Kettenfett Owls', '23:30'), kind: 'weekly', weekday: 3}}});
     assert.equal(nextRaceDate(c, 'owls', T('2026-11-18T23:30:00Z')), '2026-11-18');
     assert.equal(nextRaceDate(c, 'owls', T('2026-11-19T00:30:00.001Z')), '2026-11-25');
+});
+
+
+// ---- a special team's start time belongs to its race, team and date (user, 19 Nov 2026) ----
+
+const cogsSheet = (date, extra = {}) => ({...sheet({team: 'cogs', label: 'Kettenfett Cogs', date, riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'}), ...extra});
+
+
+test('plannedStart: a special team races at its race\'s start, a weekly team at the team\'s', () => {
+    const c = kinds({ca0001: cogsSheet('2026-11-21'), ca0002: cogsSheet('2026-11-28')});
+    c.teams.cogs.raceStarts = {'2026-11-21': '20:15'};
+    // special: the start stored for the date (Berlin, UTC+1)
+    assert.equal(startOf(c, c.sheets.ca0001), '20:15');
+    assert.equal(plannedStart(c, c.sheets.ca0001), T('2026-11-21T19:15:00Z'));
+    // a date without one (a plan stored by 0.3.0): the team's start, as before
+    assert.equal(startOf(c, c.sheets.ca0002), '19:30');
+    assert.equal(plannedStart(c, c.sheets.ca0002), T('2026-11-28T18:30:00Z'));
+    // a stored start that is no HH:MM counts as none; a key from the prototype never matches
+    for (const bad of ['25:00', '7:30', '', 1930, null]) {
+        c.teams.cogs.raceStarts = {'2026-11-21': bad};
+        assert.equal(plannedStart(c, c.sheets.ca0001), T('2026-11-21T18:30:00Z'), String(bad));
+    }
+    c.teams.cogs.raceStarts = {'2026-11-21': '20:15'};
+    assert.equal(startOf(c, {team: 'cogs', date: 'toString'}), '19:30');
+    assert.equal(startOf(c, {team: 'cogs', date: '__proto__'}), '19:30');
+    // neither: no S
+    c.teams.cogs.start = null;
+    assert.equal(plannedStart(c, c.sheets.ca0002), null);
+    assert.equal(plannedStart(c, c.sheets.ca0001), T('2026-11-21T19:15:00Z'));
+    // a weekly team always races at the team's start, whatever is stored (a team made weekly again)
+    c.teams.rollers.raceStarts = {[DATE]: '21:00'};
+    const ra = sheet({team: 'rollers', label: 'Kettenfett Rollers', date: DATE, riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'});
+    assert.equal(plannedStart(c, ra), T('2026-11-19T18:30:00Z'));
+    c.teams.cogs.kind = 'weekly';
+    c.teams.cogs.start = '19:00';
+    assert.equal(plannedStart(c, c.sheets.ca0001), T('2026-11-21T18:00:00Z'));
+});
+
+
+test('raceStart: one race per team and date', () => {
+    const c = kinds({ca0001: cogsSheet('2026-11-21'), ca0002: cogsSheet('2026-11-28')});
+    c.teams.cogs.raceStarts = {'2026-11-21': '20:15'};
+    // every plan of that date starts with it
+    assert.equal(raceStart(c, 'cogs', '2026-11-21'), '20:15');
+    assert.equal(raceStartAt(c, 'cogs', '2026-11-21'), T('2026-11-21T19:15:00Z'));
+    assert.equal(raceStart(c, 'cogs', '2026-11-28'), '19:30');
+    c.teams.cogs.start = null;
+    assert.equal(raceStart(c, 'cogs', '2026-11-28'), null);
+    assert.equal(raceStartAt(c, 'cogs', '2026-11-28'), null);
+    // weekly (and an unknown team): the team's start on any date
+    assert.equal(raceStart(c, 'rollers', '2026-12-05'), '19:30');
+    assert.equal(raceStart(c, 'gone', '2026-12-12'), null);
+    assert.equal(raceStart(c, '__proto__', '2026-12-12'), null);
+    // still to race until the race's S + 2 h
+    assert.equal(stillToRace(c, 'cogs', '2026-11-21', T('2026-11-21T21:15:00Z')), true);
+    assert.equal(stillToRace(c, 'cogs', '2026-11-21', T('2026-11-21T21:15:00.001Z')), false);
+    assert.equal(nextRaceDate(c, 'cogs', T('2026-11-21T21:15:00Z')), '2026-11-28');
+});
+
+
+test('servable and pickForRider: a special team\'s plan at its race\'s start', () => {
+    const c = kinds({ca0001: cogsSheet('2026-11-21')});
+    c.teams.cogs.raceStarts = {'2026-11-21': '20:15'};
+    c.teams.cogs.live = 'ca0001';
+    const S = T('2026-11-21T19:15:00Z');
+    assert.deepEqual(servable(c, NOW).map(x => [x.slug, x.S]), [['cogs', S]]);
+    // used up 4 h after the race's start, not the team's
+    assert.deepEqual(servable(c, S + USED_UP_MS).map(x => x.slug), ['cogs']);
+    assert.deepEqual(servable(c, S + USED_UP_MS + 1), []);
+    // in the event at 20:15 Berlin, not at the team's 19:30
+    assert.equal(pickForRider(c, '1001', {now: S - HOUR, E: S, eventId: null})?.id, 'ca0001');
+    assert.equal(pickForRider(c, '1001', {now: S - HOUR, E: T('2026-11-21T17:30:00Z'), eventId: null}), null);
 });

@@ -11,6 +11,7 @@ import {captainPage, flashBlock, hidden, sevLine, freshLine, footer, dstBanner} 
 import {ic} from './icons.mjs';
 import {teamView, teamRow, teamOrder, refreshDue, nextRace, foldedTeams} from './team-view.mjs';
 import {localHHMM, dstChangedRecently} from './time.mjs';
+import {rhythmFields} from './team-page.mjs';
 
 
 // The club name with `kicker` above it; without one an empty kicker from 1024 px keeps the title
@@ -34,13 +35,15 @@ function tile(row) {
 
 const STEPS = [['fr-step-team', 'fr-step-team-sub'], ['fr-step-plan', 'fr-step-plan-sub'], ['fr-step-riders', 'fr-step-riders-sub']];
 
-// No teams yet: the three steps and the add-team form (it posts like the new-team page's).
+// No teams yet: the three steps and the add-team form (it posts like the new-team page's, with the
+// same race rhythm).
 function firstRun(club, {now, seen, flash, others}) {
     const steps = STEPS.map(([title, sub], i) => `<li${i === 0 ? ' class="now"' : ''}><span class="stepnum">${i + 1}</span>`
         + `<span><strong>${esc(t(title))}</strong><span class="sub">${esc(t(sub))}</span></span></li>`);
     const main = `<main class="page" id="main">
   ${clubHead(club, t('fr-welcome'))}
   ${flashBlock(flash)}
+  <p class="banner info" role="note">${ic('info')}<span>${esc(t('fr-bookmark', {club: club.name}))}</span></p>
   <section class="card onboard" aria-labelledby="steps-h">
     <h2 id="steps-h">${esc(t('fr-steps'))}</h2>
     <ol class="steps">
@@ -51,7 +54,7 @@ function firstRun(club, {now, seen, flash, others}) {
     <h2 id="add-h">${esc(t('fr-add'))}</h2>
     <form class="stack" method="post" action="/manage/team">${hidden({action: 'add'})}
       <label class="field">${esc(t('team-name-label'))}<input name="name" maxlength="40" required autocomplete="off" placeholder="${esc(t('fr-placeholder'))}"></label>
-      <label class="field">${esc(t('team-start-label'))} <span class="hint">${esc(t('nt-start-hint', {tz: club.tz}))}</span><input type="time" name="start"></label>
+      ${rhythmFields(club, {kind: 'weekly', weekday: null, start: ''})}
       <button class="btn primary block" type="submit">${ic('plus')}${esc(t('team-add'))}</button>
     </form>
   </section>
@@ -65,7 +68,7 @@ function firstRun(club, {now, seen, flash, others}) {
 // `refresh` false keeps it from reloading itself (a refusal answers a POST: its URL must not be
 // reloaded).
 export function teamsPage(club, {now, seen = {}, flash = null, refresh = true, others = []}) {
-    const slugs = teamOrder(club);
+    const slugs = teamOrder(club, now);
     if (!slugs.length) {
         return firstRun(club, {now, seen, flash, others});
     }

@@ -852,3 +852,30 @@ test('a planner export: height, FTP and power profile are neither stored nor ser
         assert.equal(importFiles([JSON.stringify(p.json)]).plan.sig, normalizePlan(p.json, null).plan.sig, id);
     }
 });
+
+
+test('v3: a special team\'s plan is served at its race\'s start, from 30 min before it (user, 19 Nov 2026)', async t => {
+    // Cogs is special and still has 0.3.0's start time 19:30; its race of 19 Nov starts 20:15 Berlin (19:15Z)
+    const c = club({
+        teams: {cogs: {...team('Cogs', '19:30', 'ca0001'), kind: 'special', weekday: null, raceStarts: {[DATE]: '20:15'}}},
+        sheets: {ca0001: sheet({team: 'cogs', label: 'Cogs', date: DATE, riders: BEN, uploadedAt: '2026-11-19T16:00:00.000Z'})},
+    });
+    const S = T('2026-11-19T19:15:00Z');
+    const s = await setup(t, {now: '2026-11-19T18:44:59Z', clubs: [c]});
+    const ev = {mod: MOD, start: String(S), event: '4567890', joined: KF};
+    let out = await s.get('1001', ev);
+    assert.equal(out.plans.length, 1);
+    assert.equal(out.plans[0].body, false);
+    assert.equal(out.plans[0].startAt, '2026-11-19T19:15:00.000Z');
+    assert.equal(out.plans[0].opensAt, '2026-11-19T18:45:00.000Z');
+    s.clock.now = T('2026-11-19T18:45Z');
+    out = await s.get('1001', ev);
+    assert.equal(out.plans[0].body, true);
+    assert.deepEqual(out.plans[0].json, s.store.get(KF).sheets.ca0001.json);
+    assert.equal(out.plans[0].eventId, 4567890, 'it matched the 20:15 event and learned it');
+    // still served until 4 h after its own start, not the team's 19:30
+    s.clock.now = S + 4 * 3600000;
+    assert.equal((await s.get('1001', {mod: MOD, joined: KF})).plans.length, 1);
+    s.clock.now = S + 4 * 3600000 + 60000;
+    assert.equal((await s.get('1001', {mod: MOD, joined: KF})).plans.length, 0);
+});

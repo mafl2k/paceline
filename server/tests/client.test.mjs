@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {shouldReload, holdsReload, reloadDecision, timeoutSignal, redrawOn, dateRedraw, touchedList, restoreState} from '../client.mjs';
+import {shouldReload, holdsReload, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, touchedList, restoreState} from '../client.mjs';
 
 
 test('shouldReload: only when nothing holds the page', () => {
@@ -76,12 +76,12 @@ test('timeoutSignal: AbortSignal.timeout where it exists, else an AbortControlle
 });
 
 
-test('redrawOn: team, plan, live and date, never the type or the link', () => {
-    for (const name of ['team', 'as', 'live', 'date']) {
+test('redrawOn: team, plan, live, date and start time, never the type or the link', () => {
+    for (const name of ['team', 'as', 'live', 'date', 'start']) {
         assert.equal(redrawOn(name), true, name);
     }
     // typing is never cut off; the event link and the hidden fields wait for Store
-    for (const name of ['type', 'event', 'drawn', 'base', 'touched', '', undefined]) {
+    for (const name of ['type', 'event', 'drawn', 'base', 'touched', 'startFor', '', undefined]) {
         assert.equal(redrawOn(name), false, String(name));
     }
 });
@@ -135,4 +135,16 @@ test('client.mjs: the old upload preview is gone', () => {
     // the assign page holds the preview now (plan versions spec §6.10)
     const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
     assert.doesNotMatch(src, /data-preview|\/manage\/upload\/preview|resetOnSubmit|previewNodes/);
+});
+
+
+test('startRedraw: a complete time other than the drawn one', () => {
+    assert.equal(startRedraw('20:15', ''), true);
+    assert.equal(startRedraw('20:15', null), true);
+    assert.equal(startRedraw('21:15', '20:15'), true);
+    assert.equal(startRedraw('20:15', '20:15'), false, 'the drawn one');
+    // typed digit by digit, or cleared: never midway
+    for (const value of ['', '2', '20:', '20:1', '24:00', '20:60', '7:30', null, undefined]) {
+        assert.equal(startRedraw(value, ''), false, String(value));
+    }
 });

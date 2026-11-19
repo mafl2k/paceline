@@ -502,13 +502,13 @@ test('teamView: a special team without a race', () => {
     const cogs = teamView(c, 'cogs', {now, seen: {}});
     assert.equal(cogs.S, null);
     assert.equal(cogs.gateAt, null);
-    assert.deepEqual(cogs.when, {day: null, time: '19:30', until: null, today: false});
+    assert.deepEqual(cogs.when, {day: null, time: null, until: null, today: false});
     // no race planned is neutral, not the red "No plan: riders get nothing" (Task 8b review)
     assert.deepEqual(cogs.status, {sev: 'neutral', kind: 'no-race', icon: 'clock', text: 'No race planned'});
     assert.equal(cogs.sev, 'neutral');
     assert.deepEqual(teamRow(cogs), {
-        slug: 'cogs', name: 'Cogs', sev: 'neutral', icon: 'clock', timeLine: '19:30',
-        main: 'No race planned', quiet: 'Upload a plan with its race date', short: 'No race',
+        slug: 'cogs', name: 'Cogs', sev: 'neutral', icon: 'clock', timeLine: '',
+        main: 'No race planned', quiet: 'Upload a plan with its date and start time', short: 'No race',
     });
     // with a plan dated 6 Dec, its race
     const later = kinds('2026-12-06');
@@ -820,4 +820,99 @@ test('liveWords: what Make live does, in words', () => {
     assert.equal(liveWords(c, 'rollers', slow.id, now), 'Riders get nothing until Rollers has a start time. '
         + '\'Rollers · slow\' still lists Cleo, who now rides another team. Make it live anyway?');
     assert.equal(fast.id, c.teams.rollers.live);
+});
+
+
+// ---- a special team's start time belongs to its race, team and date (user, 19 Nov 2026) ----
+
+test('teamView: a special team races at its race\'s start; "No start time" only for a race without any', () => {
+    const now = T('2026-11-19T12:00Z');
+    // Cogs has no start time of its own; its live plan of 21 Nov races at 20:15 (19:15Z)
+    const c = kinds('2026-11-21');
+    c.teams.cogs = {...c.teams.cogs, start: null, live: 'cccc01', raceStarts: {'2026-11-21': '20:15'}};
+    const cogs = teamView(c, 'cogs', {now, seen: {}});
+    assert.equal(cogs.S, T('2026-11-21T19:15:00Z'));
+    assert.equal(cogs.noStart, false);
+    assert.deepEqual(cogs.when, {day: 'Sat 21 Nov', time: '20:15', until: 'in 2 days', today: false});
+    assert.deepEqual(cogs.status, {sev: 'neutral', kind: 'opens', icon: 'clock', text: 'Opens Sat 21 Nov 19:45 · 1 rider on this plan'});
+    assert.deepEqual(cogs.trap, []);
+    assert.equal(teamRow(cogs).timeLine, 'Sat 21 Nov 20:15 · in 2 days');
+    assert.equal(liveWords(c, 'cogs', 'cccc01', now), 'Riders get \'Cogs\' v1 at once.');
+    // its gate: 30 min before the race's start
+    assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:45:00Z'), seen: {}}).open, true);
+    assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:44:59Z'), seen: {}}).open, false);
+    // stored, not live, with its time: "No plan" (red), as for a weekly team, with its day and time
+    c.teams.cogs.live = null;
+    const stored = teamView(c, 'cogs', {now, seen: {}});
+    assert.equal(stored.status.kind, 'no-plan');
+    assert.equal(teamRow(stored).timeLine, 'Sat 21 Nov 20:15 · in 2 days');
+
+    // nothing stored: the neutral no-race status and no time line, even with a stale team start
+    for (const start of [null, '19:30']) {
+        const none = kinds();
+        none.teams.cogs.start = start;
+        const empty = teamView(none, 'cogs', {now, seen: {}});
+        assert.equal(empty.noStart, false);
+        assert.deepEqual(empty.status, {sev: 'neutral', kind: 'no-race', icon: 'clock', text: 'No race planned'});
+        assert.deepEqual([teamRow(empty).timeLine, teamRow(empty).main], ['', 'No race planned'], String(start));
+    }
+
+    // a live plan stored by 0.3.0, neither the race nor the team with a time: red "no start time"
+    const old = kinds('2026-11-21');
+    old.teams.cogs = {...old.teams.cogs, start: null, live: 'cccc01'};
+    const red = teamView(old, 'cogs', {now, seen: {}});
+    assert.equal(red.noStart, true);
+    assert.deepEqual(red.status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time: riders on this plan get nothing'});
+    assert.deepEqual(teamRow(red), {
+        slug: 'cogs', name: 'Cogs', sev: 'err', icon: 'clock', timeLine: 'No start time',
+        main: 'No start time: riders on this plan get nothing', quiet: '\'Cogs\' has no start time · upload a new version with it', short: 'No start time',
+    });
+    assert.equal(liveWords(old, 'cogs', 'cccc01', now), 'Riders get nothing: \'Cogs\' has no start time. Upload a new version of it with its start time.');
+    // the same plan stored but not live: still red, never "null" in a line (review I3)
+    old.teams.cogs.live = null;
+    const notLive = teamView(old, 'cogs', {now, seen: {}});
+    assert.equal(notLive.noStart, true);
+    assert.deepEqual(notLive.status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time for Sat 21 Nov'});
+    const row = teamRow(notLive);
+    assert.deepEqual([row.timeLine, row.quiet], ['No start time', 'Upload a new version with its start time']);
+    assert.ok(!JSON.stringify(row).includes('null'), JSON.stringify(row));
+    // with the team's start time (0.3.0's way) it races at that, as before
+    old.teams.cogs = {...old.teams.cogs, start: '19:30', live: 'cccc01'};
+    assert.equal(teamView(old, 'cogs', {now, seen: {}}).S, T('2026-11-21T18:30:00Z'));
+
+    // a weekly team without a start time: "No start time", as before
+    const weekly = kinds();
+    weekly.teams.rollers.start = null;
+    assert.deepEqual(teamView(weekly, 'rollers', {now, seen: {}}).status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time and no plan'});
+});
+
+
+test('teamView: a special team\'s trap names the race\'s start time, not a team start time', () => {
+    // Cogs (special, no time anywhere) has a live plan listing Ida, who rides Rollers now
+    const c = kinds('2026-11-19');
+    c.teams.cogs = {...c.teams.cogs, start: null, live: 'cccc01'};
+    c.teams.rollers.live = 'rrrr01';
+    c.sheets.rrrr01 = sheet({team: 'rollers', label: 'Rollers A', date: DATE, riders: ['1008', '1001'], uploadedAt: '2026-11-19T10:00:00.000Z'});
+    c.sheets.cccc01.uploadedAt = '2026-11-19T11:00:00.000Z';
+    const now = T('2026-11-19T12:00Z');
+    assert.deepEqual(teamView(c, 'cogs', {now, seen: {}}).trap.map(x => x.text),
+        ['Ida rides Rollers for now; once this race has its start time (it comes with the plan), Ida moves here and Rollers has a hole.']);
+    // with the race's start it is sent, and no trap
+    c.teams.cogs.raceStarts = {[DATE]: '21:00'};
+    assert.deepEqual(teamView(c, 'cogs', {now, seen: {}}).trap, []);
+});
+
+
+test('teamOrder: a special team by its next race\'s start, after the weekly teams without one', () => {
+    const now = T('2026-11-19T12:00Z');
+    const c = kinds('2026-11-21');
+    c.teams.axles = {...team('Axles', '20:00'), kind: 'weekly', weekday: null};
+    c.teams.owls = {...team('Owls', null), kind: 'weekly', weekday: null};
+    c.teams.bolts = {...team('Bolts', '18:00'), kind: 'special', weekday: null};
+    // Cogs' race of 21 Nov at 19:45; Bolts has no race (its stale 18:00 does not count)
+    c.teams.cogs = {...c.teams.cogs, start: null, raceStarts: {'2026-11-21': '19:45'}};
+    assert.deepEqual(teamOrder(c, now), ['rollers', 'cogs', 'axles', 'owls', 'bolts']);
+    // without a time Cogs goes after the weekly teams; the special teams without one by name
+    delete c.teams.cogs.raceStarts;
+    assert.deepEqual(teamOrder(c, now), ['rollers', 'axles', 'owls', 'bolts', 'cogs']);
 });

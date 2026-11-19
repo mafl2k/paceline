@@ -14,7 +14,7 @@ import {
 import {diffSummary} from './diff.mjs';
 import {teamHint} from './club.mjs';
 import {plannedStart, effects, PLAN_OPEN_MS} from './select.mjs';
-import {localLabel, isDate} from './time.mjs';
+import {localLabel, isDate, HHMM_RE, zonedToUtc} from './time.mjs';
 import {planOfId, ridersShared} from './plans.mjs';
 import {entryPlan} from './preselect.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
@@ -111,14 +111,14 @@ function teamHtml(club, {team, teams}) {
 
 
 // The race line: "Race Thu 19 Nov 19:30" (the day without a start time), with the chosen plan's
-// event link.
-function raceHtml(club, {team, as, date}) {
+// event link. A special team's time is the page's (`start`, what Store would set).
+function raceHtml(club, {team, as, date, start, special}) {
     if (!isDate(date)) {
         return '';
     }
-    const S = plannedStart(club, {team, date});
-    let text = t('as-race', {race: S === null ? dateDay(date, club.tz) : localLabel(S, club.tz)});
     const own = as !== null && as !== 'new' ? planOfId(club, team, as) : null;
+    const S = !special ? plannedStart(club, {team, date}) : HHMM_RE.test(start ?? '') ? zonedToUtc(date, start, club.tz) : null;
+    let text = t('as-race', {race: S === null ? dateDay(date, club.tz) : localLabel(S, club.tz)});
     const src = own === null ? null : own.live !== null ? club.sheets[own.live] : own.newest[1];
     if (src?.pinnedEventId != null) {
         text += t('as-race-event', {id: src.pinnedEventId});
@@ -171,12 +171,14 @@ function typeLiveHtml(club, choices, preview) {
 
 
 // "What happens": the preview's lines, the diff summary with all its lines in a fold; an error
-// instead when the dry run was refused; nothing without a preview.
+// instead when the dry run was refused, a neutral line ({note}) while a field it needs is empty;
+// nothing without a preview.
 function whatHtml(preview) {
     if (preview === null) {
         return '';
     }
     const items = Object.hasOwn(preview, 'error') ? [lineLi({sev: 'err', text: preview.error})]
+        : Object.hasOwn(preview, 'note') ? [lineLi({sev: 'neutral', text: preview.note})]
         : preview.lines.map(l => (l.diff ? lineLi(l, `<details class="fold"><summary>${esc(t('as-changed'))}</summary>`
             + `<ul>${preview.diff.map(d => `<li>${esc(d.text)}</li>`).join('')}</ul></details>`) : lineLi(l)));
     return `<section class="card" aria-labelledby="wh-h">
@@ -202,16 +204,27 @@ export function assignPage(club, entry, {now, seen, others, choices, preview, fl
     const source = t('as-source-upload', {at: Number.isFinite(at) ? atLabel(at, now, tz) : '–'})
         + (entry.text != null ? t('as-with-text') : '');
     const base = team === null ? '' : club.teams[team].version;
-    // a new plan without a default date (a special team with nothing ahead) asks for it above the fold
-    const above = team !== null && !choices.dateFixed && choices.dateRequired === true;
+    // a new plan without a default date (a special team with nothing ahead) asks for it above the
+    // fold; a special team's plan (new or a version) has its race date and start time there, the
+    // time always editable and needed (user, 19 Nov 2026: the newest upload for a date sets it); a
+    // version keeps the plan's date. `startFor` says which date the time was drawn for.
+    const special = team !== null && choices.special === true;
+    const above = team !== null && (special || (!choices.dateFixed && choices.dateRequired === true));
     const date = choices.dateFixed ? `<p>${esc(t('as-date-fixed', {day: dateDay(choices.date, tz)}))}</p>`
         : `<label class="field">${esc(t('upload-date'))} <input type="date" name="date" value="${esc(choices.date ?? '')}"${above ? ' required' : ''}></label>`;
+    // a version's fixed date sits beside the time like a field
+    const fixed = `<p class="as-fixed"><strong>${esc(t('upload-date'))}</strong><span>${esc(t('as-date-fixed-short', {day: dateDay(choices.date, tz)}))}</span></p>`;
+    const when = !special ? date : `<div class="as-when">${hidden({startFor: choices.date ?? ''})}
+        ${choices.dateFixed ? fixed : date}
+        <label class="field">${esc(t('team-start-label'))} <input type="time" name="start" value="${esc(choices.start ?? '')}" required></label>
+      </div>
+      <p class="hint">${esc(t('as-start-hint', {tz, team: nameOf(club, team)}))}</p>`;
     const choose = team === null ? '' : `
       ${raceHtml(club, choices)}
       ${plansHtml(club, entry, choices, now)}
       ${typeLiveHtml(club, choices, preview)}${above ? `
-      ${date}` : ''}`;
-    const button = preview !== null && !Object.hasOwn(preview, 'error') ? preview.button : t(choices.live ? 'as-store-live' : 'as-store');
+      ${when}` : ''}`;
+    const button = preview?.button ?? t(choices.live ? 'as-store-live' : 'as-store');
     const back = typeof entry.team === 'string' && Object.hasOwn(club.teams, entry.team) ? teamPath(entry.team) : '/manage';
     const main = `<main class="page" id="main">
   <header class="pagehead">${home === null ? `<p class="kicker desk">${esc(club.name)}</p>` : `<p class="kicker">${esc(nameOf(club, home))}</p>`}<h1>${esc(t('as-heading'))}</h1></header>

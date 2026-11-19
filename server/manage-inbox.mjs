@@ -6,7 +6,7 @@ import {readBody, BODY_MS, html, parseForm} from './http.mjs';
 import {t} from './pages.mjs';
 import {methodNotAllowed, FORM_BYTES} from './web.mjs';
 import {ClubError, entryOf, storeEntry, discardEntry, teamHint} from './club.mjs';
-import {effects, nextRaceDate} from './select.mjs';
+import {effects, nextRaceDate, raceStart} from './select.mjs';
 import {SHEET_RE, isSlug, parseEventUrl, randomId} from './ids.mjs';
 import {assignChoices} from './preselect.mjs';
 import {assignPage, assignPreview, entryGonePage} from './assign-page.mjs';
@@ -23,7 +23,7 @@ const PARSE_RETRY_S = 600;
 export function storeInput(choices, base) {
     const event = parseEventUrl(choices.event ?? '');
     return {
-        slug: choices.team, as: choices.as, live: choices.live, date: choices.date, type: choices.type,
+        slug: choices.team, as: choices.as, live: choices.live, date: choices.date, start: choices.start ?? null, type: choices.type,
         pinnedEventId: event.ok ? event.id : null, base,
     };
 }
@@ -31,12 +31,14 @@ export function storeInput(choices, base) {
 
 // The choices of a Store POST, straight from the form: never preselected. A blank `as` is no plan;
 // a missing `type` keeps a version's type (a blank one is none); a missing `date` is the team's next
-// race (the page always sends it for a new plan).
+// race (the page always sends it for a new plan); `start` is a special team's new plan's start time
+// (uploadSheet ignores it for anything else).
 function formChoices(form) {
     const has = k => form.get(k) !== null;
     return {
         team: field(form, 'team'), as: field(form, 'as') || null, live: field(form, 'live') === 'on',
-        date: has('date') ? field(form, 'date') : null, type: has('type') ? field(form, 'type') : undefined, event: field(form, 'event'),
+        date: has('date') ? field(form, 'date') : null, start: field(form, 'start'),
+        type: has('type') ? field(form, 'type') : undefined, event: field(form, 'event'),
     };
 }
 
@@ -49,6 +51,20 @@ function refusedChoices(club, entry, form, now) {
         return choices;
     }
     return {...choices, as: null, live: false, liveKind: 'pick', liveVars: {}, dateFixed: false, drawn: `${choices.team ?? ''}:`};
+}
+
+
+// True when a special team's Store posts a start time drawn for another date (`startFor`, the date
+// changed without a redraw) and the posted date's race has a time of its own that differs: storing
+// would move that race to a time nobody chose for it (the coordinator, 19 Nov 2026).
+function staleStart(club, choices, startFor) {
+    const team = isSlug(choices.team) && Object.hasOwn(club.teams, choices.team) ? club.teams[choices.team] : null;
+    if (team?.kind !== 'special' || startFor === null || choices.date === null || startFor === choices.date) {
+        return false;
+    }
+    const raced = Object.values(club.sheets).some(sh => sh.team === choices.team && sh.date === choices.date);
+    const current = raceStart(club, choices.team, choices.date);
+    return raced && current !== null && choices.start !== '' && current !== choices.start;
 }
 
 
@@ -73,7 +89,8 @@ function inboxGet(req, res, ctx, cid, id) {
 
 
 // The dry run of Store for `choices` (spec §6.6): assignPreview's answer, {error} for a refusal or an
-// event link that does not parse, null without a team. Counts nothing: the caller does.
+// event link that does not parse, {note} while the date or a special team's start time is empty,
+// null without a team. Counts nothing: the caller does.
 function previewOf(ctx, cid, club, entry, choices) {
     const {store, now} = ctx;
     if (choices.team === null) {
@@ -81,6 +98,12 @@ function previewOf(ctx, cid, club, entry, choices) {
     }
     if (!parseEventUrl(choices.event).ok) {
         return {error: t('upload-bad-event')};
+    }
+    // nothing typed yet is no error (the coordinator, 19 Nov 2026): a neutral line until the date
+    // (and a special team's start time) is there; a value that is there but wrong is an error
+    if (choices.date === '' || (choices.special && choices.start === '')) {
+        const key = choices.date !== '' ? 'as-pv-choose-time' : choices.special && choices.start === '' ? 'as-pv-choose' : 'as-pv-choose-date';
+        return {note: t(key)};
     }
     const base = club.teams[choices.team].version;
     try {
@@ -95,7 +118,9 @@ function previewOf(ctx, cid, club, entry, choices) {
 }
 
 
-// POST /manage/inbox/<id> (team, as, live, type, date, event, base, drawn, touched): Store. A team or
+// POST /manage/inbox/<id> (team, as, live, type, date, start, startFor, event, base, drawn, touched):
+// Store. A special team's start time drawn for another date than the posted one, when that date's
+// race has another time, stores nothing either: the page is redrawn for it (staleStart). A team or
 // plan choice the page was not drawn for (`drawn` is not `<team>:<as>`: the captain changed it and
 // stored without a redraw) stores nothing: 400 with the page redrawn for the new choice (its
 // defaults, its preview; not counted, Ruling 7) and a note to check it. A refusal answers 400 with
@@ -114,11 +139,18 @@ function inboxStore(req, res, ctx, cid, form, id) {
         html(res, 400, assignPage(club, entry, {...frameOf(ctx, cid), choices: refusedChoices(club, entry, form, now), preview: null, flash: {kind: 'err', text}}));
     };
     const choices = formChoices(form);
-    if (form.get('drawn') !== `${choices.team}:${choices.as ?? ''}`) {
+    const redraw = key => {
         const redrawn = assignChoices(before, entry, form, now);
         html(res, 400, assignPage(before, entry, {
-            ...frameOf(ctx, cid), choices: redrawn, preview: previewOf(ctx, cid, before, entry, redrawn), flash: {kind: 'err', text: t('as-redrawn')},
+            ...frameOf(ctx, cid), choices: redrawn, preview: previewOf(ctx, cid, before, entry, redrawn), flash: {kind: 'err', text: t(key)},
         }));
+    };
+    if (form.get('drawn') !== `${choices.team}:${choices.as ?? ''}`) {
+        redraw('as-redrawn');
+        return;
+    }
+    if (staleStart(before, choices, form.get('startFor'))) {
+        redraw('as-redrawn-time');
         return;
     }
     if (choices.team === '') {

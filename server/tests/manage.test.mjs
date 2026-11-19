@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import {gzipSync, gunzipSync} from 'node:zlib';
 import {planJson, sheet, T, CODE_SECRET, rows as dbRows, refuseWrites} from './helpers.mjs';
 import {
     CID, DATE, NOW, SETUP_AT, ROLLERS, makeClub, secondClub, upload, serve, textOf, count, flashOf, post, followPost,
@@ -1803,8 +1804,10 @@ test('remove a rider', async t => {
     assert.ok(!textOf(riders).includes('Ben'));
     const one = await followPost(srv, c.cookie, '/manage/rider/remove', {zwiftId: '1009'});
     assert.deepEqual(one.flash, {kind: 'ok', text: 'Removed from 1 plan.'});
+    // again: removed in full already, nothing of his since (coordinator ruling, 19 Nov 2026: no
+    // "0 plans", no second line, mail or pass)
     const none = await followPost(srv, c.cookie, '/manage/rider/remove', {zwiftId: '1001'});
-    assert.deepEqual(none.flash, {kind: 'ok', text: 'Removed from 0 plans.'});
+    assert.deepEqual(none.flash, {kind: 'ok', text: 'This rider was removed already, and nothing of theirs was stored since.'});
     const file = storedClub(srv);
     for (const zwiftId of ['abc', '', '1234567890123', '-1']) {
         const bad = await post(srv, c.cookie, '/manage/rider/remove', {zwiftId});
@@ -1972,10 +1975,11 @@ test('every action needs same origin and a principal', async t => {
 
 // ---- the archive (plan versions spec §11) ----
 
-// A recording of `slug` with these plan codes, written through the server's log store.
+// A recording of `slug` with these plan codes, written through the server's log store (a head line
+// only, as the server stores one: Remove a rider reads it).
 function recordingOf(srv, slug, codes) {
     const name = `${T('2026-11-18T18:00:00Z')}-1001.jsonl.gz`;
-    srv.server.logs.put(CID, slug, name, Buffer.from('x'));
+    srv.server.logs.put(CID, slug, name, gzipSync('{"kind":"paceline-recording","v":1}\n'));
     srv.server.logs.addSigs(CID, slug, name, codes);
     return name;
 }
@@ -2143,6 +2147,64 @@ test('remove a rider: a version left without riders is not archived with him (th
     assert.ok(!Object.hasOwn(srv.store.get(CID).sheets, solo));
     const leaked = dbRows(srv.server.db, 'SELECT slug, id FROM archive WHERE cid = ? AND instr(version, \'"1002"\') > 0', CID);
     assert.deepEqual(leaked, [], 'rider 1002 in the archive after Remove a rider');
+});
+
+
+test('remove a rider: his own recordings are deleted and his rows leave the others; the flash counts them, also what failed', async t => {
+    const c = makeClub();
+    upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
+    const srv = await serve(t, c);
+    const session = T('2026-11-18T18:30:00Z');
+    const head = {kind: 'paceline-recording', v: 1, plan: {riders: [{id: '1001', name: 'Ben'}, {id: '1002', name: 'Cleo'}], bench: []}};
+    const rec = self => gzipSync([head, {ts: 1, watchingId: '1002', riders: [{id: self, self: true}, {id: self === '1001' ? '1002' : '1001'}]}]
+        .map(x => JSON.stringify(x)).join('\n') + '\n');
+    const dir = path.join(srv.dataDir, 'logs', CID);
+    srv.server.logs.put(CID, 'rollers', `${session}-1001.jsonl.gz`, rec('1001'));
+    srv.server.logs.put(CID, 'rollers', `${session}-1002.jsonl.gz`, rec('1002'));
+    srv.server.logs.put(CID, 'cogs', `${session}-1003.jsonl.gz`, rec('1003'));
+    // the rename of Dan's rewritten file fails once
+    const danFile = path.join(dir, 'cogs', `${session}-1003.jsonl.gz`);
+    const renameSync = fs.renameSync;
+    fs.renameSync = (from, to) => {
+        if (String(to) === danFile) {
+            throw Object.assign(new Error('io'), {code: 'EIO'});
+        }
+        return renameSync(from, to);
+    };
+    const error = console.error;
+    console.error = () => {};
+    let res;
+    try {
+        res = await followPost(srv, c.cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    } finally {
+        fs.renameSync = renameSync;
+        console.error = error;
+    }
+    assert.deepEqual(res.flash, {kind: 'err', text: 'Removed from 1 plan and 1 recording. 1 of their own recordings deleted. ' +
+        '1 recording could not be changed: remove the rider again to finish it.'});
+    assert.equal(res.location, '/manage/settings');
+    assert.ok(!fs.existsSync(path.join(dir, 'rollers', `${session}-1002.jsonl.gz`)));
+    assert.ok(!gunzipSync(fs.readFileSync(path.join(dir, 'rollers', `${session}-1001.jsonl.gz`))).toString().includes('1002'));
+    assert.ok(gunzipSync(fs.readFileSync(danFile)).toString().includes('1002'), 'the failed one as it was');
+    // again: the rest is done
+    const lines = () => fs.readFileSync(path.join(srv.dataDir, 'erasures.jsonl'), 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines().length, 1);
+    const again = await followPost(srv, c.cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    assert.deepEqual(again.flash, {kind: 'ok', text: 'Removed from 1 recording.'});
+    assert.ok(!gunzipSync(fs.readFileSync(danFile)).toString().includes('1002'));
+    assert.equal(lines().length, 1, 'the retry runs the pending entry again, no new line');
+    const last = await followPost(srv, c.cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    assert.deepEqual(last.flash, {kind: 'ok', text: 'This rider was removed already, and nothing of theirs was stored since.'});
+    assert.equal(lines().length, 1);
+    // the activity log names no one
+    assert.ok(!JSON.stringify(srv.store.get(CID).log).includes('1002'));
+    // the hint and the privacy page say it reaches the recordings
+    const settings = textOf(await (await srv.get('/manage/settings')).text());
+    assert.match(settings, /out of the rider status lists and out of every recording of the club: their own uploaded recordings are deleted, and their rows are taken out of their team-mates'\./);
+    assert.doesNotMatch(settings, /stay until you delete them under Recordings/);
+    const privacy = textOf(await (await srv.get('/privacy')).text());
+    assert.match(privacy, /90 days; Remove a rider deletes the rider's own recordings and takes their rows out of the others at once/);
+    assert.match(privacy, /seen only by the operator\. Remove a rider takes a rider out of all of them at once \(backups: see below\)\./);
 });
 
 

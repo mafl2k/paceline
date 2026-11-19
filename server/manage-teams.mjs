@@ -122,11 +122,19 @@ function sheetAction(change, doneKey, {unpinning = false} = {}) {
 }
 
 
+// The posted weekday: a blank one is the club's (null), anything but 1-7 NaN (bad-weekday).
+function postedWeekday(form) {
+    const typed = field(form, 'weekday');
+    return typed === '' ? null : /^[1-7]$/.test(typed) ? Number(typed) : NaN;
+}
+
+
 // POST /manage/team (action = add | rename | start | kind | delete, team, name, start, kind, weekday).
-// A blank start clears the start time (F8); a blank weekday is the club's. Add goes to the new team's
-// page, rename, start and kind to the team's
-// settings, delete to the teams; a refusal shows the new-team page or the settings with what was
-// typed. A deleted team's slug is retired in the club change's transaction, so it is never used
+// A blank start clears the start time (F8); a blank weekday is the club's. Add takes the race rhythm
+// too (user, 19 Nov 2026): without `kind` (a page from before) it is weekly on the club's day, and a
+// special team ignores the start. Add goes to the new team's page, rename, start and kind to the
+// team's settings, delete to the teams; a refusal shows the new-team page or the settings with what
+// was typed. A deleted team's slug is retired in the club change's transaction, so it is never used
 // again (a failed change retires nothing). Retired slugs are kept for good, so a club
 // deletes at most TEAM_DELETES_PER_DAY teams a day (429 on the team's settings beyond, nothing
 // retired).
@@ -140,8 +148,10 @@ function teamAction(req, res, ctx, cid, form) {
     const team = teamOf(store.get(cid), slug);
     const settings = {page: 'team-settings', slug};
     if (action === 'add') {
-        const added = attempt(res, ctx, cid, c => addTeam(c, {name, start}, {slugTaken: s => store.slugTaken(s), now}),
-            {place: {page: 'new-team'}, typed: {name, start: typedStart}});
+        const kind = field(form, 'kind') || 'weekly';
+        const weekday = postedWeekday(form);
+        const added = attempt(res, ctx, cid, c => addTeam(c, {name, start, kind, weekday}, {slugTaken: s => store.slugTaken(s), now}),
+            {place: {page: 'new-team'}, typed: {name, start: typedStart, kind, weekday: field(form, 'weekday')}});
         if (added) {
             done(res, ctx, cid, {page: 'team', slug: added.result}, t('team-added', {team: store.get(cid).teams[added.result].name}));
         }
@@ -155,13 +165,17 @@ function teamAction(req, res, ctx, cid, form) {
             done(res, ctx, cid, settings, start === null ? t('team-start-cleared', {team}) : t('team-start-set', {team, start}));
         }
     } else if (action === 'kind') {
-        const typedDay = field(form, 'weekday');
-        const weekday = typedDay === '' ? null : /^[1-7]$/.test(typedDay) ? Number(typedDay) : NaN;
+        const weekday = postedWeekday(form);
+        const was = team?.kind === 'special' ? 'special' : 'weekly';
         if (attempt(res, ctx, cid, c => setKind(c, slug, {kind: field(form, 'kind'), weekday}, now), {place: settings})) {
             const after = store.get(cid);
-            const {name: team, kind} = after.teams[slug];
+            const {name, kind, start: own} = after.teams[slug];
             const rhythm = kind === 'special' ? t('ts-special') : t('ts-weekly', {weekday: t(`weekday-${teamWeekday(after, slug)}`)});
-            done(res, ctx, cid, settings, t('team-kind-set', {team, rhythm}));
+            // what a switch does to the start of its plans (the coordinator, 19 Nov 2026)
+            const plans = Object.values(after.sheets).some(sh => sh.team === slug);
+            const what = !plans || kind === was ? null : kind === 'special' ? t('team-kind-special-keep')
+                : own != null ? t('team-kind-weekly-start', {start: own}) : t('team-kind-weekly-none');
+            done(res, ctx, cid, settings, [t('team-kind-set', {team: name, rhythm}), what].filter(Boolean).join(' '));
         }
     } else if (action === 'delete') {
         if (!team) {

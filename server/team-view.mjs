@@ -11,7 +11,8 @@
 import {t, andList} from './pages.mjs';
 import {pullTarget, diffVersions, diffSummary} from './diff.mjs';
 import {
-    servable, datePicks, effects, outdated, plannedStart, planOpen, nextRaceDate, stillToRace, PLAN_OPEN_MS, USED_UP_MS,
+    servable, datePicks, effects, outdated, plannedStart, startOf, raceStart, raceStartAt, planOpen, nextRaceDate, stillToRace,
+    PLAN_OPEN_MS, USED_UP_MS,
 } from './select.mjs';
 import {isUsed, backTo, ClubError} from './club.mjs';
 import {planOfId, racePlans, previousVersion} from './plans.mjs';
@@ -102,13 +103,27 @@ export const inPen = (club, slug, entry, S) => Boolean(entry?.inEvent) && teamOf
 export const otherEvent = (entry, sheet) => sheet.pinnedEventId != null && entry.event != null && entry.event !== sheet.pinnedEventId;
 
 
-// By start time, teams without one last, then by name, then slug. Never by status.
-export function teamOrder(club) {
+// By start time, then by name, then slug; never by status. A weekly team's start time is the
+// team's; a special team's is that of its next race (liveAndStart, with `now`). Teams without one
+// last: weekly ones, then special ones.
+export function teamOrder(club, now) {
+    const keyOf = slug => {
+        const team = club.teams[slug];
+        if (team.kind !== 'special') {
+            return {group: team.start == null ? 1 : 0, time: team.start ?? ''};
+        }
+        const {time} = liveAndStart(club, slug, now);
+        return {group: time === null ? 2 : 0, time: time ?? ''};
+    };
+    const keys = new Map(Object.keys(club.teams).map(s => [s, keyOf(s)]));
     return Object.keys(club.teams).sort((a, b) => {
-        const sa = club.teams[a].start ?? null;
-        const sb = club.teams[b].start ?? null;
-        if (sa !== sb) {
-            return sa === null ? 1 : sb === null ? -1 : (sa < sb ? -1 : 1);
+        const ka = keys.get(a);
+        const kb = keys.get(b);
+        if (ka.group !== kb.group) {
+            return ka.group - kb.group;
+        }
+        if (ka.time !== kb.time) {
+            return ka.time < kb.time ? -1 : 1;
         }
         const na = String(club.teams[a].name);
         const nb = String(club.teams[b].name);
@@ -170,23 +185,26 @@ export function atLabel(ms, now, tz) {
 }
 
 
-// The team's live plan and S. `live` is the servable live plan {slug, id, sheet, S}; for a team
-// without a start time its live pointer (S null) unless that is used up; else null. S is the live
-// plan's, else (with a start time) the next race day's at the start time, else null.
+// The team's live plan, S and its start time 'HH:MM'. `live` is the servable live plan {slug, id,
+// sheet, S}; a live pointer without a start time (a weekly team without one, a special team's plan
+// stored by 0.3.0 without any) is `live` with S null unless it is used up; else null. S is the live
+// plan's, else the next race day's (raceStartAt: a weekly team's start time, a special team's plan
+// of that day), else null; `time` is S's start time, or null.
 function liveAndStart(club, slug, now) {
     const team = club.teams[slug];
     const c = servable(club, now).find(x => x.slug === slug);
     if (c) {
-        return {live: c, S: c.S};
+        return {live: c, S: c.S, time: startOf(club, c.sheet)};
     }
     let live = null;
-    if (team.start == null && typeof team.live === 'string' && Object.hasOwn(club.sheets, team.live)
-        && !isUsed(club, club.sheets[team.live], now)) {
-        live = {slug, id: team.live, sheet: club.sheets[team.live], S: null};
+    const id = team.live;
+    if (typeof id === 'string' && Object.hasOwn(club.sheets, id) && plannedStart(club, club.sheets[id]) === null
+        && !isUsed(club, club.sheets[id], now)) {
+        live = {slug, id, sheet: club.sheets[id], S: null};
     }
-    const date = team.start == null ? null : nextRaceDate(club, slug, now);
-    const S = date === null ? null : plannedStart(club, {team: slug, date});
-    return {live, S};
+    const date = nextRaceDate(club, slug, now);
+    const S = date === null ? null : raceStartAt(club, slug, date);
+    return {live, S, time: S === null ? null : raceStart(club, slug, date)};
 }
 
 
@@ -299,12 +317,13 @@ function holeNotes(club, slug, sheet, now) {
 }
 
 
-// For a team without a start time: the riders its live plan would take from other teams once a
-// start time is set, by team. The latest start (23:59) keeps the plan servable whenever its date
-// is today or later, and precedence does not depend on S. A rider listing left behind is a hole
-// (effects' holes). A rider who is only in the other team's roster leaves none and is no news (the
-// roster is the club's rider pool), so only the riders who leave a hole are named, in this plan's
-// ride order; a team they leave no hole in has no entry.
+// For a team without a start time (or a special team's live plan without one): the riders its live
+// plan would take from other teams once a start time is set, by team. The latest start (23:59)
+// keeps the plan servable whenever its date is today or later, and precedence does not depend on
+// S. A rider listing left behind is a hole (effects' holes). A rider who is only in the other
+// team's roster leaves none and is no news (the roster is the club's rider pool), so only the
+// riders who leave a hole are named, in this plan's ride order; a team they leave no hole in has
+// no entry.
 function trapOf(club, slug, sheet, listed, now) {
     const withStart = structuredClone(club);
     withStart.teams[slug].start = '23:59';
@@ -318,7 +337,8 @@ function trapOf(club, slug, sheet, listed, now) {
     }
     const namesOf = list => list.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0)).map(m => m.name);
     const out = [];
-    for (const s of teamOrder(club).filter(x => byTeam.has(x))) {
+    const special = club.teams[slug].kind === 'special';
+    for (const s of teamOrder(club, now).filter(x => byTeam.has(x))) {
         const holed = namesOf(byTeam.get(s).filter(m => holes.some(h => h.slug === s && h.id === m.id)));
         if (!holed.length) {
             continue;
@@ -326,8 +346,8 @@ function trapOf(club, slug, sheet, listed, now) {
         const teamName = nameOf(club, s);
         out.push({
             team: s, teamName, names: holed,
-            text: holed.length === 1 ? t('tv-trap-one', {name: holed[0], team: teamName})
-                : t('tv-trap', {names: andList(holed), team: teamName}),
+            text: holed.length === 1 ? t(special ? 'tv-trap-one-special' : 'tv-trap-one', {name: holed[0], team: teamName})
+                : t(special ? 'tv-trap-special' : 'tv-trap', {names: andList(holed), team: teamName}),
         });
     }
     return out;
@@ -339,7 +359,7 @@ function trapOf(club, slug, sheet, listed, now) {
 export function teamView(club, slug, {now, seen = {}}) {
     const team = club.teams[slug];
     const tz = club.tz;
-    const {live: lv, S} = liveAndStart(club, slug, now);
+    const {live: lv, S, time} = liveAndStart(club, slug, now);
     const sheet = lv?.sheet ?? null;
     const sent = lv !== null && lv.S !== null;
     const open = sent && planOpen(S, now);
@@ -347,13 +367,14 @@ export function teamView(club, slug, {now, seen = {}}) {
     const opens = gateAt === null ? null : atLabel(gateAt, now, tz);
     const today = localDate(now, tz);
     let when;
+    // the date of the race the view is about: the live plan's, else the next race's
+    const raceDate = lv?.sheet.date ?? nextRaceDate(club, slug, now);
     if (S === null) {
-        const date = nextRaceDate(club, slug, now);
         // a special team without a race: no day
-        when = date === null ? {day: null, time: team.start, until: null, today: false}
-            : {day: dateDay(date, tz), time: null, until: null, today: date === today};
+        when = raceDate === null ? {day: null, time: null, until: null, today: false}
+            : {day: dateDay(raceDate, tz), time: null, until: null, today: raceDate === today};
     } else {
-        when = {day: localDay(S, tz), time: team.start, until: untilLabel(S, now), today: localDate(S, tz) === today};
+        when = {day: localDay(S, tz), time, until: untilLabel(S, now), today: localDate(S, tz) === today};
     }
     const marks = outdated(club, slug, now);
     const marksOf = id => (marks.get(id) ?? []).map(m => ({id: m.id, name: m.name, rides: m.rides, ridesName: nameOf(club, m.rides)}));
@@ -378,9 +399,15 @@ export function teamView(club, slug, {now, seen = {}}) {
     const count = riders.length;
     const has = open ? riders.filter(r => isHas(r.state)).length : null;
 
+    // "No start time" (user, 19 Nov 2026): a weekly team without one; a special team gets its time
+    // with each upload, so only a race with plans but no time at all (plans stored by 0.3.0) has
+    // none, live or not
+    const special = team.kind === 'special';
+    const noStart = special ? S === null && raceDate !== null : team.start == null;
     let status;
-    if (team.start == null) {
-        status = {sev: 'err', kind: 'no-start', icon: 'clock', text: t(live ? 'tv-no-start-plan' : 'tv-no-start-none')};
+    if (noStart) {
+        const text = live ? t('tv-no-start-plan') : special ? t('tv-no-start-not-live', {day: when.day}) : t('tv-no-start-none');
+        status = {sev: 'err', kind: 'no-start', icon: 'clock', text};
     } else if (!live && when.day === null) {
         // a special team with no race planned: nothing is missing (Task 8b review)
         status = {sev: 'neutral', kind: 'no-race', icon: 'clock', text: t('tp-race-none')};
@@ -421,10 +448,10 @@ export function teamView(club, slug, {now, seen = {}}) {
         });
 
     return {
-        slug, name: team.name, start: team.start ?? null, S, gateAt, opens, open, when, live, status, notes, sev,
+        slug, name: team.name, start: team.start ?? null, special, noStart, raceDate, S, gateAt, opens, open, when, live, status, notes, sev,
         icon: sev === status.sev ? status.icon : SEV_ICON[sev],
         riders, has, count, plans,
-        trap: team.start == null && live ? trapOf(club, slug, sheet, plan.riders, now) : [],
+        trap: noStart && live ? trapOf(club, slug, sheet, plan.riders, now) : [],
     };
 }
 
@@ -464,9 +491,10 @@ function liveCard(club, slug, lv, p, {now, marksOf}) {
 // One row of the picker and the switcher.
 export function teamRow(view) {
     const {when, status, notes, live} = view;
-    // a team with no race planned says so in its status line; the time line keeps its start time
-    const timeLine = view.start === null ? t('tv-row-no-start') : when.day === null ? (status.kind === 'no-race' ? view.start : t('tp-race-none'))
-        : t(when.today ? 'tv-row-time' : 'tv-row-day-time', {day: when.day, time: when.time, until: when.until});
+    // a team with no race planned says so in its status line, with no time line; without a time
+    // the day alone
+    const timeLine = view.noStart ? t('tv-row-no-start') : when.day === null ? (status.kind === 'no-race' ? '' : t('tp-race-none'))
+        : when.time === null ? when.day : t(when.today ? 'tv-row-time' : 'tv-row-day-time', {day: when.day, time: when.time, until: when.until});
     let main;
     let quiet;
     let short;
@@ -476,7 +504,8 @@ export function teamRow(view) {
         short = t('tv-short-no-race');
     } else if (status.sev === 'err') {
         main = status.text;
-        quiet = status.kind === 'no-plan' ? t('tv-row-upload') : live ? t('tv-row-ready', {label: live.label}) : t('tv-row-neither');
+        quiet = status.kind === 'no-plan' ? t('tv-row-upload') : live ? t(view.special ? 'tv-row-ready-special' : 'tv-row-ready', {label: live.label})
+            : t(view.special ? 'tv-row-special-time' : 'tv-row-neither');
         short = t(status.kind === 'no-plan' ? 'tv-short-no-plan' : 'tv-short-no-start');
     } else if (notes.length) {
         main = t('tv-row-fix', {n: notes.length, short: notes[0].short});
@@ -556,8 +585,16 @@ export function backAsk(club, slug, {plan, n, version = null}, now) {
     }
     const live = club.sheets[dry.p.live];
     const words = movesWords(club, slug, dry);
-    const head = dry.team.start == null ? t('tp-live-words-no-start', {team: dry.team.name}) : t('back-q-live', {n: dry.r.from, ln: live.n});
+    const head = plannedStart(club, live) === null ? noStartWords(club, slug, live) : t('back-q-live', {n: dry.r.from, ln: live.n});
     return words === null ? head : `${head} ${words}`;
+}
+
+
+// What riders get from a version without a start time: nothing until the team has one; a special
+// team's plan stored by 0.3.0 without any never gets one (its time comes with a new plan).
+function noStartWords(club, slug, sheet) {
+    const team = club.teams[slug];
+    return team.kind === 'special' ? t('tp-live-words-no-start-plan', {label: sheet.label}) : t('tp-live-words-no-start', {team: team.name});
 }
 
 
@@ -567,9 +604,8 @@ export function backAsk(club, slug, {plan, n, version = null}, now) {
 // label: a newer version may carry another type.
 export function liveWords(club, slug, id, now) {
     const sheet = club.sheets[id];
-    const team = club.teams[slug];
     const {live: lv} = liveAndStart(club, slug, now);
-    const words = [team.start == null ? t('tp-live-words-no-start', {team: team.name})
+    const words = [plannedStart(club, sheet) === null ? noStartWords(club, slug, sheet)
         : lv === null || lv.id === id ? t('tp-live-words-none', {label: sheet.label, n: sheet.n})
             : t('tp-live-words', {label: sheet.label, n: sheet.n, live: lv.sheet.label, ln: lv.sheet.n})];
     const marks = outdated(club, slug, now).get(id) ?? [];

@@ -13,7 +13,7 @@ import {TOKEN_RE, tokenHash, newToken, randomId, cleanName, nameKey} from './ids
 import {ClubError, addLog, newClub} from './club.mjs';
 import {isZone} from './time.mjs';
 import {isAddress} from './mail.mjs';
-import {mailContent} from './mail-content.mjs';
+import {mailContent, operatorAddress} from './mail-content.mjs';
 import {clientIp, makeLimiter, makeSlots, SHEET_UPLOADS_MAX} from './limits.mjs';
 import {readBody, BODY_MS, send, html, sameOrigin, parseForm, parseCookies} from './http.mjs';
 import {esc, t, maskAddress, retentionText, monthsText} from './pages.mjs';
@@ -44,6 +44,10 @@ const NEW_CLUBS_PER_IP = [{ms: 24 * HOUR_MS, max: 3}];
 // retired_slugs is read at every start, so an add-and-delete loop must not grow it without bound.
 export const TEAM_DELETES_PER_DAY = 20;
 const TEAM_DELETES = [{ms: 24 * HOUR_MS, max: TEAM_DELETES_PER_DAY}];
+// Remove a rider per club a day (coordinator ruling, 19 Nov 2026): each costs a pass over the club's
+// recordings, a line on the erasure list and an operator mail.
+export const RIDER_REMOVALS_PER_DAY = 20;
+const RIDER_REMOVALS = [{ms: 24 * HOUR_MS, max: RIDER_REMOVALS_PER_DAY}];
 // Sheet uploads and their previews (the dry run) per club in 10 minutes (plan 3b, spec §5.4 "Calls
 // made while planning"): each parses the files, so both count, when they get their slot; then 429.
 export const SHEET_PARSES_PER_10_MIN = 60;
@@ -54,13 +58,13 @@ const ZONES = new Set(Intl.supportedValuesOf('timeZone'));
 
 
 // What the web routes keep while the server runs, in memory only: the per-address limits of the
-// public forms, the clubs each client address started, each club's team deletes and sheet parses
+// public forms, the clubs each client address started, each club's team deletes, rider removals and sheet parses
 // (uploads and previews, by club id), and the one-shot flashes of the captain pages (flash.mjs).
 // sweep(now) drops expired counters and flashes.
 export function makeWebState() {
     const limits = {
         register: makeLimiter(FORM_WINDOWS), lost: makeLimiter(FORM_WINDOWS), newClubs: makeLimiter(NEW_CLUBS_PER_IP),
-        teamDeletes: makeLimiter(TEAM_DELETES), sheetParses: makeLimiter(SHEET_PARSES),
+        teamDeletes: makeLimiter(TEAM_DELETES), sheetParses: makeLimiter(SHEET_PARSES), riderRemovals: makeLimiter(RIDER_REMOVALS),
     };
     // sheetUploads: the sheet uploads in flight, one per club and SHEET_UPLOADS_MAX in all (manage.mjs);
     // sheetBodyMs: the deadline for an upload's body (a test shortens it)
@@ -395,7 +399,8 @@ const noRoomPage = () => publicPage(card(t('home-heading'), sevLine('err', 'aler
 
 
 function openPage(club, tok) {
-    return publicPage(card(club.name, postForm(`/m/${tok}`, {}, t('link-open', {club: club.name}), {cls: 'btn primary block'})));
+    return publicPage(card(club.name, `${postForm(`/m/${tok}`, {}, t('link-open', {club: club.name}), {cls: 'btn primary block'})}
+    <p class="hint">${esc(t('link-keep', {club: club.name}))}</p>`));
 }
 
 
@@ -458,11 +463,14 @@ const registerClosedPage = () => publicPage(card(t('register-heading'), sevLine(
 const PRIVACY_ROWS = ['club', 'address', 'sheets', 'inbox', 'code', 'delivery', 'recordings', 'deleted', 'backups', 'limits'];
 
 // The heading and its intro on top, then a card per section.
+// Without an operator address for the notices of removals (or without mail) a full restore relies on
+// the operator's own records: the backup texts say so.
 function privacyPage({cfg, mailer}) {
     const months = monthsText(cfg.backupRetentionMonths);
+    const noMail = mailer === null || operatorAddress(cfg) === null ? '-nomail' : '';
     const kept = r => r === 'recordings'
         ? retentionText('privacy-recordings-kept', cfg.logRetentionDays)
-        : t(`privacy-${r}-kept`, {months});
+        : t(`privacy-${r}-kept${r === 'backups' ? noMail : ''}`, {months});
     const section = (key, body) => `<section class="card">\n<h2>${esc(t(`privacy-${key}-heading`))}</h2>\n${body}\n</section>\n`;
     const p = s => `<p>${esc(s)}</p>`;
     const rows = PRIVACY_ROWS.map(r => `<tr><td>${esc(t(`privacy-${r}-data`))}</td><td>${esc(t(`privacy-${r}-who`))}</td><td>${esc(kept(r))}</td></tr>`).join('\n');
@@ -480,7 +488,7 @@ function privacyPage({cfg, mailer}) {
         + section('mod', p(t('privacy-mod')))
         + section('lookup', p(t('privacy-lookup')))
         + section('where', p(cfg.privacyWhere ?? t('privacy-where-none')))
-        + section('retention', p(t('privacy-retention', {months})))
+        + section('retention', p(t(`privacy-retention${noMail}`, {months})))
         + section('cookie', p(t('privacy-cookie')))
         + section('rights', p(t('privacy-rights'))), {here: '/privacy', wide: true});
 }

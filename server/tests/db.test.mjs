@@ -46,7 +46,7 @@ try {
 `;
 
 
-test('openDb: the pragmas, schema 1, a write before it returns, no -shm', t => {
+test('openDb: the pragmas, schema 2, a write before it returns, no -shm', t => {
     const dir = tmpDir(t);
     const db = openDb(dir, {now: () => T('2026-11-19T12:00Z')});
     const one = sql => ({...db.sql.prepare(sql).get()});
@@ -55,7 +55,8 @@ test('openDb: the pragmas, schema 1, a write before it returns, no -shm', t => {
     assert.deepEqual(one('PRAGMA synchronous'), {synchronous: 2});
     assert.deepEqual(one('PRAGMA foreign_keys'), {foreign_keys: 1});
     assert.deepEqual(one('PRAGMA secure_delete'), {secure_delete: 1});
-    assert.deepEqual(one('PRAGMA user_version'), {user_version: 1});
+    // schema 2 (19 Nov 2026): recordings.mtime, for the erasure list's reconcile check
+    assert.deepEqual(one('PRAGMA user_version'), {user_version: 2});
     assert.deepEqual(db.sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(r => r.name),
         ['archive', 'clubs', 'meta', 'recording_sigs', 'recordings', 'retired_slugs', 'seen', 'settings', 'tombstone_clubs', 'trash']);
     // the indexes the queries use (the primary keys aside)

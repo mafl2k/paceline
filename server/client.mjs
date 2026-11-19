@@ -41,9 +41,10 @@ export function reloadDecision(answer) {
 
 
 // The assign page's fields whose change redraws the page (spec §6.10): the team, the plan, the live
-// box and the race date. Never the type or the event link: typing is never cut off. The date waits
-// (dateRedraw): typed digit by digit it changes at every digit.
-const REDRAW = new Set(['team', 'as', 'live', 'date']);
+// box, the race date and a special team's start time. Never the type or the event link: typing is
+// never cut off. The date and the time wait (dateRedraw, startRedraw): typed digit by digit they
+// change at every digit.
+const REDRAW = new Set(['team', 'as', 'live', 'date', 'start']);
 
 export function redrawOn(name) {
     return REDRAW.has(name);
@@ -60,6 +61,13 @@ export function dateRedraw(value, drawn) {
     }
     const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
     return d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+}
+
+
+// Does the start time redraw the page? Only a complete time 'HH:MM' (00:00-23:59) that differs from
+// the one the page was drawn with; asked as for the date.
+export function startRedraw(value, drawn) {
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(value ?? '') && value !== drawn;
 }
 
 
@@ -116,6 +124,7 @@ if (typeof document !== 'undefined') {
     confirms();
     copyButtons();
     assignRedraw();
+    rhythmChoice();
 }
 
 
@@ -271,11 +280,28 @@ function copyButtons() {
 }
 
 
-// ---- the assign page: a change of team, plan, live box or date redraws it ----
+// ---- the race rhythm (Add a team, team settings): the weekly fields only with weekly checked ----
+// Without the script they simply show (a special team ignores them).
+function rhythmChoice() {
+    for (const set of document.querySelectorAll('fieldset[data-rhythm]')) {
+        const weekly = set.querySelector('[data-weekly]');
+        if (!weekly) {
+            continue;
+        }
+        const sync = () => {
+            weekly.hidden = set.querySelector('input[name=kind][value=special]')?.checked === true;
+        };
+        set.addEventListener('change', sync);
+        sync();
+    }
+}
+
+
+// ---- the assign page: a change of team, plan, live box, date or start time redraws it ----
 // A GET of the page with the form's fields (the server draws the preview; no button), on `change`
-// only: typing in the type or the event link never redraws. The date redraws when it is left, or a
-// second after the last digit, once it is a complete date other than the drawn one (dateRedraw):
-// never in the middle of typing it. The type and the live box the captain touched go along in
+// only: typing in the type or the event link never redraws. The date and the start time redraw when
+// they are left, or a second after the last digit, once complete and other than the drawn value
+// (dateRedraw, startRedraw): never in the middle of typing them. The type and the live box the captain touched go along in
 // `touched`, also those touched before an earlier redraw or a refused Store (the server draws what it
 // received into the field; a redraw also has them in its query), so a redraw never resets them. Before it goes, the scroll position and the field to focus are kept in
 // sessionStorage for this page; the redrawn page scrolls back and focuses that field, opening the
@@ -307,7 +333,12 @@ function assignRedraw() {
             write();
         }
     };
-    const drawnDate = form.querySelector('input[name=date]')?.value ?? null;
+    // the fields that wait for a complete value: whether it redraws, against the drawn one
+    const waiting = {
+        date: {ok: dateRedraw, drawn: form.querySelector('input[name=date]')?.value ?? null},
+        start: {ok: startRedraw, drawn: form.querySelector('input[name=start]')?.value ?? null},
+    };
+    const waits = el => (el?.name === 'date' || el?.name === 'start') && el.type !== 'hidden';
     let timer = null;
     const go = focus => {
         clearTimeout(timer);
@@ -320,39 +351,41 @@ function assignRedraw() {
         }
         location.replace(to.href);
     };
-    const dateSoon = el => {
+    const due = el => waiting[el.name].ok(el.value, waiting[el.name].drawn);
+    const soon = el => {
         clearTimeout(timer);
-        if (dateRedraw(el.value, drawnDate)) {
-            timer = setTimeout(() => go('date'), DATE_WAIT_MS);
+        if (due(el)) {
+            timer = setTimeout(() => go(el.name), DATE_WAIT_MS);
         }
     };
     form.addEventListener('input', e => {
         touch(e);
-        if (e.target?.name === 'date') {
-            dateSoon(e.target);
+        if (waits(e.target)) {
+            soon(e.target);
         }
     });
     form.addEventListener('change', e => {
         touch(e);
         const name = e.target?.name;
-        if (name === 'date') {
-            dateSoon(e.target);
+        if (waits(e.target)) {
+            soon(e.target);
         } else if (redrawOn(name)) {
             go(name);
         }
     });
-    // leaving the date: at once, focusing where the captain went (a radio's own change follows)
+    // leaving the date or the time: at once, focusing where the captain went (a radio's own change
+    // follows)
     form.addEventListener('focusout', e => {
-        if (e.target?.name !== 'date') {
+        if (!waits(e.target)) {
             return;
         }
-        // to Store or Discard: the POST takes the date along (or the entry goes)
+        // to Store or Discard: the POST takes the field along (or the entry goes)
         if (e.relatedTarget instanceof Element && e.relatedTarget.matches('[type=submit]')) {
             clearTimeout(timer);
             return;
         }
-        if (dateRedraw(e.target.value, drawnDate)) {
-            go(e.relatedTarget?.name || 'date');
+        if (due(e.target)) {
+            go(e.relatedTarget?.name || e.target.name);
         }
     });
     // a Store or Discard while the date's second runs: no redraw after it

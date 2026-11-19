@@ -64,7 +64,7 @@ no-referrer` and a neutral title.
 | --- | --- |
 | `/` | without a club open: register, lost link, privacy. A browser whose cookie still opens a club goes straight to `/manage` (303; Several clubs, below) |
 | `/register` | club name, e-mail address, time zone and the required box "I will tell my riders that their Zwift IDs and names are in the plans". Answers "Check your inbox" whatever happens. A club that is not confirmed within 24 hours is deleted |
-| `/m/<token>` | the club link from the mail: a page with one button; the button starts a pending club or opens the club, puts the club first in the cookie `__Host-pl_club` (up to 5 clubs per browser; every time the server sets the cookie, all of them are kept for another 400 days) and goes to `/manage`. Opening a new link ends the older links |
+| `/m/<token>` | the club link from the mail (open it within 24 hours; from then on it is the club's link for good, until a new link from Lost link is opened: the mails, this page and the first-run page tell the captain to bookmark it): a page with one button; the button starts a pending club or opens the club, puts the club first in the cookie `__Host-pl_club` (up to 5 clubs per browser; every time the server sets the cookie, all of them are kept for another 400 days) and goes to `/manage`. Opening a new link ends the older links |
 | `/switch` | POST only, from the captain pages' footer: `club=<id>` of a club the cookie opens becomes the active one, then `/manage`; any other id changes nothing and goes back to `/` |
 | `/logout-all` | POST only, from the captain pages' footer: clears the club cookie |
 | `/lost` | the address gets a new link for each club it registered; the answer is always the same neutral text. The old link keeps working until the new one is opened |
@@ -124,13 +124,28 @@ and the team picker two.
 </p>
 
 - **Team picker** (`/manage`): the club, its next race, "Updated 19:12", one row per team in start
-  time order (never by status) and "Add a team". A special team with nothing in the next 14 days
+  time order (never by status; a special team by the start of its next race, and one without a
+  race after the weekly teams) and "Add a team". A special team with nothing in the next 14 days
   folds into "Other teams (n)" below the rest; weekly teams never fold. A club without teams gets
   three steps and the add-team form instead; that page never reloads.
 - **Team kinds.** A team is **weekly** (it races every week on the club's race day, Thursday unless
-  the club settings say otherwise, or on a day of its own) or **special** (it races on the dates of
-  its plans: a ZRL team, a yearly event). New teams are weekly; the team settings change it under
-  "Race rhythm". A new plan's default race date is the live plan's date while that race is still
+  the club settings say otherwise, or on a day of its own, always at the team's start time) or
+  **special** (a ZRL team, a yearly event: no fixed times at all, so the date and the start time
+  come with each upload). "Add a team" asks for the name and the race rhythm: "Every week on" a day
+  (the club's by default) with the start time, or "Special: date and start time come with each
+  plan"; a special team gets no start time of its own (a posted one is ignored). The team settings
+  change it under "Race rhythm"; a special team's settings have no start time card, only the line
+  "A special team gets its date and start time with each plan." A special team's start time
+  belongs to the race (team and date): every plan of that date starts at it, and the newest upload
+  for the date sets it (see the assign page). Switching keeps the stored start time, and the flash
+  says what it means for the plans: a team made weekly again races at the team's start time ("Its
+  plans now start at 19:30, the team's start time."); a team made special keeps its plans' times.
+  A special team's race stored before 0.3.1 has no start time of its own and races at the team's,
+  as it did. "No start time" (red) is for weekly teams without one, and for a special team's race
+  that has plans but no time at all (stored before 0.3.1, the team without one), live or not; its
+  callout leads to the upload of that race's plan, whose Store sets the time. A special team with
+  no plan stored has "No race planned" (neutral, no time line); with a plan stored but none live,
+  "No plan", as a weekly team. A line never shows a missing time: without one, the day alone. A new plan's default race date is the live plan's date while that race is still
   to come or running (until 2 h after its start); otherwise the kind sets it: a weekly team's next
   race day, a special team's newest plan still to race (or none, and the date is then asked for).
 - **Team page** (`/manage/team/<slug>`), the race-day view: one race line with the opening time
@@ -141,8 +156,8 @@ and the team picker two.
   live, "v3 · 16:40 is newer, not live" with "Make v3 live". The other rows show what is outdated
   ("Ben now rides Sprockets"), a short rider list and Make live. Under the plans: the live plan's
   riders (never the planner's roster, the club's rider pool), and "Upload a plan" as a plain link. Team settings is a quiet link at the
-  top right on a phone and beside the title from 1024 px, as Club settings is on the teams page; a team without a start time also gets "Set the
-  start time" in its red callout. Every Make live ("Make v3 live" and Back of the live plan too)
+  top right on a phone and beside the title from 1024 px, as Club settings is on the teams page; a weekly team without a start time also gets "Set the
+  start time" in its red callout (a special team's race without one: "Upload it with its start time"). Every Make live ("Make v3 live" and Back of the live plan too)
   asks first, in the page. Raced plans are not listed.
 - **Plan page** (`/manage/team/<slug>/plan/<id>`): the plan's head (its label, such as "Rollers ·
   slow", the race, LIVE or Make live, and "Make v3 live" for a newer version that is not live), its
@@ -227,27 +242,42 @@ dry run on a copy of the club:
 - in the "More" fold, the **race date** (a new plan's default: the live plan's date while still to
   race, else by the team's kind; a new version keeps its plan's date) and the optional **event
   link** (Zwift or ZwiftPower; only its id is read, nothing is fetched; a new version without one
-  keeps the plan's link);
+  keeps the plan's link). A special team's plan has its race date and **start time** at the top
+  instead, the time required and editable for a new plan and a new version alike (a version keeps
+  its plan's date): it is prefilled with the race's start time for that date, else the team's old
+  start time, else empty, and never carries over from another date. The newest upload for a date
+  sets the race's start, so a mistyped time is fixed by uploading again (a new version is enough);
+  every other plan of that date moves with it, and the preview and the result say so ("Race on Sun
+  29 Nov now starts at 21:15 (was 20:15); 'Cogs · slow' moves with it."). The plan page's head
+  line shows the race's time. A time that is over already is refused for a version too ("The race
+  on … is over"), and a Store whose time was drawn for another date (the date changed without a
+  redraw) moves no race that has a time of its own: the page is drawn again ("Check the choices:
+  the start time was for another date."). Weekly teams have no time field: their plans start at
+  the team's start time;
 - **what happens**: the outcome ("v3 of 'Rollers', live for Thu 19 Nov 19:30. Riders get it from
   19:00."), what changed against the version it follows, what a cap drops, the moves and holes
   ("Ben moves from Sprockets to Rollers.", "Still to do: Sprockets"), and the warnings: the team hint
   first ("This plan says Sprockets", "It looks like Sprockets (7 of 8 riders)"), a change made by
-  someone else since the page was drawn (`base`), no start time, no pull watts, the import
-  warnings;
+  someone else since the page was drawn (`base`), no start time, a special race's start time this
+  Store changes, no pull watts, the import warnings. While the date (or a special team's start
+  time) is still empty it says "Choose the race date and start time." in a neutral line: an error
+  shows only for a value that is there but wrong, or on Store;
 - the riders in order with pull time and target, folded (the planner's roster is not shown).
 
-With the script, a change of team, plan or the live box, and leaving the race date, redraw the page
-(a GET of itself with the form's fields: `team`, `as`, `live`, `type`, `date`, `event`, `drawn`,
-`touched`). A redraw for the same team and plan keeps what was chosen; after a team or plan change
+With the script, a change of team, plan or the live box, and leaving the race date or the start
+time (or a second after its last digit, once complete), redraw the page (a GET of itself with the
+form's fields: `team`, `as`, `live`, `type`, `date`, `start`, `startFor` (the date the time was
+drawn for), `event`, `drawn`, `touched`). A redraw for the same team and plan keeps what was chosen; after a team or plan change
 the box and the type go back to their defaults, except what the captain touched.
 
-**Store** (`POST /manage/inbox/<id>`: `team`, `as`, `live`, `type`, `date`, `event`, `base`,
+**Store** (`POST /manage/inbox/<id>`: `team`, `as`, `live`, `type`, `date`, `start`, `event`, `base`,
 `drawn`) stores the version and removes the entry, in one step, and answers the result page: "'Rollers
 · fast' v3 is live for Thu 19 Nov 19:30. Plan code RE5CFQ." or "Stored as v2 of 'Rollers · slow',
 not live. Riders keep 'Rollers · fast' v4.", what this changes, the warnings, the riders and "Wrong
 file?" with "Back to v2" (after a new version) or Delete (after a new plan). A plan whose content,
 type and event link equal its newest version stores nothing ("Same as v2: nothing new stored"); the
-live box still applies. A refusal (a race already over, an empty or taken type, a cap) answers 400
+live box still applies. A refusal (a race already over, a special team's plan without a date or start time, an empty or
+taken type, a cap) answers 400
 with the assign page and the reason on top, and the entry stays. Store pressed for a team or plan the
 preview was not drawn for stores nothing and draws the page again ("Check the choices"). A second
 Store of the same entry answers 400 "This plan is stored or no longer here." **Discard**
@@ -321,7 +351,9 @@ data (plans, the inbox, plan codes) are constants too.
 | mails per e-mail address | 3 per hour, 10 per day |
 | mails for new clubs | 50 per day in all, apart from the rest |
 | all other mail | `MAIL_MAX_PER_DAY` (200) |
+| the operator's notices of removals | 50 per day, apart from the rest, no per-address limit |
 | team deletes per club | 20 per day (429 beyond) |
+| Remove a rider per club | 20 per day (429 beyond; a repeat that finds nothing new is free) |
 | wrong logins on `/admin`, per client address | 10 per 15 minutes, then 429. Correct credentials always pass |
 | wrong rider codes, per public client address | 20 per hour, then 429 for checks that carry codes |
 | recordings | 4 new files per day per rider and team; one body at a time |
@@ -362,6 +394,8 @@ code 1) and never opens its port. Run one instance only.
 
 ```
 DATA_DIR/
+  erasures.jsonl            every Remove a rider (club, Zwift ID, time), applied again after a
+                            restore; never restored from a backup (see Recordings)
   paceline.db               all state but the recordings: the clubs (teams, plan versions, the
                             inbox); the trash (deleted clubs, 7 days, operator restore only); ids of
                             deleted clubs (30 days) and retired team slugs (forever); last checks of
@@ -402,7 +436,10 @@ moved. "Upgrading from 0.3" below has the details and what to do.
 Club files from before plan versions lose their stored plans when they are loaded: the teams stay,
 the start logs `club <cid>: <n> plans in the old format dropped (no plan versions); its teams stay`,
 and captains upload again. From the production switch on, every change to stored data comes with a
-migration.
+migration, or loads old data unchanged: a special team has an optional `raceStarts` (0.3.1),
+{'YYYY-MM-DD': 'HH:MM'}, the start of its race on each date, written by every Store of its plans
+and dropped for a date with no plan left; a date without one (plans stored by 0.3.0) starts at the
+team's start time, as before.
 
 ## Plan check
 
@@ -528,7 +565,11 @@ they are now. The mod's `inPlan` flag is not trusted. Other rows (a rider of a p
 not know, a watched outsider) are dropped, not refused (17 Nov 2026: a plan changed mid-race): the
 server stores the recording without them, with `watchingId` null where its row went, and logs once
 per stored file how many rows went (club and team, no IDs). The plan of the head line comes from the
-upload and is not checked against the stored plans.
+upload and is not checked against the stored plans, so a team-mate's mod that still has a plan with a
+removed rider in it would vouch for his rows: riders removed from the club after the ride began
+(Remove a rider, below) are therefore taken out of every upload by their Zwift ID, as Remove a rider
+takes them out of a stored recording. A removal that lands while a body is checked is applied to the
+checked file before it is stored.
 
 **What is stored is what was checked.** Every line that is not empty is written as `JSON.stringify`
 of what the check parsed (a key given twice keeps only the last, the one the check saw), one per
@@ -566,7 +607,7 @@ delete drop the deleted files' rows with their codes and then every archived ver
 lists. A team keeps at most 1 000 archived versions: beyond that the oldest one no recording uses
 goes first, then the oldest of all, with one warning line. Archived versions count against the
 club's recording quota. "Remove a rider" takes the rider out of the archived versions too, in the
-same transaction. If the archive cannot be written, the sweep leaves those versions in the club,
+same transaction (see Remove a rider below). If the archive cannot be written, the sweep leaves those versions in the club,
 logs once and tries again on its next run; a captain's Delete that the database refuses changes
 nothing. Only the operator reads the archive; captains never see archived versions.
 
@@ -575,6 +616,93 @@ the teams' rides. The club's captains see the list on `/manage/settings` and can
 (`POST /manage/logs/delete`, also how a rider's withdrawn consent reaches files already uploaded);
 there is no download route, and `GET /manage/logs/...` answers 404. `/privacy` says so, with the
 legal bases (6(1)(a) for the uploading rider's own data, 6(1)(f) for the other plan riders' rows).
+
+**Remove a rider** (`POST /manage/rider/remove`, the club settings; for data-protection requests)
+takes a Zwift ID out of the club: in one transaction out of every plan version and inbox entry, the
+archived versions (deleted teams' too) and the rider status lists; then out of the club's
+recordings, one file at a time. His own uploads (`<session>-<his id>.jsonl.gz`, in any team folder
+of the club, deleted teams' too) are deleted as a captain's Delete does (file, index row, plan codes,
+archived versions only they used). Every other recording is rewritten without him, matching his ID
+only as an exact value: every line loses his tick rows, his entries in the head's plan (riders and
+bench), every key that is his ID and every list element that is his ID; the ID fields whose whole
+value is his ID, as a number or a string (`id`, `athleteId`, `selfId`, `watchingId`, the `det` ids
+`puller`, `frontId`, `wheel`, `wheelObs`, `wheelCue`, `gap.id`, and `shown.wheel.planned`/`.live`,
+`shown.next.id`), become null, and so does `selfName` next to his `selfId`. Nothing else is touched:
+no text is searched for his ID inside it (a team "Rollers 2" stays when rider 2 goes), and a number
+under any other key and plan codes stay. No field the mod writes holds his ID or his plan name in any
+other way, so no line of a mod's recording holds them afterwards. The other riders' rows stay as
+they were. The new file is streamed (gunzip, filter, gzip) to
+`logs/.incoming/`, synced and renamed over the old one; the index row's size follows, its stored
+time (retention) and its plan codes stay; its mtime is kept in the row too. A recording without him
+is not written at all. A file that cannot be rewritten stays as it was and is logged (club and team,
+no ID); the flash says how many, and running Remove a rider again finishes the rest (it is
+idempotent). A recording whose index row is there but whose file is not (its team folder unavailable,
+a mount gone) counts as such a failure: the removal is not done until the folder is back. A file that cannot be
+read at all (no gzip, no recording) is counted apart: the flash says to delete it under Recordings,
+since no run can check it. The flash names what he was removed from (plans, archived versions,
+recordings), his own recordings deleted and what failed, only the parts that are not zero. The
+activity log entry names no one.
+
+A club removes at most 20 riders a day (429 beyond; each costs a pass over its recordings). A repeat
+for a rider whose newest entry on the erasure list (below) is still there, when nothing of his was
+stored since (no version, inbox entry, archived version or check lists him, no recording of the club
+began since), writes no new line and sends no mail: an entry applied in full means nothing to do at
+all ("removed already"); one that left failures runs again. The removed rider's own upload of a
+ride from before his removal is refused (403, as for a rider in no plan, which the mod does not send
+again by itself), also when the removal lands while its body comes in.
+
+**The erasure list.** Every Remove a rider is first appended to `DATA_DIR/erasures.jsonl` (synced
+before anything is removed), one line `{"cid":"…","aid":"<Zwift ID>","at":"<ISO time>"}` per removal.
+It is deliberately not in `paceline.db`: restoring an older database must not roll it back. Backups
+are encrypted and cannot be changed, so removed data stays in them until they expire, unused; the
+list is how a restore loses it again. `paceline.db` keeps which entries it has applied (meta
+`erasures_applied`, hashes of the lines, no Zwift ID). At start, before the port opens, the server
+applies every entry it has not: the plan versions and inbox entries, rider status and archived
+versions stored before the entry's `at`; then, in the background, the recordings of rides that began
+before it (his own deleted, the others rewritten). What was stored later stays (a rider removed and
+listed again rides on). An entry is marked once nothing of it failed; a failed part is logged (club,
+no ID) and tried again at the next start; an entry for a club in the trash waits until it is
+restored or purged (an operator restore from the trash applies them at once). Several entries of one
+club run as one pass over its recordings. The uploads leave out every rider removed after the ride
+began, by this list, and refuse his own. The reconcile (at start and in every 6-hourly sweep) checks
+each recording file it finds against the list before it counts: a file without an index row that a
+removal concerns (a ride that began before it) gets its row only once it is checked, and a file whose
+size or mtime is not its row's (a restore of `logs/` brings an older copy back with its old time) is
+checked before its row follows: his own deleted, the others rewritten without every rider removed
+after their ride began. A held file that cannot be read is logged once while the server runs and
+goes with retention by its session age like any other (captains cannot see it: it has no row).
+
+While the list cannot be read (its owner or mode) the server still starts but fails closed: it
+applies nothing, refuses Remove a rider ("The removal could not be recorded; nothing was changed")
+and /admin pastes, answers recording uploads 503 (`Retry-After: 300`; the mod tries again later),
+and the reconcile holds every file it would index or correct. One log line names the file and what to
+do, at start and at every sweep while it lasts. Every sweep reads the file again; once it can, the
+removals this database has not applied are applied and the held files checked. A removal refused
+because its line could not be written does not count toward the 20 a day.
+
+**Schema 2.** The recordings index has a column `mtime` (the file's mtime when its row was written)
+since this version; a database of schema 1 gets it at start, and the next reconcile fills it in for
+the rows from before. An image of schema 1 (0.3.0 up to this change) refuses a schema-2 database
+("paceline.db has schema 2; this server knows up to 1"): to go back to such an image, restore the
+last dump taken before the upgrade (see Database dumps).
+Entries older than `BACKUP_RETENTION_MONTHS` + 1 months are dropped at the 6-hourly sweep (the file
+rewritten atomically): by then no backup holds the data. A line that cannot be read is logged by its
+number and skipped.
+
+A full restore of the data folder rolls the list back too. So every Remove a rider also mails the
+operator, as soon as its line is written (before the removal itself): club name and id, the Zwift
+ID, the time and the entry's line, to keep. The address is `OPERATOR_EMAIL`, else the first e-mail
+address in `PRIVACY_CONTACT`; without either, or without mail set up, no mail is sent, and /privacy
+then says that after a full restore the operator applies the removals again from their own records.
+These mails have their own budget (50 a day) and no per-address limit; one that is refused is logged
+without the ID and never blocks the removal.
+After a full restore the operator pastes the lines of every such mail since the backup's date into
+`/admin` → **Removals to re-apply** (`POST /admin/erasures`): each new line goes onto the list and
+is applied as at start; the answer counts new, known and unreadable lines (a time more than 5
+minutes ahead counts as unreadable) and the new ones of clubs this server does not have (kept, for a
+later restore of those clubs). The form takes 64 KB (about 500 lines) at a time. Paste at once:
+until then the restored data holds those riders. See
+`server/DEPLOY-SWARM.md`, "Removals after a restore".
 
 ## Database dumps
 
@@ -621,9 +749,9 @@ stays in the dumps for up to 7 days and in the operator's backups for as long as
 Everything written to the database since that dump is lost: clubs, plans, links and settings
 changed since, last checks, and the plan codes of recordings uploaded since. The recordings
 themselves stay. **Clubs deleted since the dump come back**, active (a purged club without its
-recordings), and **riders removed since are back in the plans**: an owner's or a rider's request
-still stands, so delete those clubs again (note the trash before step 1) and ask the captains to do
-Remove a rider again for every rider they removed since. A club that was in the trash at the dump and
+recordings): an owner's request still stands, so delete those clubs again (note the trash before
+step 1). Riders removed since are taken out again by the server at start, from `erasures.jsonl`
+(keep the current one; never restore it from a backup; see Recordings, "The erasure list"). A club that was in the trash at the dump and
 restored since goes back into the trash, and the first sweep after its original 7 days there (at the
 start itself, if they are over) purges it with its recordings.
 
@@ -835,6 +963,7 @@ password.
 | `REGISTRATION` | `open` | `closed` closes the registration of new clubs |
 | `PACELINE_TZ` | `Europe/Berlin` | default time zone for new clubs; also the clock of the nightly dump |
 | `PRIVACY_CONTACT` | – | operator name and address for the privacy page, e.g. `Example Operator <privacy@example.org>`; also named in the mail to an old address after a change |
+| `OPERATOR_EMAIL` | the first address in `PRIVACY_CONTACT` | where the notice of every Remove a rider goes (an address); without both, no notice is sent |
 | `PRIVACY_WHERE` | – | where the data is processed: one line of plain text for the privacy page, at most 500 characters, no control characters; shown as written (escaped). Unset: the page says to ask the contact |
 | `ADMIN_USER`, `ADMIN_PASS` | the `UPLOAD_USER` / `UPLOAD_PASS` pair | operator login, set together; a password starting with `change-me` stops the start. Make the password long and random: the login throttle lets correct credentials through, so it cannot stop guessing |
 | `TRUSTED_PROXY_HOPS` | 1 | proxies in front of the server: the client address is the `X-Forwarded-For` entry this far from the end. If real client addresses do not arrive, per-address limits act globally (see Limits); the wrong-code limit never counts private addresses, so behind a proxy that hides the client it is off |
