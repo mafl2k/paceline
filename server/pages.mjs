@@ -16,7 +16,10 @@ const DELETE_KEPT = 'Versions used in a ride recording stay with it for analysis
 // key -> template; `{name}` placeholders are filled once by t().
 export const T = {
     'home-heading': 'Paceline',
-    'home-intro': 'The plan server for Paceline: clubs keep their team plans here, and every rider\'s Paceline gets the right one in the race.',
+    'home-title': 'Paceline plan server',
+    'home-intro': 'For {paceline}, the TTT mod for Sauce for Zwift. Plan your TTT with the {planner}, and every rider\'s Paceline gets the plan 30 minutes before the start.',
+    'home-paceline': 'Paceline',
+    'home-planner': 'ZwiftGopher TTT planner',
     'home-logout-all': 'Log out of all clubs',
     'home-register': 'Register a club',
     'home-lost': 'Lost link',

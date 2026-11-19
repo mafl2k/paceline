@@ -2203,3 +2203,17 @@ test('public pages: the app frame, not the plain one', async () => {
         await full.stop();
     }
 });
+
+
+test('start page: the intro names Paceline and the ZwiftGopher TTT planner, each a link', async () => {
+    const {startServer} = await import('./helpers.mjs');
+    const srv = await startServer();
+    try {
+        const body = await (await fetch(`${srv.base}/`)).text();
+        assert.match(body, /<h1>Paceline plan server<\/h1>/);
+        assert.ok(body.includes('<p class="prose">For <a href="https://github.com/mafl2k/paceline" rel="noopener noreferrer">Paceline</a>, the TTT mod for Sauce for Zwift.'), body);
+        assert.ok(body.includes('Plan your TTT with the <a href="https://zwiftgopher.com/TTT/" rel="noopener noreferrer">ZwiftGopher TTT planner</a>, and every rider&#39;s Paceline gets the plan 30 minutes before the start.'));
+    } finally {
+        await srv.stop();
+    }
+});

@@ -19,7 +19,7 @@ import {readBody, BODY_MS, send, html, sameOrigin, parseForm, parseCookies} from
 import {esc, t, maskAddress, retentionText, monthsText} from './pages.mjs';
 import {addLink, openLink, usableLink, addConfirm, addEmailToken, liveToken, takeToken} from './tokens.mjs';
 import {makeFlashes} from './flash.mjs';
-import {signedOutPage, publicPage, flashBlock, postForm, sevLine} from './ui.mjs';
+import {signedOutPage, publicPage, flashBlock, postForm, sevLine, th} from './ui.mjs';
 import {ic} from './icons.mjs';
 
 export const CLUB_COOKIE = '__Host-pl_club';
@@ -380,10 +380,17 @@ const card = (heading, inner) => `<section class="card">
 const lostButton = () => `<a class="btn primary block" href="/lost">${ic('mail')}${esc(t('lost-ask'))}</a>`;
 
 
+// Where the start page's intro links to: the mod's public repository and the planner the plans come from.
+const PACELINE_URL = 'https://github.com/mafl2k/paceline';
+const PLANNER_URL = 'https://zwiftgopher.com/TTT/';
+
+
 // The start page, for a browser without a club open (GET / sends one with a club to /manage):
 // Register a club and Lost link.
 function homePage() {
-    return publicPage(card(t('home-heading'), `<p>${esc(t('home-intro'))}</p>
+    const ext = (href, key) => `<a href="${href}" rel="noopener noreferrer">${esc(t(key))}</a>`;
+    const intro = th('home-intro', {paceline: ext(PACELINE_URL, 'home-paceline'), planner: ext(PLANNER_URL, 'home-planner')});
+    return publicPage(card(t('home-title'), `<p class="prose">${intro}</p>
     <div class="btnrow">
       <a class="btn primary block" href="/register">${ic('plus')}${esc(t('home-register'))}</a>
       <a class="btn secondary block" href="/lost">${ic('mail')}${esc(t('home-lost'))}</a>

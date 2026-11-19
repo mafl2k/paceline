@@ -349,7 +349,8 @@ const fit = `JSON.stringify((() => {
   const small = [];
   const vis = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
   for (const el of document.querySelectorAll('a,button,summary,input:not([type=hidden]),select,label.choice')) {
-    if (el.closest('.sr,.vh,.skip') || !vis(el)) continue;
+    // .prose: links inside a sentence of running text (WCAG 2.5.8 inline exception)
+    if (el.closest('.sr,.vh,.skip') || el.matches('.prose a') || !vis(el)) continue;
     const r = el.matches('input[type=radio],input[type=checkbox]') ? el.closest('label').getBoundingClientRect() : el.getBoundingClientRect();
     if (r.height < 43.5 || r.width < 43.5) small.push((el.textContent.trim() || el.name || el.tagName).slice(0, 28) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
   }

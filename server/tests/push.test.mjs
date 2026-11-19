@@ -265,7 +265,7 @@ test('push: refusals as for an upload (400), too large 413, wrong type 415, noth
 });
 
 
-test('push: 30 per team and hour, 60 per public address, 503 while both push slots are taken', async t => {
+test('push: 30 per team and hour, 60 failed tries per public address (valid pushes never count), 503 while both push slots are taken', async t => {
     const kf = makeClub();
     const srv = await serve(t, kf, {env: {...ENV, TRUSTED_PROXY_HOPS: '1'}});
     const rollers = tokenFor(secretOf(srv), 'rollers');
@@ -280,7 +280,16 @@ test('push: 30 per team and hour, 60 per public address, 503 while both push slo
     srv.clock.now = NOW + 3600 * 1000;
     assert.equal((await push(srv, rollers, plan(), {headers: from(98)})).status, 201, 'an hour later');
 
-    // per address: unknown tokens count too
+    // per address: valid pushes don't count (ZwiftGopher's server posts for every club)
+    srv.clock.now = NOW + 2 * 3600 * 1000;
+    const teams = ['rollers', 'sprockets'];
+    for (let i = 0; i < 60; i++) {
+        assert.equal((await push(srv, tokenFor(secretOf(srv), teams[i % 2]), '{', {headers: from(6)})).status, 400, `valid ${i + 1}`);
+    }
+    assert.equal((await push(srv, 'e'.repeat(40), plan(), {headers: from(6)})).status, 404, 'after 60 valid pushes the address is not limited');
+    // failed tries count: 60 unknown tokens, then even a valid one waits (a new hour: the loop above
+    // used up both teams' 30)
+    srv.clock.now = NOW + 3 * 3600 * 1000;
     for (let i = 0; i < 60; i++) {
         assert.equal((await push(srv, 'f'.repeat(40), plan(), {headers: from(7)})).status, 404);
     }

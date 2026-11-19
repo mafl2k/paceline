@@ -374,7 +374,7 @@ data (plans, the inbox, plan codes) are constants too.
 | plan uploads and assign-page draws | one upload body per club at a time, 8 on the server in all (503, `Retry-After: 5`); uploads and draws together 60 per club per 10 minutes (429, `Retry-After: 600`) |
 | plans | 8 per team (a full team drops its oldest raced plan, else the upload is refused), 5 per race, 20 versions per plan: the oldest version that is not live goes, and the assign page says so first |
 | inbox | 20 entries and 640 KB per club, one entry at most 320 KB; an upload drops the oldest, a push is refused (409); an upload goes after 24 hours, a received plan after 7 days |
-| ZwiftGopher push | 30 per team per hour (429, `Retry-After: 3600`); 60 per public client address per hour, unknown tokens included; one body per club and 2 on the server at a time, apart from the uploads (503, `Retry-After: 5`); the body at most 256 KB (413) within 10 seconds (408) |
+| ZwiftGopher push | 30 per team per hour (429, `Retry-After: 3600`); 60 failed tries (unknown or expired tokens) per public client address per hour, valid pushes not counted; one body per club and 2 on the server at a time, apart from the uploads (503, `Retry-After: 5`); the body at most 256 KB (413) within 10 seconds (408) |
 | plan codes per recording | 10; the rest are ignored |
 | recordings | 5 000 per club |
 | archived plan versions | 1 000 per team (the oldest no recording uses goes first, then the oldest) |
@@ -569,8 +569,8 @@ only: `POST, OPTIONS`, headers `Content-Type, X-Paceline-Token`, no credentials,
 Another origin gets no allow headers, and the answers carry `Access-Control-Allow-Origin` only for
 those two origins. Posting needs no origin: the token is the permission.
 
-**Limits.** 30 pushes per team per hour; 60 per public client address per hour (counted before the
-token is checked); one body per club and 2 on the server at a time, in slots of their own (a push
+**Limits.** 30 pushes per team per hour; 60 failed tries (unknown or expired tokens) per public client
+address per hour, checked before the token, valid pushes not counted; one body per club and 2 on the server at a time, in slots of their own (a push
 never takes a captain's upload slot); 256 KB per body, within 10 seconds; the inbox caps (20
 entries, 640 KB; a full inbox refuses the push instead of dropping a waiting plan). A token whose
 expiry lies more than 7 days and 5 minutes ahead was never handed out by this server and counts as
@@ -617,10 +617,10 @@ The contract, to forward as it is:
 >   discards some first.
 > - `413 {"error": "too-large"}`, `408 {"error": "too-slow"}`, `415 {"error": "content-type"}`,
 >   `405` for any method but POST.
-> - `429 {"error": "rate-limit"}` (`Retry-After` in seconds): 30 plans per team per hour, and 60
->   pushes per hour from one network address, counted before the token is checked (so if
->   ZwiftGopher posts from its own server rather than the captain's browser, all pushes share those
->   60). `503 {"error": "busy"}`: try again after `Retry-After`, 5 seconds.
+> - `429 {"error": "rate-limit"}` (`Retry-After` in seconds): 30 plans per team per hour. Per network
+>   address only failed tries count (unknown or expired tokens): after 60 of them in an hour that
+>   address waits. Valid pushes never count, so ZwiftGopher's own server can post for every club.
+>   `503 {"error": "busy"}`: try again after `Retry-After`, 5 seconds.
 > - The body must arrive within 10 seconds. Every answer carries the CORS headers for the two
 >   origins above, errors (and a `500 {"error": "internal"}`) included.
 >

@@ -23,7 +23,9 @@ export const PUSH_TTL_S = 7 * 24 * 3600;
 export const PLANNER_URL = 'https://zwiftgopher.com/TTT/';
 // Origins whose pages may read the answers (CORS); anyone with a token may post.
 export const PUSH_ORIGINS = ['https://zwiftgopher.com', 'https://www.zwiftgopher.com'];
-// Plans received per team (user, 19 Nov 2026), and pushes of any kind per public client address.
+// Plans received per team (user, 19 Nov 2026). Per public client address only the failed tries count
+// (an unknown, forged or expired token): a flood of made-up tokens is stopped before any HMAC, while
+// valid pushes from one server (ZwiftGopher's) share no budget (user, 19 Nov 2026).
 export const PUSH_PER_TEAM = [{ms: HOUR_MS, max: 30}];
 export const PUSH_PER_IP = [{ms: HOUR_MS, max: 60}];
 const BUSY_RETRY_S = 5;
@@ -129,7 +131,7 @@ export function pushPreflight(req, res) {
 
 // POST /api/v3/push?paceline=<token> (or the header X-Paceline-Token; the query wins): the planner's
 // JSON export, checked as an upload (manage.mjs checkTexts, club.mjs checkPlan), becomes an inbox
-// entry of the token's team. In this order: 405, 429 per address, 404 unknown-token, 410 expired,
+// entry of the token's team. In this order: 405, 429 per address (failed tries), 404 unknown-token, 410 expired,
 // 415, 429 per team, 503 busy (the push slots), 413/408 the body, 400 the checks, 409 inbox-full,
 // 201; a team or club gone while the body came in is 404 unknown-token, and nothing is stored.
 // Every answer, a 500 too, carries the CORS headers for an allowed origin. ctx: {store, cfg, now, push}.
@@ -160,18 +162,23 @@ async function push(req, res, {store, cfg, now, push: state}, query, method, ans
         return;
     }
     const ip = clientIp(req, cfg.trustedProxyHops);
-    if (isPublicIp(ip) && !state.perIp.allow(ip, now)) {
+    const counted = isPublicIp(ip);
+    // only failed tries count per address; at the limit the token is not even looked at
+    if (counted && PUSH_PER_IP.some(w => state.perIp.count(ip, now, w.ms) >= w.max)) {
         answer(429, {error: 'rate-limit'}, {'Retry-After': '3600'});
         return;
     }
+    const failed = () => counted && state.perIp.add(ip, now);
     const header = req.headers['x-paceline-token'];
     const token = query.get('paceline') ?? (typeof header === 'string' ? header : null);
     const found = state.find(token, now);
     if (found === null) {
+        failed();
         answer(404, {error: 'unknown-token'});
         return;
     }
     if (found.expired) {
+        failed();
         answer(410, {error: 'expired'});
         return;
     }
