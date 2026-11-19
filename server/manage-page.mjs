@@ -139,9 +139,13 @@ export function postedClub(req, res, ctx, cid, posted) {
 }
 
 
-// What was done, as a one-shot flash on the page of `place`: 303 there (POST -> 303 -> GET).
-export function done(res, ctx, cid, place, text, kind = 'ok') {
-    redirectWithFlash(res, ctx, cid, placePath(place), {kind, text});
+// What was done, as a one-shot flash on the page of `place`: 303 there (POST -> 303 -> GET). `extra`
+// goes into the flash. A change of the live plan passes {row, undo} (user, 19 Nov 2026: Undo where
+// the action was): `row` the id of the plan live now, whose row (team page) or head (plan page)
+// shows the flash in place of the top flash, with Undo when `undo`; the 303 lands on that row
+// (#plan-<row>).
+export function done(res, ctx, cid, place, text, kind = 'ok', extra = {}) {
+    redirectWithFlash(res, ctx, cid, placePath(place), {kind, text, ...extra}, {hash: typeof extra.row === 'string' ? `plan-${extra.row}` : null});
 }
 
 

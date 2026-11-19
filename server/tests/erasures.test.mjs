@@ -253,7 +253,7 @@ async function clubServer(t, {env = {}, mailer = fakeMailer()} = {}) {
 test('Remove a rider: the entry is on the list, marked applied, and the operator gets its line by mail', async t => {
     const {srv, cookie, mailer, clock} = await clubServer(t, {env: {...MAIL_ENV, PRIVACY_CONTACT: 'Paceline beta, privacy@example.org.'}});
     const at = new Date(MANAGE_NOW).toISOString();
-    const res = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    const res = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     assert.equal(res.flash.kind, 'ok');
     const line = `{"cid":"${CID}","aid":"1002","at":"${at}"}`;
     assert.equal(fs.readFileSync(path.join(srv.dataDir, ERASURES_FILE), 'utf8'), line + '\n');
@@ -269,7 +269,7 @@ test('Remove a rider: the entry is on the list, marked applied, and the operator
     // every Remove a rider is an entry and a mail of its own
     const second = new Date(MANAGE_NOW + 60000).toISOString();
     clock.now = MANAGE_NOW + 60000;
-    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1003'})).flash.kind, 'ok');
+    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1003', confirm: '1'})).flash.kind, 'ok');
     assert.deepEqual(fs.readFileSync(path.join(srv.dataDir, ERASURES_FILE), 'utf8').split('\n').filter(Boolean),
         [line, `{"cid":"${CID}","aid":"1003","at":"${second}"}`]);
     assert.equal(mailer.sent.length, 2);
@@ -279,7 +279,7 @@ test('Remove a rider: the entry is on the list, marked applied, and the operator
 test('Remove a rider: no operator mail without an address in PRIVACY_CONTACT or without mail; a refused mail changes nothing', async t => {
     for (const env of [{...MAIL_ENV}, {...MAIL_ENV, PRIVACY_CONTACT: 'the operator of this server'}]) {
         const {srv, cookie, mailer} = await clubServer(t, {env});
-        assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'})).flash.kind, 'ok');
+        assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).flash.kind, 'ok');
         assert.deepEqual(mailer.sent, [], JSON.stringify(env));
         assert.ok(fs.readFileSync(path.join(srv.dataDir, ERASURES_FILE), 'utf8').includes('"aid":"1002"'));
     }
@@ -290,12 +290,12 @@ test('Remove a rider: no operator mail without an address in PRIVACY_CONTACT or 
     upload(c.club, 'rollers', {riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     off.store.create(c.club);
     assert.equal(off.server.mailer, null);
-    assert.deepEqual((await followPost(off, c.cookie, '/manage/rider/remove', {zwiftId: '1002'})).flash, {kind: 'ok', text: 'Removed from 1 plan.'});
+    assert.deepEqual((await followPost(off, c.cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).flash, {kind: 'ok', text: 'Removed from 1 plan.'});
     // the queue refuses (over its budget): logged without the ID, the removal stands
     const {srv, cookie} = await clubServer(t, {env: {...MAIL_ENV, PRIVACY_CONTACT: 'privacy@example.org'}, mailer: fakeMailer({refuse: true})});
     let res;
     const warned = await capture('warn', async () => {
-        res = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+        res = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     });
     assert.deepEqual(res.flash, {kind: 'ok', text: 'Removed from 1 plan.'});
     assert.deepEqual(warned, [`paceline-server: club ${CID}: the operator mail of a removal was not sent`]);
@@ -445,7 +445,7 @@ test('the removed rider\'s own upload: refused while its body comes in during th
         assert.ok(i < 400, 'the upload never got in flight');
         await new Promise(r => setTimeout(r, 5));
     }
-    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'})).flash.kind, 'ok');
+    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).flash.kind, 'ok');
     finish();
     assert.deepEqual(await answer, [403, '{"error":"not in this team"}']);
     const team = path.join(srv.dataDir, 'logs', CID, 'rollers');
@@ -465,7 +465,7 @@ test('Remove a rider: 20 a day per club, then 429; a repeat with nothing stored 
     const mailer = fakeMailer();
     const {srv, cookie, clock} = await clubServer(t, {env: {...MAIL_ENV, OPERATOR_EMAIL: 'operator@example.org'}, mailer});
     const file = () => fs.readFileSync(path.join(srv.dataDir, ERASURES_FILE), 'utf8').split('\n').filter(Boolean);
-    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'})).flash.kind, 'ok');
+    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).flash.kind, 'ok');
     const passes = [];
     const eraseRider = srv.server.logs.eraseRider;
     srv.server.logs.eraseRider = (...x) => {
@@ -475,21 +475,21 @@ test('Remove a rider: 20 a day per club, then 429; a repeat with nothing stored 
     t.after(() => {
         srv.server.logs.eraseRider = eraseRider;
     });
-    const repeat = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    const repeat = await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     assert.deepEqual(repeat.flash, {kind: 'ok', text: 'This rider was removed already, and nothing of theirs was stored since.'});
     assert.deepEqual([file().length, mailer.sent.length, passes.length], [1, 1, 0]);
     // the limit: 19 more removals of other IDs pass, the 21st is refused and changes nothing
     for (let i = 0; i < 19; i++) {
-        assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: String(5000 + i)})).flash.kind, 'ok', String(i));
+        assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: String(5000 + i), confirm: '1'})).flash.kind, 'ok', String(i));
     }
-    const refused = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1003'});
+    const refused = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1003', confirm: '1'});
     assert.equal(refused.status, 429);
     assert.deepEqual(flashOf(refused.body), {kind: 'err', text: 'Too many riders removed today. Try again tomorrow.'});
     assert.equal(file().length, 20);
     assert.ok(Object.values(srv.store.get(CID).sheets).some(x => Object.hasOwn(x.json.riders, '1003')));
     // and the next day again
     clock.now += DAY;
-    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1003'})).flash.kind, 'ok');
+    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1003', confirm: '1'})).flash.kind, 'ok');
 });
 
 
@@ -608,7 +608,7 @@ test('OPERATOR_EMAIL: the operator mail goes there before PRIVACY_CONTACT; witho
     assert.equal(operatorAddress(readConfig({DATA_DIR: '/tmp/x', PRIVACY_CONTACT: 'the operator'})), null);
     const mailer = fakeMailer();
     const {srv, cookie} = await clubServer(t, {env: {...MAIL_ENV, OPERATOR_EMAIL: 'op@example.org', PRIVACY_CONTACT: 'P, privacy@example.org'}, mailer});
-    await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+    await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     assert.deepEqual(mailer.sent.map(m => m.to), ['op@example.org']);
     const page = async s => (await (await fetch(`${s.base}/privacy`)).text()).replace(/&#39;/g, '\'');
     const withMail = await page(srv);
@@ -631,7 +631,7 @@ test('Remove a rider: the operator mail goes when the entry is written, also whe
     console.error = () => {};
     let res;
     try {
-        res = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+        res = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     } finally {
         console.error = error;
         undo();
@@ -651,7 +651,7 @@ test('Remove a rider: an unwritable erasures.jsonl changes nothing and says so; 
     };
     let res;
     const errors = await capture('error', async () => {
-        res = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'});
+        res = await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'});
     });
     list.append = append;
     assert.equal(res.status, 503);
@@ -858,9 +858,9 @@ test('Remove a rider: removals refused for an unwritable list do not count towar
     };
     await capture('error', async () => {
         for (let i = 0; i < 25; i++) {
-            assert.equal((await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'})).status, 503);
+            assert.equal((await post(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).status, 503);
         }
     });
     list.append = append;
-    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002'})).flash.kind, 'ok');
+    assert.equal((await followPost(srv, cookie, '/manage/rider/remove', {zwiftId: '1002', confirm: '1'})).flash.kind, 'ok');
 });

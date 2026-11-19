@@ -546,12 +546,17 @@ export function uploadSheet(club, input, {now, newId}) {
         if (JSON.stringify(newest.json) === JSON.stringify(json) && JSON.stringify(newest.text ?? null) === JSON.stringify(text)
             && (newest.type ?? null) === type && (pinnedEventId === null || pinnedEventId === newest.pinnedEventId)) {
             setStart();
+            const prevLive = team.live;
             if (live === true && team.live !== nid) {
                 team.live = nid;
                 changed(club, slug, team, now, 'live', newest.label);
             }
             if (newStart) {
                 changed(club, slug, team, now, 'race-start', `${raceDay(club, date)} ${start}`);
+            }
+            if (team.live !== prevLive) {
+                // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
+                rememberLive(club, team, prevLive, true, now);
             }
             return {
                 id: nid, planId: target.id, n: newest.n, prev: previousVersion(club, nid)?.[0] ?? null,
@@ -599,6 +604,7 @@ export function uploadSheet(club, input, {now, newId}) {
         plan: planId, n, at: iso(now), copyOf: null, jsonName: nameKey(input.json?.team?.name), type, recSig: plan.sig,
         ...(zgShare === null ? {} : {zgShare}),
     };
+    const prevLive = team.live;
     if (live === true) {
         team.live = id;
     } else if (dropIds.includes(team.live)) {
@@ -607,6 +613,10 @@ export function uploadSheet(club, input, {now, newId}) {
     rememberType(team, type);
     pruneRaceStarts(club, slug);
     changed(club, slug, team, now, 'upload', `${label} v${n}`);
+    if (live === true && prevLive !== id) {
+        // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
+        rememberLive(club, team, prevLive, true, now);
+    }
     return {
         id, planId, n, prev: target === null ? null : target.newest[0], live: team.live === id,
         created: target === null, same: false, dropped, changedAt, plan, startMoved,
@@ -614,11 +624,35 @@ export function uploadSheet(club, input, {now, newId}) {
 }
 
 
-// Make live keeps upload times.
-export function makeLive(club, slug, id, now) {
-    const {team, sheet} = sheetOf(club, slug, id);
+// Make live keeps upload times. `version` is the team's version the page was drawn with: another
+// one is refused (`changed`), so a page drawn before another captain's change cannot replace a newer
+// live plan (UI panel, 19 Nov 2026); null (a page from before the check) skips it. With `undo` (the
+// default) the team keeps what Undo needs (rememberLive); the Undo itself passes false.
+export function makeLive(club, slug, id, now, {version = null, undo = true} = {}) {
+    const team = teamOf(club, slug);
+    if (version !== null && Number(version) !== team.version) {
+        throw new ClubError('changed');
+    }
+    const {sheet} = sheetOf(club, slug, id);
+    const prev = team.live;
     team.live = id;
     changed(club, slug, team, now, 'live', sheet.label);
+    rememberLive(club, team, prev, undo, now);
+}
+
+
+// What Undo of a change of the live plan needs (UI panel wave 2, team-view.mjs undoOffer), kept on
+// the team after the change bumped its version: team.liveBefore = {id, version, at}, the version
+// that was live before and the team's version right after the change. Any later change of the team
+// bumps its version, so Undo is offered only while nothing changed since. Nothing (and an older
+// record goes) when there was no live version before, it is gone, or `undo` is false. Additive: a
+// club stored without it loads unchanged.
+function rememberLive(club, team, prev, undo, now) {
+    if (undo && typeof prev === 'string' && prev !== team.live && Object.hasOwn(club.sheets, prev)) {
+        team.liveBefore = {id: prev, version: team.version, at: iso(now)};
+    } else {
+        delete team.liveBefore;
+    }
 }
 
 
@@ -630,9 +664,13 @@ function planVersions(club, slug, id) {
 
 
 // Deletes the whole plan of version `id`, every version of it, for good (spec §8: no Undo; the
-// confirm says so). The log names the plan's label.
-export function deleteSheet(club, slug, id, now) {
+// confirm says so). The log names the plan's label. `version` as for makeLive (S7: a page drawn
+// before a newer upload cannot delete it unseen); null skips the check.
+export function deleteSheet(club, slug, id, now, {version = null} = {}) {
     const team = teamOf(club, slug);
+    if (version !== null && Number(version) !== team.version) {
+        throw new ClubError('changed');
+    }
     const p = planVersions(club, slug, id);
     for (const [vid] of p.versions) {
         delete club.sheets[vid];
@@ -657,8 +695,8 @@ export function unpin(club, slug, id, now) {
 }
 
 
-// Back to vN (plan versions §8): a new version of plan `plan` (any of its ids) with version `n`'s
-// JSON, text and sig, `via: 'back'`, `copyOf: n`, `at` now and vN's upload time (O4). The type stays
+// Restore vN ("Back to vN" in plan versions §8): a new version of plan `plan` (any of its ids)
+// with version `n`'s JSON, text and sig, `via: 'back'`, `copyOf: n`, `at` now and vN's upload time (O4). The type stays
 // the plan's current one; the event fields come from the plan's live version, else its newest, as an
 // upload without a link takes them; the race keeps its start time. It goes live at once when the
 // plan is live, and counts against MAX_VERSIONS. `version` is the team's version
@@ -701,11 +739,13 @@ export function backTo(club, slug, {plan, n, version}, {now, newId}) {
         plan: p.id, n: k, at: iso(now), copyOf: from, jsonName: old.jsonName ?? null, type, recSig: old.sig,
         ...(isShare(old.zgShare) ? {zgShare: old.zgShare} : {}),
     };
+    const prev = team.live;
     if (p.live !== null) {
         team.live = id;
     }
     rememberType(team, type);
     changed(club, slug, team, now, 'back', `${label} v${from} → v${k}`);
+    rememberLive(club, team, prev, p.live !== null, now);
     return {id, planId: p.id, n: k, from, live: team.live === id, dropped};
 }
 
@@ -866,7 +906,9 @@ export function sweepClub(club, now) {
 
 // ---- the inbox (plan versions spec §4.1, §5) ----
 // A plan that came in and waits on the assign page: {id, at, source, team, forPlan, via, json, text,
-// warnings, warningsMore}, `json` and `text` as checkPlan stripped them. Not part of any team's state: no version
+// warnings, warningsMore}, `json` and `text` as checkPlan stripped them; `fromPlan: true` when the
+// upload came from that plan's page (its New version), so the assign page, Discard and the result go
+// back there (absent on entries from before, and on every other). Not part of any team's state: no version
 // bump, no log (but discard), and an entry nobody stores goes after keepOf (24 h, a received one 7 days).
 
 // the share value counts too (up to 16 KB)
@@ -894,11 +936,12 @@ const SOURCES = ['upload', 'import', 'receive'];
 
 // Adds an entry and returns its id. `source` must be one of SOURCES (else an Error: a caller's bug).
 // `team` is kept only when it is a team of the club, `via` only when it is one of VIAS, `forPlan`
-// only when it names a plan of `team`; else each is null. An entry that alone is over ENTRY_BYTES is
+// only when it names a plan of `team`; else each is null. `fromPlan` true is kept only with a kept
+// `forPlan`. An entry that alone is over ENTRY_BYTES is
 // refused (cap-bytes; a checked plan is at most MAX_SHEET_BYTES plus its warnings, far below).
 // Then the oldest entries go until at most INBOX_MAX are left and they fit INBOX_BYTES (the new one
 // stays).
-export function addEntry(club, {source, team = null, forPlan = null, via = null, json, text, warnings = [], zgShare = null}, {now, newId}) {
+export function addEntry(club, {source, team = null, forPlan = null, fromPlan = false, via = null, json, text, warnings = [], zgShare = null}, {now, newId}) {
     if (!SOURCES.includes(source)) {
         throw new Error(`unknown entry source ${source}`);
     }
@@ -923,7 +966,7 @@ export function addEntry(club, {source, team = null, forPlan = null, via = null,
         throw new Error('no free entry id');
     }
     const plan = slug !== null && typeof forPlan === 'string' ? planOfId(club, slug, forPlan) : null;
-    club.inbox.push({...entry, id, forPlan: plan === null ? null : forPlan});
+    club.inbox.push({...entry, id, forPlan: plan === null ? null : forPlan, ...(plan !== null && fromPlan === true ? {fromPlan: true} : {})});
     let bytes = club.inbox.reduce((n, e) => n + entryBytes(e), 0);
     while (club.inbox.length > 1 && (club.inbox.length > INBOX_MAX || bytes > INBOX_BYTES)) {
         bytes -= entryBytes(club.inbox.shift());

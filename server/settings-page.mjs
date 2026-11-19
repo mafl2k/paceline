@@ -3,14 +3,15 @@
 // sign-in (the masked address with Change e-mail, a new club link), Remove a rider; then the
 // "Records" band: the recordings per rider file with the quota, grouped by team and the session's
 // local day, the activity (the newest entries, the rest folded), and Delete club. The page never
-// reloads itself. A new rider code asks first in the page only (decision 13). Also the rider code
-// page, the answer of /manage/code that shows the code once. Pure: it
+// reloads itself. A new rider code, Make private, Remove a rider and (with a race within 7 days)
+// another zone ask first in their place (UI panel wave 2), and the server asks without the script.
+// Also the rider code page, the answer of /manage/code that shows the code once. Pure: it
 // reads the club and the recordings it is given, and the clock is passed in. Every value goes
 // through esc().
 import {esc, t, maskAddress, retentionText} from './pages.mjs';
-import {captainPage, th, flashBlock, hidden, postForm, sevLine, backBar, footer} from './ui.mjs';
+import {captainPage, th, flashBlock, hidden, postForm, armForm, sevLine, placeNav, footer} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {atLabel, nameOf} from './team-view.mjs';
+import {atLabel, nameOf, raceWithin} from './team-view.mjs';
 import {isPrivate} from './club.mjs';
 import {teamWeekday} from './select.mjs';
 import {formatRiderCode} from './ids.mjs';
@@ -31,19 +32,26 @@ const LOG_WORDS = new Set([
 const SETTINGS_PATH = '/manage/settings';
 
 
-function clubCard(club, cfg, typed) {
+// The club's name, zone and weekday. Another zone while a race of the club is within 7 days asks
+// first in its place (S11; the server asks too).
+function clubCard(club, cfg, typed, now) {
     const day = teamWeekday(club, null);
     const days = [1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}"${n === day ? ' selected' : ''}>${esc(t(`weekday-${n}`))}</option>`);
-    return `<section class="card" aria-labelledby="club-h">
-    <h2 id="club-h">${esc(t('manage-club-heading'))}</h2>
-    <form class="stack" method="post" action="/manage/club">
+    const fields = `
       <label class="field">${esc(t('name-label'))}<input name="name" value="${esc(typed?.name ?? club.name)}" maxlength="60" required autocomplete="off"></label>
       <label class="field">${esc(t('register-tz-label'))} <span class="hint">${esc(t('cs-tz-hint'))}</span>
         ${zoneSelect(cfg, club.tz, club.tz)}</label>
       <label class="field">${esc(t('cs-weekday'))}
         <select name="weekday">${days.join('')}</select></label>
-      <button class="btn secondary" type="submit">${esc(t('manage-club-save'))}</button>
-    </form>
+      `;
+    const form = raceWithin(club, null, now)
+        ? armForm('/manage/club', {}, {key: 'tz', body: fields, button: t('manage-club-save'), cls: 'btn primary', formCls: 'stack',
+            when: {when: 'changed', field: 'tz'}, words: t('cs-tz-confirm', {club: club.name}), yes: t('cs-tz-yes')})
+        : `<form class="stack" method="post" action="/manage/club">${fields}<button class="btn primary" type="submit">${esc(t('manage-club-save'))}</button>
+    </form>`;
+    return `<section class="card" aria-labelledby="club-h">
+    <h2 id="club-h">${esc(t('manage-club-heading'))}</h2>
+    ${form}
   </section>`;
 }
 
@@ -65,15 +73,14 @@ function whoCard(club, cfg, now) {
             out.push(`<p class="hint">${esc(t('cs-code-made', {at: atLabel(at, now, club.tz)}))}</p>`);
         }
         out.push(`<div class="btnrow">
-      <details class="confirm">
-        <summary class="btn secondary">${esc(t('cs-new-code'))}</summary>
-        <div class="confirm-body"><p>${esc(t('code-confirm'))}</p>
-        ${postForm('/manage/code', {action: 'new', confirm: '1', setAt: club.riderCode.setAt}, t('private-new'), {cls: 'btn secondary'})}</div>
-      </details>
+      ${armForm('/manage/code', {action: 'new', setAt: club.riderCode.setAt}, {key: 'code-new', button: t('cs-new-code'), cls: 'btn secondary danger-text',
+        words: t('code-confirm'), yes: t('private-new'), yesCls: 'btn danger'})}
       ${off}
     </div>`);
     } else {
-        out.push(postForm('/manage/code', {action: 'on'}, t('private-on'), {cls: 'btn secondary', icon: 'lock'}));
+        // S2: as New rider code, it asks first, with the race-day warning
+        out.push(armForm('/manage/code', {action: 'on'}, {key: 'code-on', button: t('private-on'), cls: 'btn secondary danger-text', icon: 'lock',
+            words: t('private-on-confirm', {club: club.name}), yes: t('private-on-yes'), yesCls: 'btn danger'}));
     }
     return `<section class="card" aria-labelledby="who-h">
     <h2 id="who-h">${esc(t('cs-who'))}</h2>
@@ -89,7 +96,7 @@ function signInCard(club) {
     <p class="value">${ic('mail')}<span>${th('cs-email', {masked})}</span></p>
     <form class="inline-form" method="post" action="/manage/email">
       <label class="field">${esc(t('manage-email-label'))}<input type="email" name="email" maxlength="254" required autocomplete="email" placeholder="name@example.org"></label>
-      <button class="btn secondary" type="submit">${esc(t('manage-email-button'))}</button>
+      <button class="btn primary" type="submit">${esc(t('manage-email-button'))}</button>
     </form>
     <p class="hint">${esc(t('cs-email-hint'))}</p>
     ${postForm('/manage/newlink', {}, t('manage-newlink'), {cls: 'btn secondary block', icon: 'link'})}
@@ -98,13 +105,17 @@ function signInCard(club) {
 }
 
 
-function riderCard() {
+// Remove a rider (GDPR): asks first in its place, naming the Zwift ID typed (the script fills it in;
+// S13), and the server's confirm page names the rider it found.
+function riderCard(club) {
+    const field = `
+      <label class="field">${esc(t('rider-label'))}<input type="text" name="zwiftId" inputmode="numeric" pattern="[0-9]{1,12}" maxlength="12" required autocomplete="off"></label>
+      `;
+    const who = th('rider-who-id', {id: '<span data-arm-fill="zwiftId"></span>'});
     return `<section class="card" aria-labelledby="rm-h">
     <h2 id="rm-h">${esc(t('rider-heading'))}</h2>
-    <form class="inline-form" method="post" action="/manage/rider/remove">
-      <label class="field">${esc(t('rider-label'))}<input type="text" name="zwiftId" inputmode="numeric" pattern="[0-9]{1,12}" maxlength="12" required autocomplete="off"></label>
-      <button class="btn secondary" type="submit">${esc(t('rider-button'))}</button>
-    </form>
+    ${armForm('/manage/rider/remove', {}, {key: 'rider', body: field, button: t('rider-button'), cls: 'btn secondary danger-text', formCls: 'inline-form',
+        wordsHtml: th('rider-confirm', {who, club: esc(club.name)}), yes: t('rider-yes'), yesCls: 'btn danger'})}
     <p class="hint">${esc(t('rider-hint'))}</p>
   </section>`;
 }
@@ -148,12 +159,15 @@ function recordingsCard(club, cfg, {files, bytes}) {
         }
         groups.get(key).files.push(f);
     }
+    // Delete asks first in its place (review I1, UI panel wave 2: no destructive action on one press)
     const row = (f, day) => {
         const rider = names.get(f.athlete) ?? f.athlete;
-        const meta = t('rec-meta', {time: localHHMM(f.session, club.tz), kb: Math.ceil(f.size / 1024)});
+        const time = localHHMM(f.session, club.tz);
+        const meta = t('rec-meta', {time, kb: Math.ceil(f.size / 1024)});
         return `<li><div><p>${esc(rider)}</p><p class="meta">${esc(meta)}</p></div>
-          <span class="rowbtns"><form method="post" action="/manage/logs/delete">${hidden({slug: f.slug, file: f.file})}<button class="btn secondary small" type="submit">`
-            + `${ic('trash')}<span class="sr">${esc(t('rec-delete', {rider, day}))}</span></button></form></span></li>`;
+          <span class="rowbtns">${armForm('/manage/logs/delete', {slug: f.slug, file: f.file}, {key: `rec-${f.file.replace(/[^0-9a-z]/gi, '')}`,
+            button: '', icon: 'trash', sr: t('rec-delete', {rider, day}), cls: 'btn secondary danger-text small',
+            words: t('rec-delete-confirm', {rider, day, time}), yes: t('rec-delete-yes'), yesCls: 'btn danger small'})}</span></li>`;
     };
     const items = [...groups.values()].map(g => `<li class="recgroup"><p class="nm">${esc(g.title)}</p>
         <ul class="rows">${g.files.map(f => row(f, g.day)).join('\n        ')}</ul></li>`);
@@ -219,7 +233,7 @@ function dangerZone(club, recordings) {
     return `<section class="danger-zone" aria-labelledby="dz">
     <h2 id="dz">${ic('trash')}${esc(del)}</h2>
     <p>${esc(body)}</p>
-    ${postForm('/manage/delete', {}, t('cs-delete-open'), {cls: 'btn danger', icon: 'trash'})}
+    ${postForm('/manage/delete', {}, t('cs-delete-open'), {cls: 'btn secondary danger-text', icon: 'trash'})}
   </section>`;
 }
 
@@ -227,27 +241,30 @@ function dangerZone(club, recordings) {
 // The club settings. `recordings` is {files: logs.list(cid), bytes: logs.circleBytes(cid)}; `typed`
 // ({name}, as posted) fills the club form again after a refused rename. `seen` and `others`:
 // captainPage's; the footer at the end of the page shows on phones only (the sidebar has it from
-// 1024 px), the club name above the title from 1024 px only (the back bar has it on phones).
+// 1024 px); from 1024 px the breadcrumb names the club above the title (the back bar does on
+// phones).
 export function settingsPage(club, {now, seen, others = [], cfg, recordings, flash = null, typed = null}) {
+    const nav = placeNav(club, [{label: t('tp-club-settings')}]);
     const main = `<main class="page" id="main">
-  <header class="pagehead"><p class="kicker desk">${esc(club.name)}</p><h1>${esc(t('tp-club-settings'))}</h1></header>
+  ${nav.crumbs}
+  <header class="pagehead"><h1>${esc(t('tp-club-settings'))}</h1></header>
   ${flashBlock(flash)}
-  ${clubCard(club, cfg, typed)}
+  ${clubCard(club, cfg, typed, now)}
   ${whoCard(club, cfg, now)}
   ${signInCard(club)}
-  ${riderCard()}
+  ${riderCard(club)}
   <h2 class="band">${esc(t('cs-records'))}</h2>
   ${recordingsCard(club, cfg, recordings)}
   ${activityCard(club, now)}
   ${dangerZone(club, recordings)}
   ${footer({club: club.name, others})}
 </main>`;
-    return captainPage(club, {now, seen, others, here: SETTINGS_PATH, bar: backBar('/manage', t('tp-nav'), club.name), main, cls: 'formpage clubpage'});
+    return captainPage(club, {now, seen, others, here: SETTINGS_PATH, bar: nav.bar, main, cls: 'formpage clubpage'});
 }
 
 
 function backToSettings() {
-    return `<a class="btn secondary" href="${SETTINGS_PATH}">${ic('left')}${esc(t('cs-back'))}</a>`;
+    return `<a class="btn quiet" href="${SETTINGS_PATH}">${ic('left')}${esc(t('cs-back'))}</a>`;
 }
 
 
@@ -257,11 +274,13 @@ function backToSettings() {
 export function codePage(club, code, {now, seen, others}) {
     const formatted = formatRiderCode(code);
     const shown = th('code-shown', {club: esc(club.name), code: `<code>${esc(formatted)}</code>`});
+    const {crumbs} = placeNav(club, [{href: SETTINGS_PATH, label: t('tp-club-settings')}, {label: t('cs-code-heading')}], {back: false});
     const main = `<main class="page" id="main">
+  ${crumbs}
   <header class="pagehead"><p class="kicker">${esc(club.name)}</p><h1>${esc(t('cs-code-heading'))}</h1></header>
   <div class="flash ok" role="status">${ic('checkCircle')}<p>${shown}</p></div>
   <section class="card stack">
-    <button type="button" class="btn secondary" data-js data-copy="${esc(formatted)}" data-copied="${esc(t('cs-copied'))}" hidden>${esc(t('cs-copy'))}</button>
+    <button type="button" class="btn primary" data-js data-copy="${esc(formatted)}" data-copied="${esc(t('cs-copied'))}" hidden>${esc(t('cs-copy'))}</button>
     ${backToSettings()}
   </section>
 </main>`;

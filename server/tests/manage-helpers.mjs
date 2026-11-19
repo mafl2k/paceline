@@ -89,10 +89,20 @@ export const textOf = html => html.replace(/<[^>]*>/g, ' ').replace(/&#39;/g, '\
 export const count = (s, sub) => s.split(sub).length - 1;
 
 
-// The flash at the top of a page: {kind, text}, or null.
+// The flash at the top of a page: {kind, text}, or null. The flash of a change of the live plan
+// carries its Undo (undoOf) after the text.
 export function flashOf(body) {
-    const m = /<div class="flash (ok|err)" role="status">[\s\S]*?<p>([^<]*)<\/p><\/div>/.exec(body);
+    const m = /<div class="flash (ok|err)(?: undo)?" role="status">[\s\S]*?<p>([^<]*)<\/p>(?:<form [^]*?<\/form>)?<\/div>/.exec(body);
     return m ? {kind: m[1], text: textOf(m[2]).trim()} : null;
+}
+
+
+// The Undo of a page (UI panel wave 2, ui.mjs flashBlock): {text, form} of the first flash line that
+// carries one (the text of that line, the form's markup), or null: the flash itself (role status)
+// or the line of its own after a reload (no role).
+export function undoOf(body) {
+    const m = /<div class="flash ok undo"(?: role="status")?>[\s\S]*?<p>([^<]*)<\/p>(<form method="post" action="\/manage\/live\/undo">[^]*?<\/form>)<\/div>/.exec(body);
+    return m ? {text: textOf(m[1]).trim(), form: m[2]} : null;
 }
 
 
@@ -202,3 +212,27 @@ export const formOf = body => {
     assert.ok(m, body);
     return m[1];
 };
+
+
+// Arm in place (UI panel wave 2, ui.mjs armForm): the form of an action that asks first in its place,
+// the first one at or after `from` that posts to `action` (any with null), as drawn; null without one.
+export function armOf(html, action = null, from = 0) {
+    for (let at = html.indexOf('<form ', from); at >= 0; at = html.indexOf('<form ', at + 1)) {
+        const tag = html.slice(at, html.indexOf('>', at) + 1);
+        if (/ data-arm[ >]/.test(tag) && (action === null || tag.includes(`action="${action}"`))) {
+            return html.slice(at, html.indexOf('</form>', at) + '</form>'.length);
+        }
+    }
+    return null;
+}
+
+
+// Does the armed form `form` post `fields` (the markup of its hidden fields after the club's) to
+// `action` without confirm, and its strip's confirm button `yes` (class `cls`) with confirm=1,
+// described by the strip's words?
+export function armHas(form, action, fields, cls, yes) {
+    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return typeof form === 'string' && new RegExp(`^<form (?:class="[^"]*" )?method="post" action="${esc(action)}" data-arm[ >]`).test(form)
+        && form.includes(`>${CLUB_FIELD}${fields}`) && !form.includes('<input type="hidden" name="confirm"')
+        && new RegExp(`<p id="(arm-[^"]+)">[^]*<button class="${esc(cls)}" type="submit" name="confirm" value="1" aria-describedby="\\1" data-arm-yes>${esc(yes)}</button>`).test(form);
+}

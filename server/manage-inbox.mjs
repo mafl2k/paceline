@@ -8,12 +8,14 @@ import {methodNotAllowed, FORM_BYTES} from './web.mjs';
 import {ClubError, entryOf, storeEntry, discardEntry, teamHint} from './club.mjs';
 import {effects, nextRaceDate, raceStart} from './select.mjs';
 import {SHEET_RE, isSlug, parseEventUrl, randomId} from './ids.mjs';
+import {planOfId} from './plans.mjs';
 import {assignChoices} from './preselect.mjs';
-import {assignPage, assignPreview, entryGonePage} from './assign-page.mjs';
+import {assignPage, assignPreview, entryGonePage, entryBack} from './assign-page.mjs';
 import {uploadResultPage} from './upload-page.mjs';
 import {ridersLine} from './team-view.mjs';
 import {clubErrorText, field, postedClub, frameOf} from './manage-page.mjs';
 import {redirectWithFlash} from './flash.mjs';
+import {confirmPage} from './ui.mjs';
 
 const PARSE_RETRY_S = 600;
 
@@ -185,24 +187,46 @@ function inboxStore(req, res, ctx, cid, form, id) {
     // moves and holes for the stored version's date: the plan's for a version (controller ruling 15)
     const {moves, holes} = effects(before, after, after.sheets[result.id].date, now);
     const hint = teamHint(before, slug, entry.json, result.plan.riders.map(r => r.id));
+    // from a plan's New version, the result goes back to that plan, as the assign page did
+    const back = entry.fromPlan === true && entry.team === slug ? entryBack(after, entry) : null;
     html(res, 200, uploadResultPage(after, slug, {
-        ...frameOf(ctx, cid), before, result, moves, holes, hint, importWarnings: entry.warnings ?? [], importMore: entry.warningsMore ?? 0,
+        ...frameOf(ctx, cid), before, result, moves, holes, hint, importWarnings: entry.warnings ?? [], importMore: entry.warningsMore ?? 0, back,
     }));
 }
 
 
-// Where Discard goes back to: /manage, or a team page of a team that exists; anything else /manage.
+// Where Discard goes back to: /manage, a team page of a team that exists, or a plan page of a plan of
+// that team that exists (the New version of a plan page); anything else /manage.
 function backOf(club, back) {
-    const m = /^\/manage\/team\/([^/?#]+)$/.exec(back);
-    return m && isSlug(m[1]) && Object.hasOwn(club.teams, m[1]) ? back : '/manage';
+    const m = /^\/manage\/team\/([^/?#]+)(?:\/plan\/([^/?#]+))?$/.exec(back);
+    if (!m || !isSlug(m[1]) || !Object.hasOwn(club.teams, m[1])) {
+        return '/manage';
+    }
+    return m[2] === undefined || (SHEET_RE.test(m[2]) && planOfId(club, m[1], m[2]) !== null) ? back : '/manage';
 }
 
 
-// POST /manage/inbox/<id>/discard (back): removes the entry; 303 to `back` with what was discarded
-// (or, for an entry that is gone, that it is).
+// POST /manage/inbox/<id>/discard (back, confirm): removes the entry; 303 to `back` with what was
+// discarded (or, for an entry that is gone, that it is). Without confirm=1 (B1, UI panel wave 2: the
+// no-script path of the in-page confirm) an entry that is still there is asked about first, on a page
+// of its own, and nothing changes.
 function inboxDiscard(req, res, ctx, cid, form, id) {
     const {store, now} = ctx;
-    const to = backOf(store.get(cid), field(form, 'back'));
+    const club = store.get(cid);
+    const to = backOf(club, field(form, 'back'));
+    const waiting = entryOf(club, id, now);
+    if (waiting !== null && field(form, 'confirm') !== '1') {
+        const riders = ridersLine(waiting);
+        const team = /^\/manage\/team\/([^/]+)/.exec(to)?.[1] ?? null;
+        // the crumbs end where the way back goes (backOf: the overview, a team page or a plan page)
+        const plan = /\/plan\/([^/]+)$/.exec(to)?.[1] ?? null;
+        const trail = team === null ? [] : [{href: `/manage/team/${team}`, label: club.teams[team].name},
+            ...(plan === null ? [] : [{href: to, label: planOfId(club, team, plan).label}])];
+        html(res, 200, confirmPage(club, {...frameOf(ctx, cid), here: team === null ? '/manage' : `/manage/team/${team}`,
+            kicker: club.name, trail, heading: t('ask-discard'), words: t('discard-confirm', {riders}), action: `/manage/inbox/${id}/discard`,
+            fields: {back: to}, button: t('discard-yes'), back: {href: to, label: team === null ? t('tp-all-teams') : t('result-back', {team: club.teams[team].name})}}));
+        return;
+    }
     let entry;
     try {
         entry = store.change(cid, c => discardEntry(c, id, now));

@@ -19,7 +19,7 @@ import {readBody, BODY_MS, send, html, sameOrigin, parseForm, parseCookies} from
 import {esc, t, maskAddress, retentionText, monthsText} from './pages.mjs';
 import {addLink, openLink, usableLink, addConfirm, addEmailToken, liveToken, takeToken} from './tokens.mjs';
 import {makeFlashes} from './flash.mjs';
-import {signedOutPage, publicPage, flashBlock, postForm, sevLine, th} from './ui.mjs';
+import {signedOutPage, publicPage, flashBlock, postForm, sevLine, th, backBar} from './ui.mjs';
 import {ic} from './icons.mjs';
 
 export const CLUB_COOKIE = '__Host-pl_club';
@@ -472,7 +472,9 @@ const PRIVACY_ROWS = ['club', 'address', 'sheets', 'inbox', 'zglink', 'code', 'd
 // The heading and its intro on top, then a card per section.
 // Without an operator address for the notices of removals (or without mail) a full restore relies on
 // the operator's own records: the backup texts say so.
-function privacyPage({cfg, mailer}) {
+// `captain` (the club cookie opens a club): a back bar to /manage above the page, as on the captain
+// pages; the public footer stays for everyone.
+function privacyPage({cfg, mailer}, {captain = false} = {}) {
     const months = monthsText(cfg.backupRetentionMonths);
     const noMail = mailer === null || operatorAddress(cfg) === null ? '-nomail' : '';
     const kept = r => r === 'recordings'
@@ -497,7 +499,7 @@ function privacyPage({cfg, mailer}) {
         + section('where', p(cfg.privacyWhere ?? t('privacy-where-none')))
         + section('retention', p(t(`privacy-retention${noMail}`, {months})))
         + section('cookie', p(t('privacy-cookie')))
-        + section('rights', p(t('privacy-rights'))), {here: '/privacy', wide: true});
+        + section('rights', p(t('privacy-rights'))), {here: '/privacy', wide: true, bar: captain ? backBar('/manage', t('tp-all-teams')) : ''});
 }
 
 
@@ -870,7 +872,7 @@ export async function handleWeb(req, res, ctx, p, method) {
     }
     if (p === '/privacy') {
         if (method === 'GET') {
-            html(res, 200, privacyPage(ctx));
+            html(res, 200, privacyPage(ctx, {captain: principal(req, ctx) !== null}));
         } else {
             methodNotAllowed(res, 'GET');
         }

@@ -1,6 +1,6 @@
 // The captain pages' shared parts. appPage() is the frame of every page: the one stylesheet and the
 // one module script (static.mjs), the skip link, the note that the page needs the script (a
-// <noscript>: only Make live works without it, plan versions spec decision 13), and the 30 s refresh
+// <noscript>: Make live and the actions that ask first work without it), and the 30 s refresh
 // (a <noscript> meta; client.mjs reloads with a script). captainPage() is the captain pages' frame
 // inside it: the top bar for phones and the sidebar from 1024 px. The fragments: the team rows, the
 // one-shot flash after an action (flash.mjs), hidden fields and one-button forms, the severity line,
@@ -19,7 +19,7 @@ export {andList, quote} from './team-view.mjs';
 // default); `noscript` false leaves out the <noscript> meta refresh, which would reload without the
 // script's guard (the upload page: a chosen file would be lost). `updated` is the page's 'HH:MM'.
 // `needsScript` false leaves out the note that the page needs the script: pages that work without it
-// (the Make live and Back confirm pages, the rider code, the gone and signed-out pages).
+// (the Make live, Restore and other confirm pages, the rider code, the gone and signed-out pages).
 // `script` false leaves out the script itself: the public pages (publicPage) carry none.
 // `cid` (a captain page: the club it shows) names the club in every form that posts to /manage
 // (withClub).
@@ -48,8 +48,9 @@ ${needsScript ? `<noscript><div class="nojs"><p class="banner warn" role="note">
 
 
 // The captain pages' frame, the same on every /manage page (desktop UI audit, 18 Nov 2026): `bar`
-// (the top bar for phones: the team switcher or a back bar; from 1024 px the switcher is hidden,
-// where the sidebar navigates, and a back bar is a link line above the page's head), the sidebar (from 1024 px; hidden on phones) and `main`, the page's <main>, beside it.
+// (the top bar for phones: the team switcher or a back bar; from 1024 px both are hidden, where the
+// sidebar navigates and the page's breadcrumb, placeNav, says where it is), the sidebar (from 1024
+// px; hidden on phones) and `main`, the page's <main>, beside it.
 // The sidebar has the club name (the way to the overview), the team rows, and at its bottom the
 // footer (the other clubs of this browser, Privacy, Log out). Club settings is no place in it: the
 // overview's button and the team settings' hint lead there. `here` is the path the sidebar marks as
@@ -59,13 +60,13 @@ ${needsScript ? `<noscript><div class="nojs"><p class="banner warn" role="note">
 // (store.seenOf(cid)) and `others` (the other clubs the cookie opens, [{id, name}]) are what the
 // sidebar draws with: manage-page.mjs frameOf gives all three; `rows` (teamRows) when the page has
 // drawn them already. The rest goes to appPage.
-export function captainPage(club, {now, seen = {}, others = [], here = null, bar = '', main, rows = null, ...page}) {
+export function captainPage(club, {now, seen = {}, others = [], here = null, herePage = false, bar = '', main, rows = null, ...page}) {
     if (!Number.isFinite(now)) {
         throw new TypeError('captainPage needs the clock');
     }
     const body = `<div class="app">
 ${bar ? `${bar}
-` : ''}${sideHtml(club, rows ?? teamRows(club, {now, seen}), here, others)}
+` : ''}${sideHtml(club, rows ?? teamRows(club, {now, seen}), here, others, herePage)}
 ${main}
 </div>`;
     return appPage({...page, body, cid: club.id});
@@ -79,9 +80,10 @@ export function teamRows(club, {now, seen = {}}, view = null) {
 }
 
 
-// The team rows as links, the one of team `current` (a slug) marked as the page.
-export function rowsHtml(rows, current) {
-    return rows.map(r => `<li><a class="trow ${esc(r.sev)}" href="/manage/team/${esc(r.slug)}"${r.slug === current ? ' aria-current="page"' : ''}>`
+// The team rows as links, the one of team `current` (a slug) marked: as the page (`mark` 'page'), or
+// as where the page is ('location': a page below the team's, whose breadcrumb holds the page itself).
+export function rowsHtml(rows, current, mark = 'page') {
+    return rows.map(r => `<li><a class="trow ${esc(r.sev)}" href="/manage/team/${esc(r.slug)}"${r.slug === current ? ` aria-current="${mark}"` : ''}>`
         + `${ic(r.icon)}<span class="trow-name">${esc(r.name)}${r.received ? ` <span class="newplans">${esc(r.received)}</span>` : ''}</span><span class="trow-time">${esc(r.timeLine)}</span>`
         + `<span class="trow-main">${esc(r.main)}</span></a></li>`).join('\n');
 }
@@ -89,13 +91,15 @@ export function rowsHtml(rows, current) {
 
 const TEAM_HERE = /^\/manage\/team\/([^/]+)$/;
 
-function sideHtml(club, rows, here, others) {
+function sideHtml(club, rows, here, others, herePage) {
     const home = here === '/manage';
     const team = TEAM_HERE.exec(here ?? '')?.[1] ?? null;
+    // the place itself (the hub, a team page) is the page; a page below it is only there
+    const mark = herePage ? 'page' : 'location';
     return `<aside class="side" aria-label="${esc(t('tp-side'))}">
-  <p class="side-club"><a href="/manage"${home ? ' aria-current="page"' : ''}>${home ? '' : ic('left')}${esc(club.name)}</a></p>
+  <p class="side-club"><a href="/manage"${home ? ` aria-current="${mark}"` : ''}>${home && herePage ? '' : ic('left')}${esc(club.name)}</a></p>
   <ul class="trows">
-${rowsHtml(rows, team)}
+${rowsHtml(rows, team, mark)}
   </ul>
   ${footer({club: club.name, others})}
 </aside>`;
@@ -126,12 +130,17 @@ export function th(key, vars = {}) {
 
 
 // The flash {kind: 'ok' | 'err', text} at the top of a page; '' for none.
-export function flashBlock(flash) {
-    if (!flash) {
-        return '';
+export function flashBlock(flash, undo = null) {
+    // the Undo of a change of the live plan (UI panel wave 2): inside the flash of that change, else
+    // a line of its own in the same place (after a reload, or on the page of another captain), not
+    // announced: it is no news there
+    const line = (text, form = '', status = true) => `<div class="flash ok${form ? ' undo' : ''}"${status ? ' role="status"' : ''}>${ic('checkCircle')}<p>${esc(text)}</p>${form}</div>`;
+    if (undo !== null && flash?.kind === 'ok' && flash.undo === true) {
+        return line(flash.text, undo.form);
     }
-    const ok = flash.kind === 'ok';
-    return `<div class="flash ${ok ? 'ok' : 'err'}" role="status">${ic(ok ? 'checkCircle' : 'alert')}<p>${esc(flash.text)}</p></div>`;
+    const head = !flash ? '' : flash.kind === 'ok' ? line(flash.text)
+        : `<div class="flash err" role="status">${ic('alert')}<p>${esc(flash.text)}</p></div>`;
+    return head + (undo === null ? '' : line(undo.text, undo.form, false));
 }
 
 
@@ -140,10 +149,57 @@ export const hidden = fields => Object.entries(fields)
 
 
 // A form of hidden fields and one button with the text `button`; `cls` '' gives a bare button
-// (the old club page), `icon` an icon before the text.
-export function postForm(action, fields, button, {cls = 'btn secondary small', icon = null} = {}) {
+// (the old club page), `icon` an icon before the text, `sr` words after it for screen readers.
+export function postForm(action, fields, button, {cls = 'btn secondary small', icon = null, sr = null} = {}) {
     return `<form method="post" action="${esc(action)}">${hidden(fields)}<button${cls ? ` class="${esc(cls)}"` : ''} type="submit">`
-        + `${icon ? ic(icon) : ''}${esc(button)}</button></form>`;
+        + `${icon ? ic(icon) : ''}${esc(button)}${sr ? `<span class="sr"> ${esc(sr)}</span>` : ''}</button></form>`;
+}
+
+
+// A one-button POST that asks first in its own place (UI panel wave 2, "arm in place"; it replaces
+// the <details> confirms). The form posts `fields` to `action` and has two submit buttons: the
+// trigger `button` (class `cls`, an `icon` before it, `sr` after it for screen readers) without
+// confirm, and the strip's confirm button `yes` (class `yesCls`: 'btn primary', or 'btn danger' for
+// a destructive action) with confirm=1, which the server needs to act. Without the script the strip
+// stays hidden and the trigger posts: the server answers with its confirm page. With it (client.mjs
+// arms) the trigger's press turns the form, in its place, into the strip: `words` (what it does, the
+// button's description; `wordsHtml` instead: markup, every value escaped by the caller), the confirm
+// button and Cancel, as a group labelled with the action. `key` makes the ids unique on the page.
+// `when` ({when: 'empty' | 'changed', field}) arms only while that field of the form is empty or
+// changed (a start time cleared, another zone); else the trigger posts. `body` (markup: the form's
+// own fields) goes before the trigger, `formCls` is the form's class.
+export function armForm(action, fields, {key, button, cls = 'btn secondary small', icon = null, sr = null, words = '', wordsHtml = null,
+    yes, yesCls = 'btn primary', body = '', formCls = '', when = null}) {
+    const id = `arm-${key}`;
+    const cond = when === null ? '' : ` data-arm-when="${esc(when.when)}" data-arm-field="${esc(when.field)}"`;
+    return `<form${formCls ? ` class="${esc(formCls)}"` : ''} method="post" action="${esc(action)}" data-arm${cond}>${hidden(fields)}${body}`
+        + `<button class="${esc(cls)}" type="submit" data-arm-open>${icon ? ic(icon) : ''}${esc(button)}${sr ? `<span class="sr"> ${esc(sr)}</span>` : ''}</button>`
+        + `<div class="arm-strip" role="group" aria-label="${esc(t('arm-label', {action: yes}))}" data-arm-strip hidden>`
+        + `<p id="${esc(id)}">${wordsHtml ?? esc(words)}</p><div class="arm-btns">`
+        + `<button class="${esc(yesCls)}" type="submit" name="confirm" value="1" aria-describedby="${esc(id)}" data-arm-yes>${esc(yes)}</button>`
+        + `<button class="btn secondary" type="button" data-arm-cancel>${esc(t('arm-cancel'))}</button></div></div></form>`;
+}
+
+
+// The page that asks before a destructive action posted without confirm=1 (the no-script path of an
+// armForm, UI panel wave 2): `heading`, `words` (what it does), a form that posts `fields` to
+// `action` again with confirm=1, its button `button` (`danger`: the danger style, else primary) and
+// the way back (`back` {href, label}). `kicker` names the club (and team) on phones; from 1024 px the
+// breadcrumb does: `trail` (placeNav's, without the page's own crumb) ends at the page `back` goes to,
+// then "Confirm". It needs no script and never reloads itself. `frame`: captainPage's (now, seen,
+// others, here).
+export function confirmPage(club, {kicker, trail, heading, words, action, fields, button, danger = true, back, ...frame}) {
+    const {crumbs} = placeNav(club, [...trail, {label: t('crumb-confirm')}], {back: false});
+    const main = `<main class="page" id="main">
+  ${crumbs}
+  <header class="pagehead"><p class="kicker">${esc(kicker)}</p><h1>${esc(heading)}</h1></header>
+  <section class="card stack">
+    <p>${esc(words)}</p>
+    <div class="confirm-acts">${postForm(action, {...fields, confirm: '1'}, button, {cls: danger ? 'btn danger' : 'btn primary'})}
+    <a class="btn secondary" href="${esc(back.href)}">${ic('left')}${esc(back.label)}</a></div>
+  </section>
+</main>`;
+    return captainPage(club, {...frame, main, cls: 'formpage', needsScript: false});
 }
 
 
@@ -164,14 +220,36 @@ export function freshLine(updated, path) {
 }
 
 
-// The top bar of a page below another: back to `href`, labelled `text`, and the name of the club
-// `club` on the right (left out when `text` is that name), so every captain page says which club
-// it shows. From 1024 px only the link shows, above the page's head (the sidebar names the club).
+// The top bar of a page below another (phones): back to `href`, labelled `text`, and the name of the
+// club `club` on the right (left out when `text` is that name), so every captain page says which club
+// it shows. From 1024 px it gives way to the breadcrumb (placeNav, which draws both).
 export function backBar(href, text, club = null) {
     const name = club !== null && club !== text ? `<span class="topbar-club">${esc(club)}</span>` : '';
     return `<nav class="topbar plain" aria-label="${esc(t('ui-back'))}">
   <div class="topbar-row"><a class="back" href="${esc(href)}">${ic('left')}${esc(text)}</a>${name}</div>
 </nav>`;
+}
+
+
+// The place of a captain page below the overview (UI panel wave 3), one source for both widths:
+// `trail` is the way from the club to the page, [{href, label}, …, {label}], the last item the page
+// itself (no link). From 1024 px it is one breadcrumb line ("Kettenfett RC › Rollers › Upload"),
+// which replaces the back link line and the kicker there; on phones the back bar goes to the crumb
+// before the page, so the two always agree, labelled as that crumb; only the way to the hub reads
+// "All teams" (one label for that way on every phone bar and button; the club's name is its crumb).
+// `back` false leaves out the back bar (a page that has none on phones: the questions without the
+// script, the rider code). {bar, crumbs}: the back bar
+// for captainPage's `bar` ('' without one) and the breadcrumb for the top of the page's <main>.
+export function placeNav(club, trail, {back = true} = {}) {
+    const crumbs = [{href: '/manage', label: club.name}, ...trail];
+    const last = crumbs.length - 1;
+    const parent = crumbs[last - 1];
+    const items = crumbs.map((c, i) => (i === last ? `<li><span aria-current="page">${esc(c.label)}</span></li>`
+        : `<li><a href="${esc(c.href)}">${esc(c.label)}</a><span class="sep" aria-hidden="true">›</span></li>`));
+    return {
+        bar: back ? backBar(parent.href, parent.href === '/manage' ? t('tp-all-teams') : parent.label, club.name) : '',
+        crumbs: `<nav class="crumbs desk" aria-label="${esc(t('ui-breadcrumb'))}"><ol>${items.join('')}</ol></nav>`,
+    };
 }
 
 
@@ -205,12 +283,13 @@ export function dstBanner() {
 // appPage without the script, `main` (the page's content) in the narrow column, or with `wide` in
 // the wide one (.page.wide, 62rem from 1024 px: the privacy page's table), and a footer with the
 // start page and the privacy page; `here` is the page's own path, left out of the footer. Copy and
-// every value go through esc() in the caller.
-export function publicPage(main, {here = null, wide = false} = {}) {
+// every value go through esc() in the caller. `bar` (backBar's markup, or '') goes above the page: the
+// privacy page's way back to /manage for a signed-in captain.
+export function publicPage(main, {here = null, wide = false, bar = ''} = {}) {
     const links = [['/', t('home-heading')], ['/privacy', t('home-privacy')]]
         .filter(([href]) => href !== here)
         .map(([href, text]) => `<a href="${href}">${esc(text)}</a>`);
-    const body = `<main class="page ${wide ? 'wide' : 'narrow'}" id="main">
+    const body = `${bar ? `${bar}\n` : ''}<main class="page ${wide ? 'wide' : 'narrow'}" id="main">
   ${main}
   <footer class="foot">${links.join('')}</footer>
 </main>`;

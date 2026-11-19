@@ -19,33 +19,51 @@
 //        sidebar's (1280) offer Spokesmen CC, "Log out of Kettenfett RC" and "Log out of all clubs";
 //        the button switches to that club, whose footer offers Kettenfett RC, which switches back;
 //        Log out of the open club lands on the other club's overview;
-//   1d.  the team page's "Plan on ZwiftGopher" (beside "Upload a plan"; in an empty team's card the
-//        second button) opens the planner in a new tab with the team's token, and the upload page
-//        has none; two plans pushed with it (POST /api/v3/push) are listed on the team page, newest
-//        first, and counted in the switcher and the sidebar; with --shots
+//   1d.  the team page's "Plan on ZwiftGopher" (in its head beside "Upload a plan", side by side at
+//        full width at 390 as "ZwiftGopher"; in an empty team's card the second button) opens the
+//        planner in a new tab with the team's token, and the upload page has none; two plans pushed
+//        with it (POST /api/v3/push) are listed on the team page, newest first, and counted in the
+//        switcher and the sidebar; the club hub lists Cogs to fix and the two plans waiting, with
+//        the team tiles at 390 only; with --shots
 //        captain-team-{empty,plans}-{390,1280}-light.png (Cogs, Rollers before the pushes),
-//        captain-team-received-{390,1280}-light.png, captain-team-received-390-dark.png and
-//        captain-teams-received-390-light.png;
+//        captain-team-received-{390,1280}-light.png, captain-team-received-390-dark.png,
+//        captain-teams-received-390-light.png and captain-hub-{390,1280}-light.png (full page);
 //   3.   the upload page shows the text export as a plain field and stays when the file is chosen
 //        (no auto-Continue); Continue goes on to the assign page, which shows the
 //        moves and what is still to do, has no "Update preview" button, and redraws itself when
 //        the plan radio or the live box changes, keeping the scroll position, the focused field
 //        and a typed type; the race date typed digit by digit redraws it once, a second after the
 //        last digit and never midway, or at once when the captain leaves the field; Store makes
-//        v2 live; at 1280 a back bar is a link line above the page's head without the club name
-//        (the upload page opened with from=plan goes back to the plan), the team page has none;
+//        v2 live; at 1280 a page below the hub has one breadcrumb line above its head instead of
+//        the back bar and the kicker, its crumb before the page where the phone's bar goes (the
+//        upload page opened with from=plan goes back to the plan), the hub has none;
 //   3b.  the reshuffle of spec §10: "Upload for Sprockets" carries the plan; no holes are left;
-//   3c.  Back of the live plan asks in the page and posts confirm=1; the flash; Back to v2 next;
+//   3c.  Restore of the live plan asks in its place (arm in place, UI panel wave 2: the gate is open)
+//        and posts confirm=1; the flash; Restore v2 next;
 //   3e.  a refused Store ("Pick a plan.", pressed right after typing a date: no redraw races it,
 //        the page stays at its top with the flash) keeps the typed type through the next redraw;
-//        Discard;
-//   4.   the guarded reload waits while a row's Make live confirm is open;
+//        Discard, at least 24 px below Store, asks first in its place;
+//   4.   the guarded reload waits while a row's Make live strip is open;
 //   5.   the stale line when offline;
-//   3d.  Make live on a row and "Make v2 live" ask in the page first (the button below the
-//        summary), post confirm=1, and change team.live only when pressed;
+//   3d.  Make live on a row and "Make v2 live" ask in their place first (the strip where the button
+//        was, the row's whole width at 390, the confirm button focused and described by the words),
+//        post confirm=1, and change team.live only when pressed;
 //   6.   Make live without the script: a second tab with script execution disabled posts Make
-//        live, gets the server's confirm page, and confirms; team.live changes only then;
-//   7.   Delete plan on the plan page asks in the page first.
+//        live (the strip stays hidden), gets the server's confirm page, and confirms; team.live
+//        changes only then;
+//   7.   Delete plan on the plan page asks in its place first, its confirm in the danger style.
+//   9.   arm in place by keyboard and mouse: Enter opens a strip, Esc and Cancel close it (the focus
+//        back on the trigger), a press of the confirm button within 450 ms of arming is ignored,
+//        one strip at a time, the Remove strip follows the Zwift ID edited after
+//        arming, a double click on a confirm button posts once (Discard is 24 px from Review and
+//        store, checked in 1d); before the gate a plain Make live goes at once and its flash's Undo
+//        takes it back; with --shots the open strips of the team, plan, team settings and club
+//        settings pages at 390 and 1280 (captain-<page>-armed-<w>-light.png), the assign page's
+//        Discard (captain-assign-armed-{390,1280}-light.png) and the Undo flash
+//        (captain-team-undo-{390,1280}-light.png: after Make live the page lands on the live row, its
+//        Undo in that row, in view below the top bar; Undo says "Undone" there).
+//   10.  the hub with nothing to do and nothing waiting (Spokesmen CC with one team and its live
+//        plan) says so in one line; with --shots captain-hub-empty-{390,1280}-light.png;
 //   8.   (with --shots) a special team's assign page: date and time above the fold, a neutral line
 //        while they are empty, the date and then the time redraw the preview, Store sets the race's
 //        start, a version with another time says the race moves; Add a team hides the weekly
@@ -63,8 +81,9 @@
 // captain-<page>-{390,1280}-light.png for teams (1280 only), team (1280 only), team-cogs (1280
 // only), team-settings (1280 only), club-settings, new-team, upload, upload-from-plan (New version
 // on the plan page), assign (1280 only), result
-// (the answer to Store), plan (1280 only), team-gone, plan-gone, entry-gone, live-confirm and
-// back-confirm (the no-script questions) and code (the new rider code, shot last: it makes the
+// (the answer to Store), plan (1280 only), team-gone, plan-gone, entry-gone, not-found (an unknown
+// /manage path), privacy (signed in: its back bar), live-confirm and
+// back-confirm and delete-confirm (the no-script questions) and code (the new rider code, shot last: it makes the
 // club private); the overview of a browser with two clubs (the footer's club switch),
 // captain-teams-two-{390,1280}-light.png (full page); and of the public pages
 // public-home-{390-light,390-dark,1280-light}.png (without the club cookie: with it / goes to
@@ -286,6 +305,13 @@ async function shootNow(name, w = 390) {
     await tab.send('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
     await sleep(300);
 }
+// a shot of the viewport as it is (an open strip in view), at the current width
+async function shootView(name) {
+    const r = await tab.send('Page.captureScreenshot', {format: 'png'});
+    fs.mkdirSync(shotsDir, {recursive: true});
+    fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
+    console.log(`wrote ${path.join(shotsDir, name)}`);
+}
 // run `action` (an expression in the page) and wait for the page it leads to
 async function follow(action, on = tab) {
     const loaded = on.once('Page.loadEventFired');
@@ -368,28 +394,54 @@ async function clean(p) {
     report(!f.small.length, `${p} tap targets >= 44 px`, f.small.join(' | '));
 }
 
-// An in-page confirm, found by `pick` (a predicate on its <details>, in the page): open it by its
-// summary, then {open, below, inView, others}: open, its submit button below the summary and in
-// the viewport, how many other confirms are open.
-const CONFIRM = pick => `[...document.querySelectorAll('details.confirm')].find(${pick})`;
-async function openConfirm(pick) {
-    await tab.evaluate(`(() => { const d = ${CONFIRM(pick)}; d.scrollIntoView({block: 'center'}); d.querySelector('summary').click(); })()`);
-    await sleep(300);
-    return JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-      const d = ${CONFIRM(pick)};
-      const s = d.querySelector('summary').getBoundingClientRect();
-      const b = d.querySelector('[type=submit]').getBoundingClientRect();
-      return {open: d.open, below: b.top >= s.bottom - 0.5 && b.height > 0, inView: b.bottom <= innerHeight && b.top >= 0,
-        focused: document.activeElement === d.querySelector('[type=submit]'),
-        others: document.querySelectorAll('details.confirm[open]').length - 1, button: d.querySelector('[type=submit]').textContent.trim()};
-    })())`));
+// Arm in place (UI panel wave 2): an action that asks first, its form found by `pick` (a predicate on
+// the form[data-arm], in the page). The mouse at the middle of a rect {x, y, width, height}.
+const ARM = pick => `[...document.querySelectorAll('form[data-arm]')].find(${pick})`;
+async function clickAt(r, on = tab) {
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await on.send('Input.dispatchMouseEvent', {type, x: r.x + r.width / 2, y: r.y + r.height / 2, button: 'left', clickCount: 1});
+    }
 }
-// press the open confirm's button: the POST it sent (url, body) and whether a page followed
+// the rect of the element `sel` (an expression in the page), scrolled into view first (`center`) or not
+const rectOf = async (sel, center = true) => JSON.parse(await tab.evaluate(`JSON.stringify((() => { const el = ${sel};
+  ${center ? 'el.scrollIntoView({block: "center"});' : ''} const r = el.getBoundingClientRect(); return {x: r.x, y: r.y, width: r.width, height: r.height, pageY: r.y + scrollY}; })())`));
+const strip = pick => `JSON.stringify((() => {
+  const f = ${ARM(pick)}, st = f.querySelector('[data-arm-strip]'), yes = f.querySelector('[data-arm-yes]');
+  const words = document.getElementById(yes.getAttribute('aria-describedby'));
+  const s = st.getBoundingClientRect(), b = yes.getBoundingClientRect();
+  return {open: !st.hidden && f.classList.contains('armed'), top: s.top + scrollY, inView: b.height > 0 && b.bottom <= innerHeight && b.top >= 0,
+    focused: document.activeElement === yes, described: Boolean(words) && st.contains(words) && words.textContent.trim().length > 0,
+    group: st.getAttribute('role') === 'group' && (st.getAttribute('aria-label') ?? '').startsWith('Confirm: '),
+    triggerGone: f.querySelector('[data-arm-open]').getClientRects().length === 0,
+    others: document.querySelectorAll('form[data-arm].armed').length - (f.classList.contains('armed') ? 1 : 0),
+    button: yes.textContent.trim(), width: Math.round(s.width), row: Math.round(f.parentElement.getBoundingClientRect().width)};
+})())`;
+// press the trigger with the mouse and wait past the 450 ms guard: the strip's state ({open, inPlace
+// (it opened where the trigger was), inView, focused, described, group, triggerGone, others, button})
+async function openConfirm(pick, {wait = 500} = {}) {
+    const t = await rectOf(`${ARM(pick)}.querySelector('[data-arm-open]')`);
+    await clickAt(t);
+    await sleep(wait);
+    const st = JSON.parse(await tab.evaluate(strip(pick)));
+    // in the page, not the viewport: the confirm button may scroll into view
+    return {...st, inPlace: Math.abs(st.top - t.pageY) < 90};
+}
+// press the open strip's confirm button with the mouse: the POST it sent (url, body) and whether a
+// page followed
 async function pressConfirm(pick) {
     tab.posts.length = 0;
-    const loaded = await follow(`${CONFIRM(pick)}.querySelector('[type=submit]').click()`);
-    return {loaded, post: tab.posts.at(-1) ?? null};
+    const r = await rectOf(`${ARM(pick)}.querySelector('[data-arm-yes]')`, false);
+    const loaded = tab.once('Page.loadEventFired', 4000);
+    await clickAt(r);
+    const got = await loaded;
+    await sleep(250);
+    return {loaded: got !== null, post: tab.posts.at(-1) ?? null};
 }
+const key = async (k, code, vk, text = undefined) => {
+    for (const type of ['keyDown', 'keyUp']) {
+        await tab.send('Input.dispatchKeyEvent', {type, key: k, code, windowsVirtualKeyCode: vk, ...(type === 'keyDown' && text ? {text} : {})});
+    }
+};
 const flash = () => tab.evaluate('document.querySelector(".flash p")?.textContent ?? ""');
 // a public page: loads clean without a script, fits 390 px, its controls are 44 px; `status` the
 // page's own answer (a bad link's 404 is logged by Chrome)
@@ -480,9 +532,25 @@ try {
     {
         const planner = sel => `JSON.stringify((a => a && {href: a.href, target: a.target, rel: a.rel})(document.querySelector('${sel} a[href^="https://zwiftgopher.com/"]')))`;
         await open('/manage/team/rollers');
-        const link = JSON.parse(await tab.evaluate(planner('.uplinks')));
+        const link = JSON.parse(await tab.evaluate(planner('header .headacts')));
         report(link !== null && link.href.startsWith('https://zwiftgopher.com/TTT/?paceline=') && link.href.endsWith('&plhost=paceline.example.org')
-            && link.target === '_blank' && link.rel === 'noopener noreferrer', 'the team page links to ZwiftGopher in a new tab, beside Upload a plan', JSON.stringify(link));
+            && link.target === '_blank' && link.rel === 'noopener noreferrer', 'the team page links to ZwiftGopher in a new tab, in its head beside Upload a plan', JSON.stringify(link));
+        // the head's two buttons (UI panel wave 3): side by side at full width on a phone ("ZwiftGopher"),
+        // under the race line; from 1024 px as wide as their words, "Plan on ZwiftGopher"
+        const headActs = `JSON.stringify((() => {
+          const row = document.querySelector('header .headacts'), [a, b] = row.querySelectorAll('a.btn'), race = document.querySelector('header .race');
+          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), rr = row.getBoundingClientRect();
+          return {side: Math.abs(ra.top - rb.top) < 1, full: Math.round(rb.right - ra.left) === Math.round(rr.width), under: ra.top >= race.getBoundingClientRect().bottom,
+            words: b.innerText.trim(), name: b.getAttribute('aria-label'), wide: Math.round(ra.width), height: Math.round(ra.height)};
+        })())`;
+        const phoneHead = JSON.parse(await tab.evaluate(headActs));
+        report(phoneHead.side && phoneHead.full && phoneHead.under && phoneHead.words === 'ZwiftGopher' && phoneHead.name === 'Plan on ZwiftGopher (opens a new tab)',
+            'at 390 Upload a plan and ZwiftGopher sit side by side at full width under the race line', JSON.stringify(phoneHead));
+        await open('/manage/team/rollers', {w: 1280});
+        const deskHead = JSON.parse(await tab.evaluate(headActs));
+        report(deskHead.side && !deskHead.full && deskHead.under && deskHead.words === 'Plan on ZwiftGopher', 'at 1280 the two buttons are as wide as their words, "Plan on ZwiftGopher"', JSON.stringify(deskHead));
+        report(await tab.evaluate('document.querySelectorAll(".uplinks, .uplink").length === 0'), 'no links under the plans any more');
+        await open('/manage/team/rollers');
         await open('/manage/team/cogs');
         const empty = JSON.parse(await tab.evaluate(planner('.card.empty')));
         await open('/manage/upload?team=rollers');
@@ -511,6 +579,11 @@ try {
         const marks = await tab.evaluate('[...document.querySelectorAll(".newplans")].filter(x => x.textContent === "2 new plans").length');
         report(String(statuses) === '201,201' && rows.join('|') === 'In the planner: Rollers slow · 4 riders|In the planner: Rollers fast · 6 riders' && marks === 2,
             'two pushed plans: listed newest first, counted in the switcher and sidebar', JSON.stringify({statuses, rows, marks}));
+        // P2 (review M4): at 390 Discard sits at least 24 px from Review and store
+        const apart = JSON.parse(await tab.evaluate(`JSON.stringify([...document.querySelectorAll('.callout.info .note-acts')].map(n => {
+          const a = n.querySelector('a.btn').getBoundingClientRect(), b = n.querySelector('.discard [data-arm-open]').getBoundingClientRect();
+          return b.top >= a.bottom ? Math.round(b.top - a.bottom) : Math.round(b.left - a.right); }))`));
+        report(apart.length === 2 && apart.every(g => g >= 24), 'Discard at least 24 px from Review and store at 390', JSON.stringify(apart));
         if (shotsDir) {
             for (const w of [390, 1280]) {
                 await open('/manage/team/rollers', {w});
@@ -520,6 +593,50 @@ try {
             await shootNow('captain-team-received-390-dark.png');
             await open('/manage');
             await shootNow('captain-teams-received-390-light.png');
+        }
+        // the club hub (UI panel wave 3): what to fix (Cogs has no start time) and the two plans waiting,
+        // with Review and store and Discard; from 1024 px no team tiles (the sidebar has them)
+        const hub = `JSON.stringify((() => {
+          const lines = id => [...(document.getElementById(id)?.closest('section').querySelectorAll('.todo > li') ?? [])].map(li => li.innerText.replace(/\\s+/g, ' ').trim());
+          const tiles = document.querySelector('.hub-teams');
+          return {todo: lines('todo-h'), recv: lines('recv-h'), races: [...document.querySelectorAll('.racetable')].length, tiles: tiles.getClientRects().length > 0,
+            add: document.querySelector('a.hub-add').getClientRects().length > 0};
+        })())`;
+        for (const w of [390, 1280]) {
+            await open('/manage', {w});
+            const h = JSON.parse(await tab.evaluate(hub));
+            report(h.todo.length === 1 && h.todo[0].startsWith('Cogs') && h.todo[0].includes('No start time and no plan') && h.recv.length === 2
+                && h.recv.every(x => x.startsWith('Rollers Sent') && x.includes('Review and store')) && h.races === 1 && h.tiles === (w === 390) && h.add,
+            `at ${w} the hub: Cogs to fix, two plans waiting, tonight's race; team tiles ${w === 390 ? 'under them' : 'only in the sidebar'}`, JSON.stringify(h));
+            if (w === 390) {
+                tab.logs.length = 0;
+                await clean('/manage (hub with plans waiting)');
+            }
+            if (shotsDir) {
+                await shootNow(`captain-hub-${w}-light.png`, w);
+            }
+        }
+        // review I1: from 1024 px the rows' words keep at least 12rem (192 px), the race table's cells
+        // one line each; review M8: opening a row's Discard moves neither Review and store nor the words
+        const widths = `JSON.stringify((() => {
+          const w = sel => [...document.querySelectorAll(sel)].map(el => Math.round(el.getBoundingClientRect().width));
+          const lines = el => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; };
+          return {todo: w('#todo-h ~ .todo .todo-what'), recv: w('#recv-h ~ .todo .todo-what'),
+            tall: [...document.querySelectorAll('.racetable td:not(:first-child):not(.st)')].filter(td => lines(td) > 1).map(td => td.innerText)};
+        })())`;
+        const reviewAt = `JSON.stringify((() => { const li = document.querySelector('#recv-h ~ .todo > li');
+          const r = li.querySelector('a.btn.primary').getBoundingClientRect(), t = li.querySelector('.todo-what').getBoundingClientRect();
+          return [Math.round(r.left), Math.round(r.top + scrollY), Math.round(t.left), Math.round(t.top + scrollY), Math.round(t.width)]; })())`;
+        for (const w of [1024, 1100, 1180, 1280]) {
+            await open('/manage', {w});
+            const ws = JSON.parse(await tab.evaluate(widths));
+            report(ws.todo.length === 1 && ws.recv.length === 2 && [...ws.todo, ...ws.recv].every(x => x >= 192) && ws.tall.length === 0,
+                `at ${w} the hub's words are at least 12rem wide, the race table's cells one line`, JSON.stringify(ws));
+            const before = await tab.evaluate(reviewAt);
+            await openConfirm('f => f.matches(".discard") && f.closest("#recv-h ~ .todo")');
+            const after = await tab.evaluate(reviewAt);
+            report(before === after, `at ${w} opening a hub row's Discard moves neither Review and store nor the words`, `${before} -> ${after}`);
+            await key('Escape', 'Escape', 27);
         }
         srv.store.change(CID, cl => {
             for (const e of cl.inbox.filter(x => x.source === 'receive')) {
@@ -546,6 +663,30 @@ try {
     let wh = await what();
     report(wh.includes('moves from') && wh.includes('Still to do'), 'What happens shows the moves and what is still to do', JSON.stringify(wh));
     await clean(assignAt);
+    // the summary line and its "What changed" fold never overlap (UI panel, 19 Nov 2026: "Jo out"
+    // ran into "What changed" at 390): the fold sits below the text, at every width, open or not
+    const overlaps = [];
+    for (const w of [320, 390, 600, 1024, 1280]) {
+        await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: 844, deviceScaleFactor: 2, mobile: w < 600});
+        await sleep(150);
+        for (const open of [false, true]) {
+            const r = await tab.evaluate(`(() => {
+              const fold = document.querySelector('#wh-h')?.closest('section').querySelector('.pv-list li > details.fold');
+              if (!fold) return null;
+              fold.open = ${open};
+              const text = fold.parentElement.querySelector(':scope > span').getBoundingClientRect();
+              const sum = fold.querySelector('summary').getBoundingClientRect();
+              return {textBottom: text.bottom, foldTop: fold.getBoundingClientRect().top, sumLeft: sum.left, textLeft: text.left};
+            })()`);
+            if (r === null || r.foldTop < r.textBottom - 0.5 || Math.abs(r.sumLeft - r.textLeft) > 1) {
+                overlaps.push({w, open, ...r});
+            }
+        }
+    }
+    await tab.evaluate('document.querySelector("#wh-h").closest("section").querySelector(".pv-list li > details.fold").open = false');
+    await tab.send('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
+    await sleep(150);
+    report(overlaps.length === 0, 'What happens: "What changed" sits below its line, aligned with the text, from 320 to 1280 px', JSON.stringify(overlaps));
     const noButton = await tab.evaluate('!document.querySelector("[data-redraw], [formmethod]") && !document.body.innerText.includes("Update preview")');
     report(noButton, 'the assign page has no "Update preview" button');
     if (shotsDir) {
@@ -664,20 +805,21 @@ try {
         report(!text.includes('Still to do') && !text.includes('Upload without') && notes === '', `/manage/team/${slug} shows no hole`, notes);
     }
 
-    // ---- 3c: Back of the live plan asks in the page; then it offers the way back ----
+    // ---- 3c: Restore of the live plan asks in its place (the gate is open); then it offers the way back ----
     await open('/manage/team/rollers');
-    const back1 = 'd => d.querySelector("summary").textContent.startsWith("Back to v1")';
+    const back1 = 'f => f.querySelector("[data-arm-open]").textContent.startsWith("Restore v1")';
     let cf = await openConfirm(back1);
-    report(cf.open && cf.below && cf.focused && cf.others === 0, 'Back to v1: the confirm opens below its summary, its button focused', JSON.stringify(cf));
+    report(cf.open && cf.inPlace && cf.focused && cf.described && cf.group && cf.triggerGone && cf.others === 0,
+        'Restore v1: the strip opens in its place, its confirm button focused and described by the words', JSON.stringify(cf));
     let liveNow = liveOf('rollers');
     report(liveNow === newestOf(fastPlan)[0], 'opening it changes nothing');
     let pressed = await pressConfirm(back1);
     report(pressed.post?.url === '/manage/plan/back' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), 'Back posts confirm=1', JSON.stringify(pressed.post));
     let fl = await flash();
-    report(fl.startsWith('Back to v1:'), 'the flash says "Back to v1:"', JSON.stringify(fl));
+    report(fl.startsWith('Restored v1:'), 'the flash says "Restored v1:"', JSON.stringify(fl));
     report(club().sheets[liveOf('rollers')].n === 3, 'v3 (the copy of v1) is live');
-    report(await tab.evaluate('[...document.querySelectorAll(".planrow.live summary")].some(s => s.textContent.startsWith("Back to v2"))'),
-        'the live row then offers "Back to v2"');
+    report(await tab.evaluate('[...document.querySelectorAll(".planrow.live [data-arm-open]")].some(s => s.textContent.startsWith("Restore v2"))'),
+        'the live row then offers "Restore v2"');
 
     // ---- 3e: a refused Store keeps what the captain touched; Store does not race the date ----
     await open('/manage/upload?team=rollers');
@@ -708,28 +850,50 @@ try {
     s = JSON.parse(await tab.evaluate(state));
     report(redrawn && s.as === 'new' && s.type === 'tempo' && s.touched === 'type', 'the next redraw keeps the typed type', JSON.stringify(s));
     const entry = tempoAt.split('/').at(-1);
-    await follow('document.querySelector("form[action$=\'/discard\'] [type=submit]").click()');
+    // Discard: on a line of its own, set apart from Store; it asks first in its place
+    const gap = await tab.evaluate(`(() => { const a = document.querySelector('[data-submit]').getBoundingClientRect();
+      const b = document.querySelector('form.discard [data-arm-open]').getBoundingClientRect(); return b.top - a.bottom; })()`);
+    report(gap >= 24, 'Discard sits at least 24 px below Store', `${gap} px`);
+    const discard = 'f => f.matches(".discard")';
+    cf = await openConfirm(discard);
+    report(cf.open && cf.focused && cf.button === 'Discard plan' && club().inbox.some(e => e.id === entry), 'Discard asks first; nothing discarded yet', JSON.stringify(cf));
+    if (shotsDir) {
+        await shootView('captain-assign-armed-390-light.png');
+    }
+    await pressConfirm(discard);
     report((await flash()).startsWith('Discarded') && !club().inbox.some(e => e.id === entry), 'Discard', await flash());
 
-    // ---- the way back at 1280: a back bar is a link line above the page's head, without the club
-    // name (the sidebar names it); the team page's switcher stays hidden; at 390 the bar as before ----
+    // ---- the way back (UI panel wave 3): at 1280 one breadcrumb line above the page's head instead of
+    // the back bar and the kicker, its crumb before the page where the phone's bar goes; the team
+    // page's switcher stays hidden; at 390 the bar as before and no breadcrumb ----
     const way = `JSON.stringify((() => {
+      const shown = el => Boolean(el) && el.getClientRects().length > 0;
       const a = document.querySelector('.app>.topbar .back'), club = document.querySelector('.app>.topbar .topbar-club'), h = document.querySelector('main h1');
-      return {href: a && a.offsetParent !== null ? a.getAttribute('href') : null, club: club ? club.offsetParent !== null : null,
-        above: a && h ? a.getBoundingClientRect().bottom <= h.getBoundingClientRect().top : null};
+      const nav = document.querySelector('nav.crumbs'), links = nav ? [...nav.querySelectorAll('a')] : [];
+      const kicker = [...document.querySelectorAll('main .pagehead .kicker')].some(shown);
+      return {bar: shown(a) ? a.getAttribute('href') : null, club: club ? shown(club) : null, crumbs: shown(nav) ? [...nav.querySelectorAll('li')].map(li => li.querySelector('a, [aria-current]').textContent).join(' › ') : null,
+        parent: links.length ? links.at(-1).getAttribute('href') : null, current: nav?.querySelector('[aria-current=page]')?.textContent ?? null,
+        above: shown(nav) && h ? nav.getBoundingClientRect().bottom <= h.getBoundingClientRect().top : null, kicker};
     })())`;
-    for (const [p, href] of [[`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`, `/manage/team/rollers/plan/${fastPlan}`],
-        ['/manage/upload?team=rollers', '/manage/team/rollers'], [`/manage/team/rollers/plan/${fastPlan}`, '/manage/team/rollers'],
-        ['/manage/team/rollers/settings', '/manage/team/rollers'], ['/manage/new-team', '/manage'], ['/manage/settings', '/manage']]) {
+    for (const [p, href, crumbs] of [[`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`, `/manage/team/rollers/plan/${fastPlan}`, 'Kettenfett RC › Rollers › Rollers · fast › Upload'],
+        ['/manage/upload?team=rollers', '/manage/team/rollers', 'Kettenfett RC › Rollers › Upload'],
+        [`/manage/team/rollers/plan/${fastPlan}`, '/manage/team/rollers', 'Kettenfett RC › Rollers › Rollers · fast'],
+        ['/manage/team/rollers/settings', '/manage/team/rollers', 'Kettenfett RC › Rollers › Team settings'], ['/manage/new-team', '/manage', 'Kettenfett RC › Add a team'],
+        ['/manage/settings', '/manage', 'Kettenfett RC › Club settings'], ['/manage/team/rollers', '/manage', 'Kettenfett RC › Rollers']]) {
         await open(p, {w: 1280});
         const wb = JSON.parse(await tab.evaluate(way));
-        report(wb.href === href && wb.club === false && wb.above === true, `at 1280 ${p} shows the way back above its head, no club name`, JSON.stringify(wb));
+        report(wb.bar === null && wb.crumbs === crumbs && wb.parent === href && wb.above === true && !wb.kicker,
+            `at 1280 ${p}: the breadcrumb "${crumbs}" above its head, no back bar, no kicker`, JSON.stringify(wb));
+        await open(p);
+        const ph = JSON.parse(await tab.evaluate(way));
+        // (the team page's bar is its switcher, whose back link goes to the hub)
+        report(ph.crumbs === null && ph.bar === href, `at 390 ${p}: the bar goes where the crumb before the page goes, no breadcrumb`, JSON.stringify(ph));
     }
-    await open('/manage/team/rollers', {w: 1280});
-    report(JSON.parse(await tab.evaluate(way)).href === null, 'at 1280 the team page shows no top bar');
+    await open('/manage', {w: 1280});
+    report(JSON.parse(await tab.evaluate(way)).crumbs === null, 'at 1280 the hub has no breadcrumb');
     await open(`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`);
     const phone = JSON.parse(await tab.evaluate(way));
-    report(phone.href === `/manage/team/rollers/plan/${fastPlan}` && phone.club === true, 'at 390 the bar goes back to the plan and names the club', JSON.stringify(phone));
+    report(phone.bar === `/manage/team/rollers/plan/${fastPlan}` && phone.club === true, 'at 390 the bar goes back to the plan and names the club', JSON.stringify(phone));
 
     // ---- shots for a look next to the prototype's ----
     if (shotsDir) {
@@ -835,7 +999,8 @@ try {
             ['team-settings', '/manage/team/rollers/settings'], ['club-settings', '/manage/settings', 390], ['new-team', '/manage/new-team', 390],
             ['upload', '/manage/upload?team=rollers', 390], ['upload-from-plan', `/manage/upload?team=rollers&plan=${fastPlan}&from=plan`, 390],
             ['plan', `/manage/team/rollers/plan/${fastPlan}`],
-            ['team-gone', '/manage/team/nope', 390], ['plan-gone', '/manage/team/rollers/plan/zzzzzz', 390], ['entry-gone', '/manage/inbox/zzzzzz', 390]];
+            ['team-gone', '/manage/team/nope', 390], ['plan-gone', '/manage/team/rollers/plan/zzzzzz', 390], ['entry-gone', '/manage/inbox/zzzzzz', 390],
+            ['not-found', '/manage/nothing', 390], ['privacy', '/privacy', 390]];
         for (const [name, p, also] of pages) {
             await shoot(`captain-${name}-1280-light.png`, p, 1280, 'light', true);
             if (also) {
@@ -860,14 +1025,46 @@ try {
         report(await signedIn(), 'signed in again after the shots');
     }
 
-    // ---- 4: the guarded reload waits while a confirm is open ----
+    // ---- the hub with nothing to do and nothing waiting (UI panel wave 3): Spokesmen CC gets a team
+    // with its live plan for tonight; one line says so, tonight's race still shows ----
+    {
+        const spokes = c2.club.id;
+        srv.store.change(spokes, cl => {
+            const slug = addTeam(cl, {name: 'Pedals', start: '20:00'}, {slugTaken: s2 => srv.store.slugTaken(s2), now: NOW});
+            upload(cl, slug, {riders: ['2001', '2002', '2003'], at: T('2026-11-19T15:00:00Z')});
+        });
+        await signIn(`${token2}.${token}`);
+        for (const w of [390, 1280]) {
+            tab.logs.length = 0;
+            await open('/manage', {w});
+            const h = JSON.parse(await tab.evaluate(`JSON.stringify({line: document.querySelector('.sevline.nothing')?.innerText.trim() ?? null,
+              blocks: document.querySelectorAll('#todo-h, #recv-h').length, races: document.querySelectorAll('.racetable').length, h1: document.querySelector('h1').textContent})`));
+            report(h.h1 === 'Spokesmen CC' && h.line === 'Nothing to do · next race Thu 19 Nov 20:00' && h.blocks === 0 && h.races === 1,
+                `at ${w} a hub with nothing to do says so in one line`, JSON.stringify(h));
+            if (w === 390) {
+                await clean('/manage (nothing to do)');
+            }
+            if (shotsDir) {
+                await shootNow(`captain-hub-empty-${w}-light.png`, w);
+            }
+        }
+        await signIn();
+        await open('/manage');
+        report(await signedIn() && await tab.evaluate('document.querySelector("h1").textContent') === 'Kettenfett RC', 'Kettenfett RC again');
+    }
+
+    // ---- 4: the guarded reload waits while a strip is open ----
     tab.logs.length = 0;
     await open('/manage/team/rollers');
-    const slowRow = 'd => d.closest(".planrow") && !d.closest(".planrow.live") && d.querySelector("form[action=\'/manage/live\']")';
-    await tab.evaluate(`window.__mark = 1; ${CONFIRM(slowRow)}.open = true`);
+    const slowRow = 'f => f.closest(".planrow") && !f.closest(".planrow.live") && f.getAttribute("action") === "/manage/live"';
+    await tab.evaluate('window.__mark = 1');
+    cf = await openConfirm(slowRow);
+    report(cf.open, 'the row\'s Make live strip is open', JSON.stringify(cf));
+    // the focus on a button holds nothing: only the open strip does
     await sleep(35000);
-    report(await tab.evaluate('window.__mark') === 1, 'no reload while a row\'s Make live confirm is open');
-    await tab.evaluate(`${CONFIRM(slowRow)}.open = false`);
+    report(await tab.evaluate('window.__mark') === 1, 'no reload while a row\'s Make live strip is open');
+    await key('Escape', 'Escape', 27);
+    await tab.evaluate('document.activeElement.blur()');
     await sleep(35000);
     report(await tab.evaluate('typeof window.__mark') === 'undefined', 'reload once it is closed');
     report(!tab.logs.length, 'reload without errors', tab.logs.join('; '));
@@ -884,11 +1081,12 @@ try {
     report(stale.shown && stale.text.includes('Not updated since 19:12 · no connection'), 'stale line when offline', JSON.stringify(stale.text));
     report(stale.dim, 'the Updated line is marked stale');
 
-    // ---- 3d: Make live on a row asks first; so does "Make v2 live" ----
+    // ---- 3d: Make live on a row asks first (the gate is open); so does "Make v2 live" ----
     await open('/manage/team/rollers');
     liveNow = liveOf('rollers');
     cf = await openConfirm(slowRow);
-    report(cf.open && cf.below && cf.inView && cf.focused, 'Make live on a row: the confirm opens below its summary', JSON.stringify(cf));
+    report(cf.open && cf.inPlace && cf.inView && cf.focused && cf.described, 'Make live on a row: the strip opens in its place', JSON.stringify(cf));
+    report(cf.width === cf.row, 'at 390 the strip takes the row\'s whole width', `${cf.width} of ${cf.row}`);
     await sleep(500);
     report(liveOf('rollers') === liveNow, 'team.live unchanged until the button is pressed');
     pressed = await pressConfirm(slowRow);
@@ -902,9 +1100,9 @@ try {
     }, {now: NOW, newId: () => randomId(6)}));
     const [slowV2] = newestOf(slowPlan);
     await open('/manage/team/rollers');
-    const newer = 'd => d.querySelector("summary").textContent.startsWith("Make v2 live")';
+    const newer = 'f => f.querySelector("[data-arm-open]").textContent.startsWith("Make v2 live")';
     cf = await openConfirm(newer);
-    report(cf.open && cf.below && cf.focused, '"Make v2 live": the confirm opens below its summary', JSON.stringify(cf));
+    report(cf.open && cf.inPlace && cf.focused, '"Make v2 live": the strip opens in its place', JSON.stringify(cf));
     report(liveOf('rollers') === rollersSlow, 'team.live unchanged until the button is pressed');
     pressed = await pressConfirm(newer);
     report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), '"Make v2 live" posts confirm=1', JSON.stringify(pressed.post));
@@ -916,10 +1114,10 @@ try {
     await open('/manage/team/rollers', {on: plain});
     const [fastNewest] = newestOf(fastPlan);
     const info = JSON.parse(await plain.evaluate(`JSON.stringify({js: document.documentElement.classList.contains('js'),
-      noteShown: [...document.querySelectorAll('p.banner.warn')].some(p => p.textContent === 'This page needs JavaScript. Make live still works without it.' && p.getBoundingClientRect().height > 0)})`));
+      noteShown: [...document.querySelectorAll('p.banner.warn')].some(p => p.textContent === 'This page needs JavaScript. Make live and every button that asks first still work without it.' && p.getBoundingClientRect().height > 0)})`));
     report(!info.js && info.noteShown, 'without the script: no html.js, and the page says it needs JavaScript', JSON.stringify(info));
-    // the row's Make live, opened by a real tap on its summary (a <details> needs no script); its
-    // form sent without confirm, as any POST without it: the server asks on a page of its own
+    // the row's Make live: without the script its strip stays hidden and the button posts without
+    // confirm, as any POST without it: the server asks on a page of its own
     const pdoc = await plain.send('DOM.getDocument', {depth: -1});
     const nodeOf = async selector => (await plain.send('DOM.querySelector', {nodeId: pdoc.result.root.nodeId, selector})).result?.nodeId ?? 0;
     const tap = async nodeId => {
@@ -935,21 +1133,15 @@ try {
             await plain.send('Input.dispatchMouseEvent', {type, x, y: yy, button: 'left', clickCount: 1});
         }
     };
-    // (:has cannot nest) the confirm whose Make live form names that version
-    const rowConfirm = `details.confirm:has(form[action="/manage/live"] input[name=sheet][value="${fastNewest}"])`;
-    const rowForm = `${rowConfirm} form[action="/manage/live"]`;
-    const rowSummary = await nodeOf(`${rowConfirm} > summary`);
-    if (!rowSummary) {
-        throw new Error(`no Make live for ${fastNewest}: ${await plain.evaluate('JSON.stringify([...document.querySelectorAll("form[action=\'/manage/live\'] input[name=sheet]")].map(i => i.value))')}, `
-            + `in the page ${await plain.evaluate(`Boolean(document.querySelector(${JSON.stringify(`${rowConfirm} > summary`)}))`)}`);
+    const rowForm = `form[action="/manage/live"]:has(input[name=sheet][value="${fastNewest}"])`;
+    const rowButton = await nodeOf(`${rowForm} [data-arm-open]`);
+    if (!rowButton) {
+        throw new Error(`no Make live for ${fastNewest}: ${await plain.evaluate('JSON.stringify([...document.querySelectorAll("form[action=\'/manage/live\'] input[name=sheet]")].map(i => i.value))')}`);
     }
-    await tap(rowSummary);
-    await sleep(300);
-    report(await plain.evaluate(`document.querySelector(${JSON.stringify(rowConfirm)}).open`), 'without the script the confirm opens by a tap');
-    await plain.send('DOM.removeNode', {nodeId: await nodeOf(`${rowForm} input[name=confirm]`)});
+    report(await plain.evaluate(`document.querySelector(${JSON.stringify(`${rowForm} [data-arm-strip]`)}).getClientRects().length === 0`), 'without the script the strip stays hidden');
     plain.posts.length = 0;
     let loaded = plain.once('Page.loadEventFired');
-    await tap(await nodeOf(`${rowForm} [type=submit]`));
+    await tap(rowButton);
     await loaded;
     await sleep(250);
     text = await pageText(plain);
@@ -973,14 +1165,159 @@ try {
     // ---- 7: Delete plan on the plan page asks in the page first ----
     tab.logs.length = 0;
     await open(`/manage/team/rollers/plan/${slowPlan}`);
-    const del = 'd => d.querySelector("summary").textContent.includes("Delete plan")';
+    const del = 'f => f.getAttribute("action") === "/manage/sheet/delete"';
     cf = await openConfirm(del);
-    report(cf.open && cf.below && cf.focused, 'Delete plan: the confirm opens below its summary', JSON.stringify(cf));
+    report(cf.open && cf.inPlace && cf.focused && cf.button.startsWith('Delete'), 'Delete plan: the strip opens in its place', JSON.stringify(cf));
+    report(await tab.evaluate(`getComputedStyle(${ARM(del)}.querySelector('[data-arm-yes]')).backgroundColor !== getComputedStyle(${ARM(del)}.querySelector('[data-arm-cancel]')).backgroundColor`),
+        'its confirm button has the danger style');
     report(Object.values(club().sheets).some(x => x.plan === slowPlan), 'nothing deleted until the button is pressed');
     pressed = await pressConfirm(del);
     report(pressed.post?.url === '/manage/sheet/delete' && await pathOf() === '/manage/team/rollers'
         && !Object.values(club().sheets).some(x => x.plan === slowPlan), 'Delete plan deletes it and goes back to the team page', `${JSON.stringify(pressed.post)} ${await flash()}`);
     report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, 'confirms without errors', tab.logs.join('; '));
+
+    // ---- 9: arm in place, by keyboard and touch: Esc, the 450 ms guard, one strip at a time; a
+    // switch before the gate goes at once and Undo takes it back; shots of the strips ----
+    tab.logs.length = 0;
+    // two more plans of tonight's race with the live plan's riders (no move, no mark: before the gate
+    // they go at once)
+    const liveRiders = Object.keys(club().sheets[liveOf('rollers')].json.riders);
+    for (const type of ['spare', 'easy']) {
+        srv.store.change(CID, cl => uploadSheet(cl, {
+            slug: 'rollers', json: planJson(`Rollers ${type}`, liveRiders), text: null, date: '2026-11-19', as: 'new', type, live: false,
+            base: cl.teams.rollers.version, pinnedEventId: null, via: 'file',
+        }, {now: NOW, newId: () => randomId(6)}));
+    }
+    await open('/manage/team/rollers');
+    const rowOf = label => `f => f.getAttribute("action") === "/manage/live" && f.closest(".planrow")?.querySelector(".label")?.textContent === "${label}"`;
+    const spareRow = rowOf('Rollers · spare');
+    // the keyboard: Enter on the trigger arms it, Esc closes it and gives the focus back
+    await tab.evaluate(`${ARM(spareRow)}.querySelector('[data-arm-open]').focus()`);
+    await key('Enter', 'Enter', 13, '\r');
+    await sleep(500);
+    let st = JSON.parse(await tab.evaluate(strip(spareRow)));
+    report(st.open && st.focused && st.described && st.group, 'Enter on Make live opens its strip, the confirm button focused', JSON.stringify(st));
+    await key('Escape', 'Escape', 27);
+    await sleep(200);
+    st = JSON.parse(await tab.evaluate(strip(spareRow)));
+    report(!st.open && await tab.evaluate(`document.activeElement === ${ARM(spareRow)}.querySelector('[data-arm-open]')`), 'Esc closes it, the focus back on Make live', JSON.stringify(st));
+    // Cancel closes it too
+    cf = await openConfirm(spareRow);
+    await clickAt(await rectOf(`${ARM(spareRow)}.querySelector('[data-arm-cancel]')`, false));
+    await sleep(200);
+    report(cf.open && !JSON.parse(await tab.evaluate(strip(spareRow))).open, 'Cancel closes it');
+    // a double tap: the second press lands on the confirm button within 450 ms and is ignored
+    tab.posts.length = 0;
+    const liveBefore = liveOf('rollers');
+    await clickAt(await rectOf(`${ARM(spareRow)}.querySelector('[data-arm-open]')`));
+    await clickAt(await rectOf(`${ARM(spareRow)}.querySelector('[data-arm-yes]')`, false));
+    await sleep(600);
+    st = JSON.parse(await tab.evaluate(strip(spareRow)));
+    report(st.open && tab.posts.length === 0 && liveOf('rollers') === liveBefore, 'a press of the confirm button within 450 ms of arming is ignored', `${tab.posts.length} posts ${JSON.stringify(st)}`);
+    // one strip at a time
+    cf = await openConfirm(rowOf('Rollers · easy'));
+    st = JSON.parse(await tab.evaluate(strip(spareRow)));
+    report(cf.open && cf.others === 0 && !st.open, 'opening another strip closes the first', JSON.stringify({cf, st}));
+    await key('Escape', 'Escape', 27);
+    // Remove a rider: the strip's words follow the field when it is edited after arming (review M3)
+    await open('/manage/settings');
+    await tab.evaluate('(() => { const i = document.querySelector("input[name=zwiftId]"); i.value = "1003"; })()');
+    await openConfirm('f => f.getAttribute("action") === "/manage/rider/remove"');
+    await tab.evaluate('(() => { const i = document.querySelector("input[name=zwiftId]"); i.focus(); i.setSelectionRange(4, 4); })()');
+    await tab.send('Input.insertText', {text: '4'});
+    await sleep(200);
+    report(await tab.evaluate('document.querySelector("[data-arm-fill=zwiftId]").textContent') === '10034', 'the Remove strip names the Zwift ID as edited after arming',
+        await tab.evaluate('document.querySelector("[data-arm-fill=zwiftId]").textContent'));
+    await key('Escape', 'Escape', 27);
+    await open('/manage/team/rollers');
+    // shots of open strips at 390 and 1280
+    if (shotsDir) {
+        for (const w of [390, 1280]) {
+            await open('/manage/team/rollers', {w});
+            await openConfirm(spareRow);
+            await shootView(`captain-team-armed-${w}-light.png`);
+            await open(`/manage/team/rollers/plan/${fastPlan}`, {w});
+            await openConfirm(del);
+            await shootView(`captain-plan-armed-${w}-light.png`);
+            await open('/manage/team/rollers/settings', {w});
+            await openConfirm('f => f.closest(".danger-zone")');
+            await shootView(`captain-team-settings-armed-${w}-light.png`);
+            await open('/manage/settings', {w});
+            await tab.evaluate('(() => { const i = document.querySelector("input[name=zwiftId]"); i.value = "1003"; })()');
+            await openConfirm('f => f.getAttribute("action") === "/manage/rider/remove"');
+            report((await tab.evaluate('document.querySelector("[data-arm-fill=zwiftId]").textContent')) === '1003', `at ${w} Remove a rider names the Zwift ID typed`);
+            await shootView(`captain-club-settings-armed-${w}-light.png`);
+            if (w === 1280) {
+                let entryId = null;
+                srv.store.change(CID, cl => {
+                    entryId = addEntry(cl, {source: 'upload', team: 'rollers', json: planJson('Rollers tempo', ['1001', '1002', '1003']), text: null}, {now: NOW, newId: () => randomId(6)});
+                });
+                await open(`/manage/inbox/${entryId}`, {w});
+                await openConfirm('f => f.matches(".discard")');
+                await shootView('captain-assign-armed-1280-light.png');
+            }
+        }
+        await open('/manage/team/rollers');
+    }
+    // a double click on the strip's confirm button, past the 450 ms guard: one POST (review M1)
+    const easyRow = rowOf('Rollers · easy');
+    await open('/manage/team/rollers');
+    await openConfirm(easyRow);
+    tab.posts.length = 0;
+    const yesAt = await rectOf(`${ARM(easyRow)}.querySelector('[data-arm-yes]')`, false);
+    const answered = tab.once('Page.loadEventFired', 4000);
+    await clickAt(yesAt);
+    await clickAt(yesAt);
+    await answered;
+    await sleep(500);
+    report(tab.posts.filter(x => x.url === '/manage/live').length === 1 && !(await flash()).includes('Nothing was changed'), 'a double click on the confirm button posts once',
+        `${JSON.stringify(tab.posts)} ${await flash()}`);
+    // before the gate (18:40), a switch with nothing to warn about goes at once, with Undo: Axles,
+    // 19:30, two plans of riders no other team lists
+    let axles = null;
+    srv.store.change(CID, cl => {
+        axles = addTeam(cl, {name: 'Axles', start: '19:30'}, {slugTaken: s2 => srv.store.slugTaken(s2), now: NOW});
+        for (const [type, live] of [['a', true], ['b', false]]) {
+            uploadSheet(cl, {slug: axles, json: planJson(`Axles ${type}`, ['2001', '2002', '2003']), text: null, date: '2026-11-19', as: 'new', type, live,
+                base: cl.teams[axles].version, pinnedEventId: null, via: 'file'}, {now: NOW, newId: () => randomId(6)});
+        }
+    });
+    clock.now = T('2026-11-19T17:40:00Z');
+    await open(`/manage/team/${axles}`);
+    const plainRow = 'document.querySelector(".planrow:not(.live) form[action=\'/manage/live\']:not([data-arm]) [type=submit]")';
+    const hasPlain = await tab.evaluate(`${plainRow} !== null`);
+    report(hasPlain, 'before the gate a row\'s Make live is a plain button');
+    // where the live row and its Undo are once the page has come back (#plan-<id>): in the viewport,
+    // below the sticky top bar (user, 19 Nov 2026: Undo where the action was)
+    const placed = `JSON.stringify((() => {
+      const row = document.querySelector('.planrow.live'), line = row?.querySelector('.flash');
+      const bar = [...document.querySelectorAll('.topbar')].find(b => b.getClientRects().length && getComputedStyle(b).position === 'sticky');
+      const r = (line ?? row).getBoundingClientRect();
+      return {hash: location.hash, id: row?.id ?? null, undo: Boolean(line?.querySelector('form[action="/manage/live/undo"]')), text: line?.querySelector('p')?.textContent ?? '',
+        top: Math.round(r.top), bottom: Math.round(r.bottom), ih: innerHeight, bar: bar ? Math.round(bar.getBoundingClientRect().bottom) : 0,
+        topFlash: [...document.querySelectorAll('.flash')].some(f => !f.closest('.planrow'))};
+    })())`;
+    for (const w of hasPlain ? [390, 1280] : []) {
+        await open(`/manage/team/${axles}`, {w});
+        const was = liveOf(axles);
+        tab.posts.length = 0;
+        await tab.evaluate('scrollTo(0, document.documentElement.scrollHeight)');
+        await follow(`${plainRow}.click()`);
+        let at = JSON.parse(await tab.evaluate(placed));
+        report(liveOf(axles) !== was && !/confirm=/.test(tab.posts.at(-1)?.body ?? 'confirm=') && at.undo && !at.topFlash && at.hash === `#${at.id}`,
+            `at ${w} it goes live at once and lands on the live row, its Undo in that row, no top flash`, JSON.stringify(at));
+        report(at.top >= at.bar && at.bottom <= at.ih, `at ${w} the live row's Undo is in view, below the top bar`, JSON.stringify(at));
+        if (shotsDir) {
+            await shootView(`captain-team-undo-${w}-light.png`);
+        }
+        await follow('document.querySelector(".planrow.live .flash.undo form [type=submit]").click()');
+        at = JSON.parse(await tab.evaluate(placed));
+        report(liveOf(axles) === was && at.text.startsWith('Undone:') && !at.undo && !at.topFlash && at.top >= at.bar && at.bottom <= at.ih,
+            `at ${w} Undo makes the version before live again, said in its row`, JSON.stringify(at));
+    }
+    clock.now = NOW;
+    srv.store.change(CID, cl => deleteTeam(cl, axles, NOW));
+    report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, 'arm in place without errors', tab.logs.join('; '));
 
     // ---- shots of the pages that answer a POST: the no-script questions, the new rider code (last:
     // it makes the club private) ----
@@ -996,7 +1333,8 @@ try {
         const notLive = Object.entries(club().sheets).find(([id, x]) => x.team === 'rollers' && id !== liveOf('rollers'))?.[0];
         for (const [name, action, fields] of [['live-confirm', '/manage/live', {team: 'rollers', sheet: notLive}],
             ['back-confirm', '/manage/plan/back', {team: 'rollers', plan: fastPlan, n: '2', version: String(club().teams.rollers.version)}],
-            ['code', '/manage/code', {action: 'on'}]]) {
+            ['delete-confirm', '/manage/sheet/delete', {team: 'rollers', sheet: notLive}],
+            ['code', '/manage/code', {action: 'on', confirm: '1'}]]) {
             await postPage(action, fields);
             await shootNow(`captain-${name}-1280-light.png`, 1280);
             await shootNow(`captain-${name}-390-light.png`);

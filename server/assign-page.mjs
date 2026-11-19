@@ -5,7 +5,7 @@
 // no button for that (decision 13). The page an entry that is gone answers. Neither reloads itself. Pure: it reads the club, the entry and the choices it is given, and the clock is passed in.
 // Every value goes through esc().
 import {esc, t} from './pages.mjs';
-import {captainPage, flashBlock, hidden, backBar} from './ui.mjs';
+import {captainPage, flashBlock, hidden, placeNav} from './ui.mjs';
 import {ic} from './icons.mjs';
 import {atLabel, dateDay, ridersLine, nameOf} from './team-view.mjs';
 import {
@@ -13,14 +13,42 @@ import {
 } from './upload-page.mjs';
 import {diffSummary} from './diff.mjs';
 import {teamHint} from './club.mjs';
-import {plannedStart, effects, PLAN_OPEN_MS} from './select.mjs';
+import {plannedStart, effects, raceStartAt, PLAN_OPEN_MS} from './select.mjs';
 import {localLabel, isDate, HHMM_RE, zonedToUtc} from './time.mjs';
 import {planOfId, ridersShared} from './plans.mjs';
 import {entryPlan} from './preselect.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
+import {discardForm} from './team-page.mjs';
 
 const inboxPath = id => `/manage/inbox/${id}`;
 const teamPath = slug => `/manage/team/${slug}`;
+
+
+// Where the assign page, Discard and the result of `entry` go back to: {href, label}. The plan's page
+// when the upload came from it (its New version: entry.fromPlan) and the plan still exists; else the
+// page of the team the upload was made for; else the teams (the club's name).
+export function entryBack(club, entry) {
+    const slug = typeof entry.team === 'string' && Object.hasOwn(club.teams, entry.team) ? entry.team : null;
+    if (slug === null) {
+        return {href: '/manage', label: club.name};
+    }
+    const p = entry.fromPlan === true && typeof entry.forPlan === 'string' ? planOfId(club, slug, entry.forPlan) : null;
+    return p !== null ? {href: `/manage/team/${slug}/plan/${p.id}`, label: p.label} : {href: teamPath(slug), label: club.teams[slug].name};
+}
+
+
+// The crumbs between the club and a page of `entry` (placeNav), ending at entryBack's page: the team
+// the upload was made for, and the plan when it came from that plan's New version; none for an entry
+// of no team.
+export function entryTrail(club, entry) {
+    const back = entryBack(club, entry);
+    if (back.href === '/manage') {
+        return [];
+    }
+    const slug = entry.team;
+    const team = {href: teamPath(slug), label: club.teams[slug].name};
+    return back.href === team.href ? [team] : [team, back];
+}
 
 
 // What Store would do, from its dry run (spec §6.6): {lines, diff, riders, withText, button, same};
@@ -44,14 +72,16 @@ export function assignPreview(before, after, entry, {result, live, now}) {
     const S = plannedStart(after, sheet);
     const when = S === null ? null : localLabel(S, tz);
     const at = S === null ? null : atLabel(S - PLAN_OPEN_MS, now, tz);
+    // after the gate riders in the event get it within a minute, not "from 19:00"
+    const phase = S === null ? '-no-start' : now >= S - PLAN_OPEN_MS ? '-open' : '';
     // the same file as a version: nothing stored, but the box can still make that version live
     const wasLive = before.teams[slug].live === result.id;
     if (result.same && result.live && !wasLive) {
-        lines.push({sev: 'ok', text: t(`as-pv-same-live${S === null ? '-no-start' : ''}`, {n, when, at})});
+        lines.push({sev: 'ok', text: t(`as-pv-same-live${phase}`, {n, when, at})});
     } else if (result.same) {
         lines.push({sev: 'info', text: t('as-pv-same', {n})});
     } else if (result.live) {
-        const key = `as-pv-${result.created ? 'new-' : ''}live${S === null ? '-no-start' : ''}`;
+        const key = `as-pv-${result.created ? 'new-' : ''}live${phase}`;
         lines.push({sev: 'ok', text: t(key, {n, label, when, at})});
     } else {
         const kept = keptOf(after, slug, now);
@@ -154,13 +184,19 @@ function plansHtml(club, entry, choices, now) {
 
 // The type, its suggestions and its hint; the "Make live" box, its label saying what ticking it does
 // for the chosen plan (with no plan chosen: pick one first). The same file as the plan's newest
-// version stores nothing: the label names that version, or says riders have it already.
-function typeLiveHtml(club, choices, preview) {
+// version stores nothing: the label names that version, or says riders have it already. A new
+// version of the live plan says when riders get it: before the race's gate from its time, never "at
+// once" (review M2, as liveWords).
+function typeLiveHtml(club, choices, preview, now) {
     const {team, type, types, typeNeeded, date, live} = choices;
     let {liveKind, liveVars} = choices;
     const same = preview?.same ?? null;
     if (same !== null && liveKind === 'live-plan') {
         [liveKind, liveVars] = same.live ? ['is-live', {n: same.n}] : [liveKind, {...liveVars, n: same.n}];
+    }
+    const S = liveKind === 'live-plan' && team !== null && isDate(date) ? raceStartAt(club, team, date) : null;
+    if (S !== null && now < S - PLAN_OPEN_MS) {
+        [liveKind, liveVars] = ['live-plan-later', {...liveVars, at: atLabel(S - PLAN_OPEN_MS, now, club.tz)}];
     }
     const hint = typeNeeded ? t('as-type-needed', {team: nameOf(club, team), day: dateDay(date, club.tz)}) : t('as-type-optional');
     return `<label class="field">${esc(t('as-type'))} <input name="type" maxlength="30" value="${esc(type)}" list="types" autocomplete="off"></label>`
@@ -193,7 +229,8 @@ function whatHtml(preview) {
 // The assign page of `entry` (spec §6.1). `choices` is assignChoices' (or, after a refused Store, the
 // form's), `preview` assignPreview's, {error} or null (no team, or over the parse budget), `flash` a
 // refusal's text at the top. Store posts the form; the script sends it as a GET of this page to
-// redraw it (data-assign; `touched` is its field). Discard is a form of its own, after it.
+// redraw it (data-assign; `touched` is its field). Discard is a form of its own, after it on a line of
+// its own, set apart from Store (P2), and asks first in its place.
 export function assignPage(club, entry, {now, seen, others, choices, preview, flash = null}) {
     const tz = club.tz;
     const {team} = choices;
@@ -223,12 +260,16 @@ export function assignPage(club, entry, {now, seen, others, choices, preview, fl
     const choose = team === null ? '' : `
       ${raceHtml(club, choices)}
       ${plansHtml(club, entry, choices, now)}
-      ${typeLiveHtml(club, choices, preview)}${above ? `
+      ${typeLiveHtml(club, choices, preview, now)}${above ? `
       ${when}` : ''}`;
     const button = preview?.button ?? t(choices.live ? 'as-store-live' : 'as-store');
-    const back = typeof entry.team === 'string' && Object.hasOwn(club.teams, entry.team) ? teamPath(entry.team) : '/manage';
+    const {href: back} = entryBack(club, entry);
+    // the bar and the crumbs go where Discard goes: the plan the upload came from, or the team it was
+    // made for, not the one chosen here
+    const nav = placeNav(club, [...entryTrail(club, entry), {label: t('as-heading')}]);
     const main = `<main class="page" id="main">
-  <header class="pagehead">${home === null ? `<p class="kicker desk">${esc(club.name)}</p>` : `<p class="kicker">${esc(nameOf(club, home))}</p>`}<h1>${esc(t('as-heading'))}</h1></header>
+  ${nav.crumbs}
+  <header class="pagehead">${home === null ? '' : `<p class="kicker">${esc(nameOf(club, home))}</p>`}<h1>${esc(t('as-heading'))}</h1></header>
   ${flashBlock(flash)}
   <form class="stack" method="post" action="${esc(inboxPath(entry.id))}" data-assign>${hidden({drawn: choices.drawn, base, touched: choices.touched ?? ''})}
     <section class="card stack">
@@ -248,23 +289,23 @@ export function assignPage(club, entry, {now, seen, others, choices, preview, fl
     </div></details>
     <button class="btn primary block" type="submit" data-submit>${esc(button)}</button>
   </form>
-  <form method="post" action="${esc(inboxPath(entry.id))}/discard">${hidden({back})}<button class="btn quiet" type="submit">${ic('trash')}${esc(t('as-discard'))}</button></form>
+  <div class="as-discard">${discardForm(entry.id, back, title)}</div>
 </main>`;
-    // the bar goes where Discard goes: the team the upload was made for, not the one chosen here
-    const bar = back === '/manage' ? backBar('/manage', club.name) : backBar(back, nameOf(club, entry.team), club.name);
-    return captainPage(club, {now, seen, others, here: home === null ? '/manage' : teamPath(home), bar, main, cls: 'formpage'});
+    return captainPage(club, {now, seen, others, here: home === null ? '/manage' : teamPath(home), bar: nav.bar, main, cls: 'formpage'});
 }
 
 
 // An entry that is stored, discarded, expired or never was: back to the teams. The caller sets the
 // status (404 for a GET, 400 for a POST).
 export function entryGonePage(club, {now, seen, others}) {
+    const nav = placeNav(club, [{label: t('crumb-gone')}]);
     const main = `<main class="page" id="main">
+  ${nav.crumbs}
   <section class="card empty" aria-labelledby="gone-h">
     ${ic('noPlan', 'big')}
     <h1 id="gone-h">${esc(t('club-entry-gone'))}</h1>
-    <a class="btn primary block" href="/manage">${esc(t('as-gone-link'))}</a>
+    <a class="btn primary block" href="/manage">${esc(t('tp-all-teams'))}</a>
   </section>
 </main>`;
-    return captainPage(club, {now, seen, others, here: '/manage', bar: backBar('/manage', club.name), main, needsScript: false});
+    return captainPage(club, {now, seen, others, here: '/manage', bar: nav.bar, main, needsScript: false});
 }

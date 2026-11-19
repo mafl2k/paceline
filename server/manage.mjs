@@ -9,7 +9,7 @@
 // GET /manage, a team page and its settings, a versions page, the new-team page, the club settings
 // the upload page and the assign page are GETs; nothing a GET answers changes the club. Handlers re-read the club from the store after any await: store.change replaces the club
 // object.
-import {readBody, BODY_MS, HttpError, send, html, parseForm, parseMultipart} from './http.mjs';
+import {readBody, BODY_MS, HttpError, html, parseForm, parseMultipart} from './http.mjs';
 import {t, T, maskAddress} from './pages.mjs';
 import {
     clubGate, principal, noLonger, cookieClubs, rewriteClubCookie, redirect, methodNotAllowed, newLinkByMail, confirmByMail, mailAddress,
@@ -22,7 +22,7 @@ import {isAddress} from './mail.mjs';
 import {readSource, importSources, PlanError} from '../pages/src/engine/plan.mjs';
 import {renderTeams, renderSettings, frameOf, clubErrorText, field, done, refuse, planOf, postedClub} from './manage-page.mjs';
 import {takeFlash} from './flash.mjs';
-import {teamPage, teamGonePage, teamSettingsPage, newTeamPage} from './team-page.mjs';
+import {teamPage, teamGonePage, teamSettingsPage, newTeamPage, manageNotFoundPage} from './team-page.mjs';
 import {versionsPage, planGonePage} from './versions-page.mjs';
 import {TEAM_FORMS} from './manage-teams.mjs';
 import {CLUB_FORMS} from './manage-club.mjs';
@@ -311,8 +311,9 @@ async function upload(req, res, ctx, cid) {
         let id;
         try {
             const checked = checkPlan(imported.json, imported.text);
+            // from=plan (the plan page's New version): the plan stays the place to go back to
             id = store.change(cid, c => addEntry(c, {
-                source: 'upload', team: slug, forPlan, via, json: checked.json, text: checked.text, warnings: imported.warnings, zgShare: checked.zgShare,
+                source: 'upload', team: slug, forPlan, fromPlan: from === 'plan', via, json: checked.json, text: checked.text, warnings: imported.warnings, zgShare: checked.zgShare,
             }, {now, newId: () => randomId(6)}));
         } catch (e) {
             if (e instanceof ClubError) {
@@ -466,7 +467,8 @@ export async function handleManage(req, res, ctx, p, method) {
     }
     const handler = Object.hasOwn(FORMS, p) ? FORMS[p] : null;
     if (!handler && p !== '/manage/logout') {
-        send(res, 404, 'text/plain; charset=utf-8', 'not found');
+        // a wrong or old link: a page with the way to the teams, not bare text
+        html(res, 404, manageNotFoundPage(ctx.store.get(gate.circle), frameOf(ctx, gate.circle)));
         return true;
     }
     if (method !== 'POST') {

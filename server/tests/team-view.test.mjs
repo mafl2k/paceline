@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {club as clubOf, sheet, planJson, T} from './helpers.mjs';
 import {
     teamView, teamRow, teamOrder, backAsk, refreshDue, untilLabel, atLabel, pullTarget, nextRace, SEV, worst,
-    andList, quote, foldedTeams, liveWords,
+    andList, quote, foldedTeams, liveWords, liveQuestion, backQuestion, undoOffer, raceWithin, gateOpen, UNDO_MS,
 } from '../team-view.mjs';
 import {localDay} from '../time.mjs';
 import {uploadSheet, backTo, makeLive} from '../club.mjs';
@@ -187,6 +187,10 @@ test('teamView: rider states and their order', () => {
     assert.equal(view.status.text, '1 of 8 riders have the plan');
     assert.equal(view.sev, 'err');
     assert.equal(view.icon, 'x');
+    // a private club records no check without the code: the unseen rider may need it (audit S12)
+    c.riderCode = {hash: 'x', setAt: '2026-11-10T10:00:00.000Z'};
+    const priv = teamView(c, 'rollers', {now: S - 5 * MIN, seen: statesSeen(c)});
+    assert.deepEqual(priv.riders.find(r => r.name === 'Hanna').state, {kind: 'none', sev: 'neutral', text: 'Not seen yet · may need the rider code', time: null});
 });
 
 
@@ -270,6 +274,37 @@ test('teamView: the worst state wins, notes count the fixes', () => {
     assert.equal(row.main, '2 to fix · Finn gets nothing');
     assert.equal(row.sev, 'err');
     assert.equal(row.icon, 'x');
+});
+
+
+test('teamView: no live plan is red only near the race; plans stored say "No live plan"', () => {
+    // Spokes races on Thursdays (the club's day) at 20:15; the morning after its race it has no plan:
+    // neutral "Next race Thu 26 Nov", not red for six days (UI panel, 19 Nov 2026)
+    const c = clubOf({teams: {spokes: team('Spokes', '20:15')}});
+    const after = teamView(c, 'spokes', {now: T('2026-11-20T08:00:00Z'), seen: {}});
+    assert.deepEqual(after.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next race Thu 26 Nov'});
+    assert.equal(after.sev, 'neutral');
+    assert.deepEqual(teamRow(after), {
+        slug: 'spokes', name: 'Spokes', sev: 'neutral', icon: 'clock', timeLine: 'Thu 26 Nov 20:15 · in 6 days',
+        main: 'Next race Thu 26 Nov', quiet: 'No plan yet', short: 'No plan yet',
+    });
+    // red from 2 days before the start (Thu 26 Nov 19:15Z)
+    assert.equal(teamView(c, 'spokes', {now: T('2026-11-24T19:14:59Z'), seen: {}}).status.sev, 'neutral');
+    const near = teamView(c, 'spokes', {now: T('2026-11-24T19:15:00Z'), seen: {}});
+    assert.deepEqual(near.status, {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: 'No plan: riders get nothing'});
+    assert.equal(teamRow(near).quiet, 'Upload a plan to fix this');
+
+    // a plan stored for that race, none live: the row says "No live plan", never "upload one"
+    c.sheets.pppp01 = {...sheet({team: 'spokes', label: 'Spokes', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-20T09:00:00.000Z'}), plan: 'pppp01'};
+    const stored = teamView(c, 'spokes', {now: T('2026-11-20T10:00:00Z'), seen: {}});
+    assert.deepEqual(stored.status, {sev: 'neutral', kind: 'none-live', icon: 'noPlan', text: 'No live plan yet'});
+    assert.deepEqual([teamRow(stored).main, teamRow(stored).quiet, teamRow(stored).short], ['No live plan yet', 'Make one of its plans live', 'No live plan']);
+    const storedNear = teamView(c, 'spokes', {now: T('2026-11-26T18:00:00Z'), seen: {}});
+    assert.deepEqual(storedNear.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
+    assert.deepEqual(teamRow(storedNear), {
+        slug: 'spokes', name: 'Spokes', sev: 'err', icon: 'noPlan', timeLine: '20:15 · in 1 h 15 min',
+        main: 'No live plan: riders get nothing', quiet: 'Make one of its plans live', short: 'No live plan',
+    });
 });
 
 
@@ -535,7 +570,9 @@ function upload(c, {type, riders = ROLLERS, as = 'new', live = true, at = UP, da
 
 test('backAsk: what riders get, then holes and moves in words; null without a question', () => {
     // ported from backWords (fix round 1: only backAsk is left); Back of the live plan always asks
-    const ASK = 'Riders get v1 at once instead of v2.';
+    // before the gate (UP is 18:50 in Berlin, the gate 19:00) no "at once" but when riders get it,
+    // then the riders that change, as the version diffs name them (UI panel, 19 Nov 2026)
+    const ASK = 'From 19:00, riders get v1 instead of v2.';
     // Rollers is live on v2 without Ben; its v1 lists Ben, who now rides Sprockets
     const withSprockets = (c, riders, uploadedAt = '2026-11-19T16:00:00.000Z') => {
         c.teams.sprockets.live = 'ssss01';
@@ -545,10 +582,13 @@ test('backAsk: what riders get, then holes and moves in words; null without a qu
     withSprockets(c, ['1001', '1009']);
     upload(c, {as: 'rrrr01', riders: ROLLERS.slice(1)});
     const kept = structuredClone(c);
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Back to v1 anyway?`);
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?`);
     assert.deepEqual(c, kept, 'backAsk changes nothing');
     // a plan named by any of its version ids, and n as the form sends it
-    assert.equal(backAsk(c, 'rollers', {plan: c.teams.rollers.live, n: '1'}, UP), `${ASK} v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Back to v1 anyway?`);
+    assert.equal(backAsk(c, 'rollers', {plan: c.teams.rollers.live, n: '1'}, UP), `${ASK} With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?`);
+    // after the gate: riders in the event get it within a minute
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, S - 10 * MIN),
+        'Riders in the event get v1 instead of v2 within a minute. With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?');
     // the newest n, an unknown n or plan, or a team that is gone: nothing to say
     assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 2}, UP), null);
     assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 7}, UP), null);
@@ -559,24 +599,33 @@ test('backAsk: what riders get, then holes and moves in words; null without a qu
     c = structuredClone(base());
     withSprockets(c, ['1001', '1002', '1009']);
     upload(c, {as: 'rrrr01', riders: ROLLERS.slice(2)});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} v1 lists Ben and Cleo, who now ride Sprockets. Rollers then rides without them. Back to v1 anyway?`);
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben and Cleo in. v1 lists Ben and Cleo, who now ride Sprockets. Rollers then rides without them. Restore v1 anyway?`);
 
     // a move: v1 (uploaded 16:00) lists Ida, who rides Sprockets (15:00) since v2 left her out
     c = structuredClone(base({uploadedAt: '2026-11-19T16:00:00.000Z'}));
     c.sheets.rrrr01 = sheet({team: 'rollers', label: 'Rollers A', date: DATE, riders: [...ROLLERS, '1008'], uploadedAt: '2026-11-19T16:00:00.000Z', plan: 'rrrr01'});
     withSprockets(c, ['1008', '1009'], '2026-11-19T15:00:00.000Z');
     upload(c, {as: 'rrrr01', riders: ROLLERS});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} Ida moves from Sprockets to Rollers. Back to v1 anyway?`);
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ida in. Ida moves from Sprockets to Rollers. Restore v1 anyway?`);
 
     // no moves and no holes: only what riders get
     c = structuredClone(base());
     upload(c, {as: 'rrrr01', riders: ROLLERS.slice(1)});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), ASK);
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben in.`);
+    // riders out too: v3 has Ben again (v2 then drops him), v4 only Cleo, Dan and Hanna
+    const both = structuredClone(c);
+    upload(both, {as: 'rrrr01', riders: [...ROLLERS.slice(1), '1001']});
+    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 2}, UP), 'From 19:00, riders get v2 instead of v3. With v2: Ben out.');
+    upload(both, {as: 'rrrr01', riders: ['1002', '1003', '1007']});
+    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 1}, UP), 'From 19:00, riders get v1 instead of v4. With v1: 4 riders in, Hanna out.');
+    // the same riders in another order: no rider line
+    upload(both, {as: 'rrrr01', riders: ['1003', '1002', '1007']});
+    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 4}, UP), 'From 19:00, riders get v4 instead of v5.');
     // a stale page: no question, the POST refuses it
     assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1, version: c.teams.rollers.version - 1}, UP), null);
     // a team without a start time gets nothing: no "at once"
     c.teams.rollers.start = null;
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), 'Riders get nothing until Rollers has a start time.');
+    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), 'Riders get nothing until Rollers has a start time. With v1: Ben in.');
 
     // a plan that is not live: null, even with a hole
     c = structuredClone(base());
@@ -605,25 +654,26 @@ test('teamView: the live version, its summary and Back', () => {
     assert.equal(view.live.planId, r1.planId);
     assert.equal(view.live.versions, 2);
     assert.equal(view.live.prevN, 1);
-    assert.equal(view.live.summary, 'Cleo in, Ben out');
+    // the change note carries its version (UI panel, 19 Nov 2026: never "Back to v1: …" beside Restore v1)
+    assert.equal(view.live.summary, 'v2: Cleo in, Ben out');
     assert.deepEqual(view.live.lines.map(l => l.text), ['Cleo in (1st)', 'Ben out']);
     assert.equal(view.live.at, '16:00');
     assert.equal(view.live.back.n, 1);
     // Back of the live plan always asks (decision 12): nothing moves, no hole, so only what riders get
-    assert.deepEqual(view.live.back, {n: 1, words: 'Riders get v1 at once instead of v2.'});
+    assert.deepEqual(view.live.back, {n: 1, words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out.'});
     assert.equal(view.live.newer, null);
     // Back's words when v1 lists a rider who now rides Sprockets
     c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
     const asked = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
-    assert.deepEqual(asked.live.back, {n: 1, words: 'Riders get v1 at once instead of v2. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Back to v1 anyway?'});
+    assert.deepEqual(asked.live.back, {n: 1, words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?'});
     // a Back copy reads as one
     const r3 = upload(c, {as: r1.planId, riders: V1, at: T('2026-11-19T16:40:00Z')});
     c.sheets[r3.id].copyOf = 1;
     const copy = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
     assert.equal(copy.live.n, 3);
     assert.equal(copy.live.prevN, 2);
-    assert.equal(copy.live.summary, 'Back to v1: Ben in, Cleo out');
+    assert.equal(copy.live.summary, 'v3 (restored v1): Ben in, Cleo out');
     // a real Back: the copy reads as made at the Back (17:40), not at v1's upload (15:00)
     const backed = structuredClone(c);
     const k = backTo(backed, 'rollers', {plan: r1.planId, n: 1, version: backed.teams.rollers.version}, {now: T('2026-11-19T16:40:00Z'), newId: () => 'bbbb01'});
@@ -636,7 +686,7 @@ test('teamView: the live version, its summary and Back', () => {
     const gap = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
     assert.equal(gap.live.prevN, 1);
     assert.equal(gap.live.back.n, 1);
-    assert.equal(gap.live.summary, 'Back to v1: Same as v1');
+    assert.equal(gap.live.summary, 'v3 (restored v1): Same as v1');
 });
 
 
@@ -803,16 +853,21 @@ test('liveWords: what Make live does, in words', () => {
     const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
     const slow = upload(c, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:10:00Z')});
     const now = S - 35 * MIN;
-    assert.equal(liveWords(c, 'rollers', slow.id, now), 'Riders get \'Rollers · slow\' v1 at once instead of \'Rollers · fast\' v1.');
+    // before the gate: when riders get it, never "at once" (UI panel, 19 Nov 2026)
+    assert.equal(liveWords(c, 'rollers', slow.id, now), 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1.');
+    // after the gate: riders in the event get it within a minute
+    assert.equal(liveWords(c, 'rollers', slow.id, S - 30 * MIN), 'Riders in the event get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1 within a minute.');
+    assert.equal(liveWords(c, 'rollers', slow.id, S - 30 * MIN - 1), 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1.');
     // the outdated marks follow: Cleo now rides Sprockets
     c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
-    assert.equal(liveWords(c, 'rollers', slow.id, now), 'Riders get \'Rollers · slow\' v1 at once instead of \'Rollers · fast\' v1. '
+    assert.equal(liveWords(c, 'rollers', slow.id, now), 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1. '
         + '\'Rollers · slow\' still lists Cleo, who now rides another team. Make it live anyway?');
     // without a live plan
     const d = versionsClub();
     const only = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
-    assert.equal(liveWords(d, 'rollers', only.id, now), 'Riders get \'Rollers · fast\' v1 at once.');
+    assert.equal(liveWords(d, 'rollers', only.id, now), 'From 19:00, riders get \'Rollers · fast\' v1.');
+    assert.equal(liveWords(d, 'rollers', only.id, S - 5 * MIN), 'Riders in the event get \'Rollers · fast\' v1 within a minute.');
     // a team without a start time sends nothing: no "at once" (fix round 1)
     d.teams.rollers.start = null;
     assert.equal(liveWords(d, 'rollers', only.id, now), 'Riders get nothing until Rollers has a start time.');
@@ -820,6 +875,31 @@ test('liveWords: what Make live does, in words', () => {
     assert.equal(liveWords(c, 'rollers', slow.id, now), 'Riders get nothing until Rollers has a start time. '
         + '\'Rollers · slow\' still lists Cleo, who now rides another team. Make it live anyway?');
     assert.equal(fast.id, c.teams.rollers.live);
+});
+
+
+test('liveWords: a plan of another race ends the live plan for its race, and asks', () => {
+    // a team has one live plan (UI panel, 19 Nov 2026: the audit's worst finding): making next
+    // week's plan live leaves tonight's race without a plan
+    const c = versionsClub();
+    const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const next = upload(c, {type: 'next', riders: V2, live: false, date: '2026-11-26', at: T('2026-11-19T14:10:00Z')});
+    assert.equal(c.teams.rollers.live, fast.id);
+    const words = 'Rollers · next\' v1 for Thu 26 Nov becomes live. That ends \'Rollers · fast\' v1 for Thu 19 Nov: riders get nothing for that race. Make it live anyway?';
+    assert.equal(liveWords(c, 'rollers', next.id, S - 35 * MIN), `'${words}`);
+    // the same after the gate and during the race: tonight's plan is still to be served
+    assert.equal(liveWords(c, 'rollers', next.id, S + 60 * MIN), `'${words}`);
+    // once tonight's plan is used up (S + 4 h, as the assign page's box), nothing ends
+    assert.equal(liveWords(c, 'rollers', next.id, S + 4 * 60 * MIN + 1), 'From Thu 26 Nov 19:00, riders get \'Rollers · next\' v1.');
+    // the other way round: next week's plan live, tonight's made live ends next week's
+    const d = versionsClub();
+    const tonight = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
+    upload(d, {type: 'next', riders: V2, live: true, date: '2026-11-26', at: T('2026-11-19T14:10:00Z')});
+    assert.equal(liveWords(d, 'rollers', tonight.id, S - 35 * MIN), '\'Rollers · fast\' v1 for Thu 19 Nov becomes live. That ends \'Rollers · next\' v1 for Thu 26 Nov: riders get nothing for that race. Make it live anyway?');
+    // with outdated marks the marks' question is the one question
+    c.teams.sprockets.live = 'ssss01';
+    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: '2026-11-26', riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    assert.equal(liveWords(c, 'rollers', next.id, S - 35 * MIN), `'${words.replace(' Make it live anyway?', '')} 'Rollers · next' still lists Cleo, who now rides another team. Make it live anyway?`);
 });
 
 
@@ -837,15 +917,18 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
     assert.deepEqual(cogs.status, {sev: 'neutral', kind: 'opens', icon: 'clock', text: 'Opens Sat 21 Nov 19:45 · 1 rider on this plan'});
     assert.deepEqual(cogs.trap, []);
     assert.equal(teamRow(cogs).timeLine, 'Sat 21 Nov 20:15 · in 2 days');
-    assert.equal(liveWords(c, 'cogs', 'cccc01', now), 'Riders get \'Cogs\' v1 at once.');
+    assert.equal(liveWords(c, 'cogs', 'cccc01', now), 'From Sat 21 Nov 19:45, riders get \'Cogs\' v1.');
     // its gate: 30 min before the race's start
     assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:45:00Z'), seen: {}}).open, true);
     assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:44:59Z'), seen: {}}).open, false);
-    // stored, not live, with its time: "No plan" (red), as for a weekly team, with its day and time
+    // stored, not live, with its time: "No live plan" as for a weekly team, with its day and time;
+    // neutral while the race is more than 2 days off, red from then (UI panel, 19 Nov 2026)
     c.teams.cogs.live = null;
     const stored = teamView(c, 'cogs', {now, seen: {}});
-    assert.equal(stored.status.kind, 'no-plan');
+    assert.deepEqual(stored.status, {sev: 'neutral', kind: 'none-live', icon: 'noPlan', text: 'No live plan yet'});
     assert.equal(teamRow(stored).timeLine, 'Sat 21 Nov 20:15 · in 2 days');
+    const near = teamView(c, 'cogs', {now: T('2026-11-19T19:15:00Z'), seen: {}});
+    assert.deepEqual(near.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
 
     // nothing stored: the neutral no-race status and no time line, even with a stale team start
     for (const start of [null, '19:30']) {
@@ -915,4 +998,209 @@ test('teamOrder: a special team by its next race\'s start, after the weekly team
     // without a time Cogs goes after the weekly teams; the special teams without one by name
     delete c.teams.cogs.raceStarts;
     assert.deepEqual(teamOrder(c, now), ['rollers', 'axles', 'owls', 'bolts', 'cogs']);
+});
+
+
+// ---- the Make live rule, Undo and the race window (UI panel wave 2) ----
+
+test('liveQuestion: asks only while the gate is open or the words warn', () => {
+    const c = versionsClub();
+    const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const slow = upload(c, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:10:00Z')});
+    // before the gate, nothing to warn about: it acts at once (Undo follows), with the words as before
+    const pre = liveQuestion(c, 'rollers', slow.id, S - 35 * MIN);
+    assert.deepEqual(pre, {words: 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1.', ask: false, marks: []});
+    assert.equal(liveWords(c, 'rollers', slow.id, S - 35 * MIN), pre.words);
+    // the gate edge: from S - 30 min it asks, until the race is used up (S + 4 h)
+    assert.equal(liveQuestion(c, 'rollers', slow.id, S - 30 * MIN - 1).ask, false);
+    assert.equal(liveQuestion(c, 'rollers', slow.id, S - 30 * MIN).ask, true);
+    assert.equal(liveQuestion(c, 'rollers', slow.id, S + 4 * 60 * MIN).ask, true);
+    assert.equal(gateOpen(c, c.sheets[slow.id], S + 4 * 60 * MIN + 1), false);
+    // the version that is live already never asks
+    assert.equal(liveQuestion(c, 'rollers', fast.id, S - 10 * MIN).ask, false);
+    // an outdated mark warns before the gate: Cleo now rides Sprockets
+    c.teams.sprockets.live = 'ssss01';
+    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    const marked = liveQuestion(c, 'rollers', slow.id, S - 35 * MIN);
+    assert.equal(marked.ask, true);
+    assert.ok(marked.words.endsWith('Make it live anyway?'), marked.words);
+    assert.deepEqual(marked.marks.map(m => m.name), ['Cleo']);
+    // no start time warns too: riders get nothing
+    const d = versionsClub();
+    const only = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
+    assert.equal(liveQuestion(d, 'rollers', only.id, S - 35 * MIN).ask, false, 'the first plan of a team, before the gate');
+    d.teams.rollers.start = null;
+    assert.deepEqual(liveQuestion(d, 'rollers', only.id, S - 35 * MIN), {words: 'Riders get nothing until Rollers has a start time.', ask: true, marks: []});
+});
+
+
+test('liveQuestion: a plan that takes a rider from another team names the move and asks', () => {
+    const c = versionsClub();
+    upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    // Sprockets' live plan lists Cleo, uploaded before 'Rollers · slow': once that is live, Cleo rides Rollers
+    c.teams.sprockets.live = 'ssss01';
+    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T14:05:00.000Z'}), plan: 'ssss01'};
+    const slow = upload(c, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:10:00Z')});
+    const q = liveQuestion(c, 'rollers', slow.id, S - 35 * MIN);
+    assert.equal(q.ask, true);
+    assert.equal(q.words, 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1. Cleo moves from Sprockets to Rollers. '
+        + 'Still to do: Sprockets. Make it live anyway?');
+});
+
+
+test('liveQuestion: the gate of the race being replaced asks too', () => {
+    // tonight's plan is live and its gate open; making next week's plan live ends it (and warns anyway)
+    const c = versionsClub();
+    upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const next = upload(c, {type: 'next', riders: V1, live: false, at: T('2026-11-19T14:10:00Z'), date: '2026-11-26'});
+    assert.equal(liveQuestion(c, 'rollers', next.id, S - 10 * MIN).ask, true);
+    // a plan of tonight's race replaced while next week's plan is live: tonight's gate is what is open
+    const d = versionsClub();
+    const tonight = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
+    upload(d, {type: 'next', riders: V1, at: T('2026-11-19T14:10:00Z'), date: '2026-11-26'});
+    assert.equal(liveQuestion(d, 'rollers', tonight.id, S - 10 * MIN).ask, true);
+});
+
+
+test('backQuestion: Restore asks only while the gate is open or it moves riders, leaves a hole, or has no start time', () => {
+    const c = versionsClub();
+    const r1 = upload(c, {riders: V1, at: T('2026-11-19T14:00:00Z')});
+    upload(c, {as: r1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
+    const pre = backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN);
+    assert.deepEqual(pre, {words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out.', ask: false});
+    assert.equal(backAsk(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN), pre.words);
+    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 30 * MIN).ask, true);
+    // Ben now rides Sprockets: v1 would leave Rollers without him
+    c.teams.sprockets.live = 'ssss01';
+    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN).ask, true);
+    delete c.sheets.ssss01;
+    c.teams.sprockets.live = null;
+    c.teams.rollers.start = null;
+    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN).ask, true, 'no start time');
+});
+
+
+test('undoOffer: the version live before, for 10 minutes, while nothing changed since', () => {
+    const c = versionsClub();
+    const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const slow = upload(c, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:10:00Z')});
+    const at = S - 40 * MIN;
+    assert.equal(undoOffer(c, 'rollers', at), null, 'nothing switched yet');
+    makeLive(c, 'rollers', slow.id, at);
+    assert.deepEqual(c.teams.rollers.liveBefore, {id: fast.id, version: c.teams.rollers.version, at: iso(at)});
+    const u = undoOffer(c, 'rollers', at + UNDO_MS);
+    assert.equal(u.id, fast.id);
+    assert.equal(u.prev.label, 'Rollers · fast');
+    assert.equal(u.live.label, 'Rollers · slow');
+    assert.equal(u.version, c.teams.rollers.version);
+    assert.equal(undoOffer(c, 'rollers', at + UNDO_MS + 1), null, 'too late');
+    // any later change of the team bumps its version: no Undo
+    const d = structuredClone(c);
+    d.teams.rollers.version++;
+    assert.equal(undoOffer(d, 'rollers', at + MIN), null, 'changed since');
+    // the Undo itself (undo: false) leaves none, and a team without a live plan before has none
+    makeLive(c, 'rollers', fast.id, at + MIN, {undo: false});
+    assert.equal(c.teams.rollers.liveBefore, undefined);
+    assert.equal(undoOffer(c, 'rollers', at + MIN), null);
+    const e = versionsClub();
+    const first = upload(e, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
+    makeLive(e, 'rollers', first.id, at);
+    assert.equal(undoOffer(e, 'rollers', at), null, 'no live version before');
+    // Restore of the live plan keeps the version it replaced
+    const f = versionsClub();
+    const r1 = upload(f, {riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const r2 = upload(f, {as: r1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
+    backTo(f, 'rollers', {plan: r1.planId, n: 1, version: f.teams.rollers.version}, {now: at, newId});
+    assert.equal(undoOffer(f, 'rollers', at).id, r2.id);
+});
+
+
+test('raceWithin: a plan of the team (or any team) starting within 7 days, not used up', () => {
+    const c = versionsClub();
+    assert.equal(raceWithin(c, 'rollers', S - 60 * MIN), false, 'no plan');
+    upload(c, {type: 'next', riders: V1, at: T('2026-11-19T14:00:00Z'), date: '2026-11-27'});
+    assert.equal(raceWithin(c, 'rollers', S - 60 * MIN), false, 'more than 7 days ahead');
+    // the 27th at 19:30 (18:30Z): from 7 days before its start (review M5: not today..today+7)
+    assert.equal(raceWithin(c, 'rollers', T('2026-11-20T18:30:00Z')), true, '7 days ahead');
+    assert.equal(raceWithin(c, 'rollers', T('2026-11-20T18:29:59Z')), false, 'a second more');
+    upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:10:00Z')});
+    assert.equal(raceWithin(c, 'rollers', S - 60 * MIN), true, 'tonight');
+    assert.equal(raceWithin(c, 'sprockets', S - 60 * MIN), false, 'another team\'s');
+    assert.equal(raceWithin(c, null, S - 60 * MIN), true, 'any team');
+    // still the 19th in Berlin: tonight's race is used up, next week's more than 7 days ahead
+    assert.equal(raceWithin(c, 'rollers', S + 4 * 60 * MIN + 1), false, 'used up');
+    // a 23:00 race still on at 00:30 the next day (review M5): its date is yesterday, it is not used up
+    const late = versionsClub();
+    late.teams.rollers.start = '23:00';
+    upload(late, {type: 'late', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    assert.equal(raceWithin(late, 'rollers', T('2026-11-19T23:30:00Z')), true, 'after midnight');
+    assert.equal(raceWithin(late, 'rollers', T('2026-11-20T02:00:01Z')), false, 'used up at 03:00');
+});
+
+
+// ---- wave 1 review fixes (UI panel, 19 Nov 2026) ----
+
+test('teamView: a special team with two races stored and none live is about the nearer race (review I1)', () => {
+    // 'near' Sat 21 Nov 20:15 and 'far' Sat 5 Dec 20:15, neither live: at Sat 21 Nov 19:00 riders get
+    // nothing for tonight's race, which the view must say, in red, naming that race
+    const c = kinds('2026-11-21', '2026-12-05');
+    c.teams.cogs = {...c.teams.cogs, start: null, raceStarts: {'2026-11-21': '20:15', '2026-12-05': '20:15'}};
+    c.sheets.cccc01.label = 'Cogs · near';
+    c.sheets.cccc02.label = 'Cogs · far';
+    const now = T('2026-11-21T18:00:00Z');
+    const view = teamView(c, 'cogs', {now, seen: {}});
+    assert.deepEqual(view.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
+    assert.equal(view.raceDate, '2026-11-21');
+    assert.equal(view.S, T('2026-11-21T19:15:00Z'));
+    assert.equal(view.when.day, 'Sat 21 Nov');
+    // today's race: the time line leaves the day out, as for every team on race day
+    assert.equal(teamRow(view).timeLine, '20:15 · in 1 h 15 min');
+    assert.equal(teamRow(teamView(c, 'cogs', {now: T('2026-11-20T12:00:00Z'), seen: {}})).timeLine, 'Sat 21 Nov 20:15 · in 1 day');
+    // once tonight's race is over, the far one
+    const later = teamView(c, 'cogs', {now: T('2026-11-22T12:00:00Z'), seen: {}});
+    assert.equal(later.raceDate, '2026-12-05');
+    assert.equal(later.status.sev, 'neutral');
+});
+
+
+test('teamView: "plans stored" counts only the plans of the race in question (review M1)', () => {
+    // Rollers (weekly, Thursdays 19:30) has only a plan for 26 Nov; on Wed 18 Nov its next race is
+    // the 19th: no plan for it, so "upload one", as 0.3.4 said, not "Make one of its plans live"
+    const c = kinds();
+    c.sheets.rrrr01 = {...sheet({team: 'rollers', label: 'Rollers', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'}), plan: 'rrrr01'};
+    const near = teamView(c, 'rollers', {now: T('2026-11-18T12:00:00Z'), seen: {}});
+    assert.deepEqual(near.status, {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: 'No plan: riders get nothing'});
+    assert.notEqual(teamRow(near).quiet, 'Make one of its plans live');
+    // after an unplayed race (S + 2 h to S + 4 h): tonight's plans no longer count for next week's race
+    c.sheets.rrrr02 = {...sheet({team: 'rollers', label: 'Rollers · tonight', date: '2026-11-19', riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'}), plan: 'rrrr02'};
+    delete c.sheets.rrrr01;
+    const after = teamView(c, 'rollers', {now: T('2026-11-19T21:00:00Z'), seen: {}});
+    assert.equal(after.raceDate, '2026-11-26');
+    assert.deepEqual(after.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next race Thu 26 Nov'});
+    // with a plan of the race itself: "No live plan", as before
+    const own = teamView(c, 'rollers', {now: T('2026-11-19T12:00:00Z'), seen: {}});
+    assert.equal(own.status.kind, 'none-live');
+});
+
+
+// ---- wave 2 review fixes ----
+
+test('liveQuestion: an older version that reopens a hole of this team asks, also as an Undo (review I2)', () => {
+    // Rollers v1 lists Ben; Sprockets has taken him since; v2 without Ben is made live before the gate
+    const c = versionsClub();
+    const v1 = upload(c, {riders: ['1001', '1002', '1003'], at: T('2026-11-19T10:00:00Z')});
+    c.teams.sprockets.live = 'ssss01';
+    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '2002', '2003'], uploadedAt: '2026-11-19T11:00:00.000Z'}), plan: 'ssss01'};
+    const v2 = upload(c, {as: v1.planId, riders: ['1002', '1003', '1004'], live: false, at: T('2026-11-19T12:00:00Z')});
+    const now = S - 150 * MIN;
+    assert.equal(liveQuestion(c, 'rollers', v2.id, now).ask, false, 'v2 closes the hole: no question');
+    makeLive(c, 'rollers', v2.id, now, {version: c.teams.rollers.version});
+    const u = undoOffer(c, 'rollers', now + MIN);
+    assert.equal(u.id, v1.id);
+    // v1 is not its plan's newest version, so outdated() does not see it: the dry run does
+    const q = liveQuestion(c, 'rollers', u.id, now + MIN);
+    assert.equal(q.ask, true);
+    assert.ok(q.words.endsWith('\'Rollers\' still lists Ben, who now rides another team. Make it live anyway?'), q.words);
+    assert.deepEqual(q.marks.map(m => [m.id, m.rides]), [['1001', 'sprockets']]);
 });

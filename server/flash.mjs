@@ -67,11 +67,12 @@ export function makeFlashes() {
 
 
 // 303 to `path` with `flash` kept for club `cid`; the cookie is appended, so another Set-Cookie of
-// the answer stays.
-export function redirectWithFlash(res, ctx, cid, path, flash) {
+// the answer stays. `hash` (without '#') goes on the Location only: the browser scrolls to that
+// element, and the flash stays bound to the path it GETs.
+export function redirectWithFlash(res, ctx, cid, path, flash, {hash = null} = {}) {
     const id = ctx.web.flashes.put(cid, path, flash, ctx.now);
     res.appendHeader('Set-Cookie', `${FLASH_COOKIE}=${id}; ${COOKIE_ATTRS}; Max-Age=${FLASH_TTL_MS / 1000}`);
-    send(res, 303, 'text/plain; charset=utf-8', '', {Location: path});
+    send(res, 303, 'text/plain; charset=utf-8', '', {Location: hash === null ? path : `${path}#${hash}`});
 }
 
 

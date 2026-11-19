@@ -6,11 +6,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {shouldReload, holdsReload, restoredInput, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, touchedList, restoreState} from '../client.mjs';
+import {
+    shouldReload, holdsReload, restoredInput, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, touchedList, restoreState,
+    armPress, armNeeded, ARM_GUARD_MS, submitDecision,
+} from '../client.mjs';
 
 
 test('shouldReload: only when nothing holds the page', () => {
-    const calm = {hidden: false, focused: false, openDetails: false, dirty: false};
+    // an open confirm strip holds it too (UI panel wave 2)
+    const calm = {hidden: false, focused: false, openDetails: false, dirty: false, armed: false};
     assert.equal(shouldReload(calm), true);
     for (const flag of Object.keys(calm)) {
         assert.equal(shouldReload({...calm, [flag]: true}), false, flag);
@@ -165,4 +169,47 @@ test('the guarded reload: a click on a file input holds it (Safari and Firefox d
     const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
     assert.match(src, /addEventListener\('click', e => \{\n\s+if \(e\.target instanceof Element && e\.target\.closest\('form input\[type="file"\]/);
     assert.match(src, /let dirty = restoredInput\(/);
+});
+
+
+test('arm in place: presses of the confirm button within 450 ms of arming are ignored', () => {
+    assert.equal(ARM_GUARD_MS, 450);
+    assert.equal(armPress(1000, 1000), false, 'the same press');
+    assert.equal(armPress(1000, 1449), false, 'a double-click or double-tap');
+    assert.equal(armPress(1000, 1450), true);
+    assert.equal(armPress(1000, 9000), true, 'no timeout: still armed much later');
+    assert.equal(armPress(null, 5), true, 'no strip opened');
+    // the script asks with exactly this, on the strip's own clock
+    const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
+    assert.ok(src.includes('if (!armPress(open?.form === f ? open.at : null, performance.now())) {'), 'submit uses armPress');
+    assert.ok(src.includes("if (e.key === 'Escape' && open !== null) {"), 'Esc closes the strip');
+});
+
+
+test('arm in place: a form with data-arm-when asks only while its field is empty or changed', () => {
+    assert.equal(armNeeded(undefined, null), true, 'no condition: always');
+    assert.equal(armNeeded('', null), true);
+    assert.equal(armNeeded('empty', {value: '', drawn: '19:30'}), true, 'a start time cleared');
+    assert.equal(armNeeded('empty', {value: '  ', drawn: '19:30'}), true);
+    assert.equal(armNeeded('empty', {value: '19:45', drawn: '19:30'}), false);
+    assert.equal(armNeeded('changed', {value: 'UTC', drawn: 'Europe/Berlin'}), true, 'another zone');
+    assert.equal(armNeeded('changed', {value: 'Europe/Berlin', drawn: 'Europe/Berlin'}), false);
+    assert.equal(armNeeded('empty', null), false, 'no such field: the server decides');
+});
+
+
+test('a POST form posts once until the page answers (review M1)', () => {
+    assert.equal(submitDecision({method: 'post', sent: false, prevented: false}), 'send');
+    assert.equal(submitDecision({method: 'POST', sent: true, prevented: false}), 'block', 'a double click');
+    assert.equal(submitDecision({method: 'post', sent: false, prevented: true}), 'ignore', 'a strip armed instead, or the 450 ms guard');
+    assert.equal(submitDecision({method: 'post', sent: true, prevented: true}), 'ignore');
+    assert.equal(submitDecision({method: 'get', sent: true, prevented: false}), 'ignore', 'a GET is never held');
+    const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
+    assert.ok(src.includes("const d = submitDecision({method: f.getAttribute('method') ?? 'get', sent: sent.has(f), prevented: e.defaultPrevented});"), 'submitOnce uses it');
+    // the buttons go disabled after the submit, so the pressed button's confirm=1 still goes along
+    assert.ok(/const buttons = \[\.\.\.f\.querySelectorAll\('button\[type=submit\], button:not\(\[type\]\)'\)\];\s+setTimeout\(\(\) => \{\s+for \(const b of buttons\) \{\s+b\.disabled = true;/.test(src));
+    // a stopped POST (Esc, the browser's Stop) gives the buttons back after RETRY_MS, and every pageshow does
+    assert.match(src, /const RETRY_MS = 10000;/);
+    assert.match(src, /setTimeout\(\(\) => \{\s+sent\.delete\(f\);\s+for \(const b of buttons\) \{\s+b\.disabled = false;/);
+    assert.match(src, /addEventListener\('pageshow', \(\) => \{\s+sent = new WeakSet\(\);/);
 });

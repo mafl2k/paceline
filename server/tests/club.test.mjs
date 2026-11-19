@@ -622,6 +622,22 @@ test('ids from requests never touch the prototype', () => {
 });
 
 
+test('makeLive: a stale version is refused, the current one and none are not', () => {
+    // UI panel, 19 Nov 2026: Make live carries the team's version the page was drawn with
+    const {c, slugs: [slug], newId} = setup();
+    const {id: a} = upload(c, slug, planJson('Rollers fast', ['1001']), {type: 'fast'}, {newId});
+    const {id: b} = upload(c, slug, planJson('Rollers slow', ['1002']), {type: 'slow', live: false}, {newId});
+    const drawn = c.teams[slug].version;
+    makeLive(c, slug, b, NOW, {version: String(drawn)});
+    assert.equal(c.teams[slug].live, b);
+    const kept = structuredClone(c);
+    assert.throws(() => makeLive(c, slug, a, NOW, {version: String(drawn)}), clubError('changed'));
+    assert.deepEqual(c, kept, 'nothing changed');
+    makeLive(c, slug, a, NOW);
+    assert.equal(c.teams[slug].live, a);
+});
+
+
 test('teamHint: name first, overlap second', () => {
     const {c, slugs: [rollers, sprockets], newId} = setup([['Rollers', '19:30'], ['Sprockets', '19:40']]);
     const ids = json => Object.keys(json.riders);

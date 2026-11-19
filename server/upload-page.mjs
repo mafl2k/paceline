@@ -8,9 +8,10 @@ import {esc, t, T} from './pages.mjs';
 import {plannedStart, usedUp, PLAN_OPEN_MS} from './select.mjs';
 import {planOfId, racePlans, previousVersion} from './plans.mjs';
 import {localLabel, localHHMM} from './time.mjs';
-import {captainPage, flashBlock, hidden, postForm, sevLine, backBar} from './ui.mjs';
+import {captainPage, flashBlock, hidden, postForm, armForm, sevLine, placeNav} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {nameOf, atLabel, pullTarget, liveWords, backAsk, dateDay, andList, quote} from './team-view.mjs';
+import {nameOf, atLabel, pullTarget, dateDay, andList, quote} from './team-view.mjs';
+import {makeLiveHtml, restoreHtml, undoBlock} from './team-page.mjs';
 import {receivedFor} from './club.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
 
@@ -72,11 +73,13 @@ export function uploadPage(club, slug, {now, seen, others, plan = null, from = n
     const name = club.teams[slug].name;
     const p = racePlanOf(club, slug, plan, now);
     const toPlan = p !== null && from === 'plan';
-    const up = toPlan ? backBar(planPath(slug, p.id), p.label, club.name) : backBar(teamPath(slug), name, club.name);
+    // the way back: the plan the upload was opened from (its New version), else the team
+    const nav = placeNav(club, [{href: teamPath(slug), label: name}, ...(toPlan ? [{href: planPath(slug, p.id), label: p.label}] : []), {label: t('crumb-upload')}]);
     const action = p === null ? uploadPath(slug) : `${uploadPath(slug)}&plan=${p.id}${toPlan ? '&from=plan' : ''}`;
     const as = p === null ? '' : `\n    <p class="sub">${esc(t('upload-as-version', {label: p.label}))}</p>`;
     const main = `<main class="page" id="main">
-  <header class="pagehead"><p class="kicker desk">${esc(name)}</p><h1>${esc(t('upload-heading-for', {team: name}))}</h1>${as}</header>
+  ${nav.crumbs}
+  <header class="pagehead"><h1>${esc(t('upload-heading-for', {team: name}))}</h1>${as}</header>
   ${flashBlock(flash)}${waitingLine(club, slug, now)}
   <form class="stack" method="post" action="${esc(action)}" enctype="multipart/form-data" data-upload>${hidden({team: slug, forPlan: p === null ? '' : p.id})}
     <section class="card stack">
@@ -87,7 +90,7 @@ export function uploadPage(club, slug, {now, seen, others, plan = null, from = n
     <button class="btn primary block" type="submit">${esc(t('upload-continue'))}</button>
   </form>
 </main>`;
-    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: up, main, cls: 'formpage upload'});
+    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: nav.bar, main, cls: 'formpage upload'});
 }
 
 
@@ -191,9 +194,10 @@ export function storedDiff(club, result, now) {
 }
 
 
-// "Wrong file?" on the result page (spec §6.9): after a new version, Back to the version before it;
-// after a new plan, Delete it behind an in-page confirm, which warns when that plan went live (the
-// team is then left without a live plan); after the same file, nothing ('').
+// "Wrong file?" on the result page (spec §6.9): after a new version, Restore the version before it
+// (restoreHtml: a live plan's asks first in its place as the Make live rule says); after a new plan,
+// Delete it, asking first in its place, with a warning when that plan went live (the team is then
+// left without a live plan); after the same file, nothing ('').
 function wrongFile(club, slug, before, result, now) {
     if (result.same) {
         return '';
@@ -207,26 +211,14 @@ function wrongFile(club, slug, before, result, now) {
             return '';
         }
         const prev = before.sheets[result.prev];
-        const fields = {team: slug, plan: result.planId, n: prev.n, version: club.teams[slug].version};
-        // Back of a live plan changes what riders get: it asks first, in the page (plan versions §9)
-        const words = backAsk(club, slug, {plan: result.planId, n: prev.n}, now);
-        if (words === null) {
-            return postForm('/manage/plan/back', fields, t('result-back-to', {n: prev.n}), {cls: 'btn secondary', icon: 'undo'});
-        }
-        return `<details class="confirm inline">
-      <summary class="btn secondary">${ic('undo')}${esc(t('result-back-to', {n: prev.n}))}…</summary>
-      <div class="confirm-body"><p>${esc(words)}</p>
-      ${postForm('/manage/plan/back', {...fields, confirm: '1'}, t(words.endsWith('?') ? 'back-confirm-button' : 'vp-back', {n: prev.n}), {cls: 'btn primary small'})}</div>
-    </details>`;
+        return restoreHtml(club, slug, result.planId, prev.n, now, {button: t('result-back-to-ask', {n: prev.n}), plain: t('result-back-to', {n: prev.n}),
+            cls: 'btn secondary', icon: 'undo'});
     }
     const {label} = club.sheets[result.id];
     const del = t('result-delete-plan', {label});
     const words = result.live ? t('result-delete-confirm-live', {label, team: club.teams[slug].name}) : t('result-delete-confirm', {label});
-    return `<details class="confirm">
-      <summary class="btn secondary">${ic('trash')}${esc(del)}</summary>
-      <div class="confirm-body"><p>${esc(words)}</p>
-      ${postForm('/manage/sheet/delete', {team: slug, sheet: result.id}, del, {cls: 'btn danger small', icon: 'trash'})}</div>
-    </details>`;
+    return armForm('/manage/sheet/delete', {team: slug, sheet: result.id, version: club.teams[slug].version}, {key: `del-${result.id}`,
+        button: t('result-delete-plan-ask', {label}), cls: 'btn secondary danger-text', icon: 'trash', words, yes: del, yesCls: 'btn danger small'});
 }
 
 
@@ -257,13 +249,22 @@ export function ridersTable(sheet, riders) {
 // targets, and the way back. `club` is the club after the Store, `before` the one before it, `result`
 // storeEntry's answer, `moves`/`holes` effects(before, club, date) for the stored version's date,
 // `hint` teamHint(before, …), `importWarnings` and `importMore` the entry's.
-export function uploadResultPage(club, slug, {now, seen, others, before, result, moves = [], holes = [], hint = null, importWarnings = [], importMore = 0}) {
+export function uploadResultPage(club, slug, {now, seen, others, before, result, moves = [], holes = [], hint = null, importWarnings = [], importMore = 0, back = null}) {
     const team = club.teams[slug];
     const sheet = club.sheets[result.id];
     const tz = club.tz;
     const parts = [];
     const v = {label: sheet.label, n: sheet.n, sig: sheet.sig};
-    if (result.same) {
+    const wasId = before.teams[slug]?.live ?? null;
+    if (result.same && result.live && wasId !== result.id) {
+        // nothing new stored, but the box made that version live: say so (UI panel, audit S9); the
+        // version it replaced only when that was live for the same race (review M3: never last
+        // week's raced plan)
+        const kept = keptOf(before, slug, now);
+        const was = kept !== null && kept.sheet.date === sheet.date ? kept.sheet : null;
+        parts.push(sevLine('ok', 'checkCircle', was === null ? t('result-same-live-none', {n: sheet.n})
+            : t('result-same-live', {n: sheet.n, was: was.label, wn: was.n}), 'big'));
+    } else if (result.same) {
         parts.push(sevLine('neutral', 'info', t('result-same', {n: sheet.n}), 'big'));
     } else if (result.live) {
         const S = plannedStart(club, sheet);
@@ -286,19 +287,20 @@ export function uploadResultPage(club, slug, {now, seen, others, before, result,
             said.push(t('result-stays', {label: club.sheets[prev].label}));
         }
         if (S !== null) {
-            said.push(t('result-from', {at: atLabel(S - PLAN_OPEN_MS, now, tz)}));
+            // after the gate: riders in the event get it within a minute
+            said.push(now >= S - PLAN_OPEN_MS ? t('result-from-open') : t('result-from', {at: atLabel(S - PLAN_OPEN_MS, now, tz)}));
         }
         if (said.length) {
             parts.push(`<p>${esc(said.join(' '))}</p>`);
         }
+        // Store and make live switched the live plan: the same Undo as Make live (S17, UI panel wave 2)
+        const undo = wasId !== result.id ? undoBlock(club, slug, now) : null;
+        if (undo !== null) {
+            parts.push(flashBlock(null, undo));
+        }
     } else {
-        // every Make live asks first, in the page (plan versions §9)
-        const words = liveWords(club, slug, result.id, now);
-        parts.push(`<details class="confirm inline">
-    <summary class="btn primary">${esc(t('tp-make-live-ask'))}</summary>
-    <div class="confirm-body"><p>${esc(words)}</p>
-    ${postForm('/manage/live', {team: slug, sheet: result.id, confirm: '1'}, t(words.endsWith('?') ? 'tp-make-live-anyway' : 'tp-confirm-live'), {cls: 'btn primary small'})}</div>
-  </details>`);
+        // Make live asks first in its place only as the Make live rule says (makeLiveHtml)
+        parts.push(makeLiveHtml(club, slug, result.id, {now, button: t('tp-make-live-ask'), plain: t('tp-confirm-live'), sr: false, cls: 'btn primary'}));
     }
     if (sheet.pinnedEventId != null) {
         parts.push(`<p class="hint">${esc(t('result-event', {id: sheet.pinnedEventId}))}</p>`);
@@ -338,10 +340,14 @@ export function uploadResultPage(club, slug, {now, seen, others, before, result,
     <div class="card-head"><h2 id="rr-h">${esc(t('result-riders'))}</h2><p class="count">${esc(n)}</p></div>
     ${ridersTable(sheet, riders)}
   </section>`);
-    parts.push(`<a class="btn quiet" href="${esc(teamPath(slug))}">${ic('left')}${esc(t('result-back', {team: team.name}))}</a>`);
+    // `back` ({href, label}: the plan page the upload came from, assign-page.mjs entryBack), else the team
+    const home = back ?? {href: teamPath(slug), label: team.name};
+    parts.push(`<a class="btn quiet" href="${esc(home.href)}">${ic('left')}${esc(t('result-back', {team: home.label}))}</a>`);
+    const nav = placeNav(club, [{href: teamPath(slug), label: team.name}, ...(home.href === teamPath(slug) ? [] : [home]), {label: t('result-heading')}]);
     const main = `<main class="page" id="main">
+  ${nav.crumbs}
   <header class="pagehead"><p class="kicker">${esc(team.name)}</p><h1>${esc(t('result-heading'))}</h1></header>
   ${parts.join('\n  ')}
 </main>`;
-    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: backBar(teamPath(slug), team.name, club.name), main, cls: 'formpage'});
+    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: nav.bar, main, cls: 'formpage'});
 }

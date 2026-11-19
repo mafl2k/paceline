@@ -53,14 +53,21 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 .sub{font-weight:400;font-size:.9375rem;color:var(--muted)}
 .tag{display:inline-block;font-size:.75rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;padding:.1rem .45rem;border-radius:6px;background:var(--ok-bg);color:var(--ok-fg);border:1px solid var(--ok-bd);vertical-align:.15em}
 
-/* buttons */
+/* buttons, one system (UI panel wave 3): primary (filled) at most one per block, the main action,
+   first; secondary (outline) the further actions; quiet (a text link) navigation and side things;
+   secondary.danger-text the button that asks before something goes; danger (filled red) only as the
+   confirm of that question. Cancel right beside the confirm. */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:var(--btn);padding:.625rem 1.125rem;border-radius:var(--r2);border:1px solid transparent;font:inherit;font-size:1rem;font-weight:600;line-height:1.25;text-align:center;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .btn.primary{background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
 .btn.primary:hover{background:var(--accent-hover)}
 .btn.secondary{background:var(--surface);color:var(--text);border-color:var(--control)}
 .btn.secondary:hover{background:var(--surface-2)}
-.btn.danger{background:var(--surface);color:var(--danger-text);border-color:var(--danger-text)}
-.btn.danger:hover{background:var(--danger-soft)}
+.btn.danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn.danger:hover{filter:brightness(.92)}
+/* one danger style (UI panel wave 2): the confirm of a destructive action is .btn.danger, the button
+   that asks for it .btn.secondary.danger-text */
+.btn.secondary.danger-text{color:var(--danger-text)}
+.btn.secondary.danger-text:hover{background:var(--danger-soft)}
 .btn.quiet{background:transparent;color:var(--accent);padding-inline:.5rem;justify-self:start}
 .btn.small{min-height:var(--tap);padding:.5rem .875rem;font-size:.9375rem}
 .btn.block{display:flex;width:100%}
@@ -128,22 +135,35 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 .planrow .l3{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin-top:.375rem;padding-top:.625rem;border-top:1px solid var(--border)}
 .planrow .l4{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem}
 .planrow .vsum{flex:1 1 10rem;font-weight:600}
-.planrow .confirm[open]{flex-basis:100%}
+
 .newer{margin-top:.25rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.625rem .875rem;border-radius:var(--r2);background:var(--surface-2);border:1px solid var(--border);font-size:.9375rem}
 .newer>p{display:flex;gap:.5rem;align-items:center;flex:1 1 12rem;font-weight:600}
 .newer>p .i{color:var(--muted);width:1.125rem;height:1.125rem;flex:none}
 .plancode{color:var(--text);font-weight:600}
 .plancode code{background:var(--accent-soft);color:var(--accent-soft-fg);border-color:transparent;margin-left:.15rem}
 
-/* in-page confirms and folds: they open inline, never as a popover or a fixed bar */
+/* folds open inline, never as a popover or a fixed bar */
 details>summary{list-style:none;cursor:pointer}
 details>summary::-webkit-details-marker{display:none}
 .menu-info{display:grid;font-size:.9375rem}
 .menu-info span{color:var(--muted)}
-.confirm-body{display:grid;gap:.625rem;padding:.75rem .625rem .5rem;font-size:.9375rem}
-.confirm-body .btn{justify-self:start}
-.confirm.inline>summary{display:inline-flex}
-.confirm[open]>summary.btn{background:var(--surface-2)}
+/* arm in place (UI panel wave 2): the action's press turns its form, in the same place, into a strip
+   with the words, the confirm button and Cancel; it takes the row's whole width */
+form[data-arm].armed{flex-basis:100%;width:100%}
+form[data-arm].armed>[data-arm-open]{display:none}
+.arm-strip{display:grid;gap:.625rem;flex-basis:100%;width:100%;padding:.75rem .875rem;border-radius:var(--r2);background:var(--surface-2);border:1px solid var(--control);font-size:.9375rem;color:var(--text);font-weight:400;text-align:left}
+.arm-btns{display:flex;flex-wrap:wrap;gap:.5rem}
+@media (max-width:1023px){.arm-btns>.btn{flex:1 1 100%}}
+.note-acts>.discard{margin-left:auto}
+/* at least 24 px between Review and store and Discard, also on a phone (P2, review M4) */
+.note-acts:has(>.discard){gap:1.5rem}
+.note-acts>.discard.armed{margin-left:0}
+.as-discard{margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)}
+.flash.undo{align-items:center;flex-wrap:wrap}
+/* a row a change of the live plan lands on (#plan-<id>): below the sticky top bar on phones */
+[id^="plan-"]{scroll-margin-top:5rem}
+.planrow>.flash{margin-block:.25rem}
+.flash.undo>p{flex:1 1 12rem}
 
 /* riders */
 .riders{display:grid}
@@ -180,7 +200,6 @@ details>summary::-webkit-details-marker{display:none}
 .rowlink{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:var(--text);padding-block:.75rem}
 .rowlink>span{display:grid;flex:1}
 .rowlink .chev{color:var(--muted)}
-.uplinks{display:flex;flex-wrap:wrap;gap:0 1.5rem}
 .uplink{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--tap);font-weight:600;color:var(--accent);justify-self:start}
 .pp-state{font-weight:650}
 .pp-state.live{color:var(--ok-fg)}
@@ -247,7 +266,9 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 
 /* the assign page's "What happens", the result page's lines */
 .pv-list{display:grid;gap:.5rem}
-.pv-list li{display:flex;gap:.625rem;align-items:flex-start;line-height:1.4}
+.pv-list li{display:flex;flex-wrap:wrap;gap:.25rem .625rem;align-items:flex-start;line-height:1.4}
+.pv-list li>span{flex:1 1 0;min-width:0}
+.pv-list li>.fold{flex:0 0 100%;min-width:0;padding-left:1.875rem}
 .pv-list .i{margin-top:.1rem}
 .pv-list .ok .i{color:var(--ok-icon)}.pv-list .info .i{color:var(--info-icon)}
 .pv-list .warn .i{color:var(--warn-icon)}.pv-list .warn{color:var(--warn-fg)}
@@ -306,14 +327,26 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .pagehead .kicker{margin-bottom:-.125rem}
 .race{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem;font-size:1.125rem;font-weight:650}
 .race .in{font-weight:500;color:var(--muted)}
-.cols,.col-a,.col-b,.col-c{display:grid;gap:1rem;align-content:start;min-width:0}
-.col-a:empty,.col-b:empty,.col-c:empty{display:none}
+.cols,.col-a,.col-b{display:grid;gap:1rem;align-content:start;min-width:0}
+.col-a:empty,.col-b:empty{display:none}
 /* the team page's kicker row with Team settings at its right, as on the teams page (.clubhead); the
    negative margins keep the 44 px link from making the row taller than the kicker (phones; from
    1024 px the page head below) */
 .teamhead{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:-.125rem}
 .teamhead .kicker{margin:0;min-width:0}
 .teamhead .btn{flex:none;margin-block:-.75rem}
+/* the team page's two ways to a plan under the race line (UI panel wave 3): side by side at full
+   width on phones, as wide as their words from 1024 px */
+.headacts{display:flex;gap:.5rem}
+.headacts>.btn{flex:1 1 0;min-width:0}
+/* the breadcrumb (ui.mjs placeNav): from 1024 px only, where it replaces the back bar and the kicker */
+.crumbs ol{display:flex;flex-wrap:wrap;align-items:center;gap:0 .375rem;font-size:.9375rem;font-weight:600;color:var(--muted)}
+.crumbs li{display:inline-flex;align-items:center;gap:.375rem;min-width:0}
+.crumbs a{display:inline-flex;align-items:center;min-height:2rem;color:var(--accent);text-decoration:none}
+.crumbs a:hover{text-decoration:underline}
+.crumbs [aria-current]{color:var(--text)}
+.crumbs .sep{color:var(--muted);font-weight:400}
+[id="plans-h"]{scroll-margin-top:5rem}
 
 .foot{display:flex;flex-wrap:wrap;justify-content:center;gap:0 .25rem;padding-top:.5rem;font-size:.9375rem}
 .foot a,.foot button{display:inline-flex;align-items:center;gap:.375rem;min-height:var(--tap);padding:0 .625rem;color:var(--muted);background:none;border:0;font:inherit;font-size:.9375rem;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:.25em;cursor:pointer}
@@ -335,7 +368,31 @@ a.tile:hover{border-color:var(--control)}
 .tile-top .chev{position:absolute;right:0;top:.1rem;color:var(--muted);width:1.5rem;height:1.5rem}
 .tile .sevline{font-size:1rem}
 .tile-quiet{font-size:.9375rem;color:var(--muted);padding-left:1.75rem}
-.tile.add{display:flex;align-items:center;justify-content:center;gap:.5rem;min-height:3.5rem;box-shadow:none;background:transparent;border:1.5px dashed var(--control);font-weight:700;color:var(--accent)}
+.hub-add{justify-self:start}
+/* the club hub (UI panel wave 3): what to fix across teams, the plans waiting, one table per race day */
+.todo{display:grid}
+.todo>li{display:grid;grid-template-columns:1.25rem minmax(0,1fr);column-gap:.625rem;row-gap:.375rem;align-items:start;padding:.75rem 0;border-top:1px solid var(--border)}
+.todo>li:first-child{border-top:0;padding-top:.25rem}
+.todo>li>.i{margin-top:.15rem}
+.todo>li.err>.i{color:var(--err-icon)}.todo>li.warn>.i{color:var(--warn-icon)}.todo>li.info>.i{color:var(--info-icon)}
+.todo-who{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .5rem}
+.todo-who a,.racetable td a{display:inline-flex;align-items:center;min-height:var(--tap);min-width:var(--tap);font-weight:700;color:var(--text)}
+.todo-who .muted{font-size:.9375rem}
+.todo-what{grid-column:2;font-weight:600}
+.todo>li.err .todo-what{color:var(--err-fg)}.todo>li.warn .todo-what{color:var(--warn-fg)}
+.todo-acts{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.todo-acts>form:not(.discard){display:contents}
+.confirm-acts{display:grid;gap:.875rem;justify-items:start}
+.todo-acts>.discard{margin-left:auto}
+.todo-acts:has(>.discard){gap:1.5rem}
+.todo-acts>.discard.armed{margin-left:0}
+/* the columns as wide as their words; a word longer than its share breaks rather than widen the page */
+.racetable{overflow-wrap:anywhere}
+.racetable td{overflow-wrap:break-word}
+.racetable th{overflow-wrap:normal}
+.racetable .st{width:2.25rem;text-align:center}
+.sevicon{display:inline-grid;place-items:center}
+.sevicon.ok{color:var(--ok-icon)}.sevicon.warn{color:var(--warn-icon)}.sevicon.err{color:var(--err-icon)}.sevicon.neutral{color:var(--neutral-icon)}
 
 /* first run */
 .onboard h2{font-size:1.25rem}
@@ -352,6 +409,9 @@ a.tile:hover{border-color:var(--control)}
 .rows .nm{font-weight:600}
 .rows .meta{font-size:.9375rem;color:var(--muted)}
 .rowbtns{display:flex;gap:.375rem;flex:none}
+/* a row's strip (a recording's Delete) takes the row's whole width, under the row */
+.rows>li:has(form.armed){flex-wrap:wrap}
+.rowbtns:has(form.armed){flex:1 1 100%}
 .rowbtns .btn{min-width:var(--tap);padding-inline:.625rem}
 .recs{display:grid;gap:.75rem}
 .recgroup>.nm{font-weight:700;font-size:.9375rem;color:var(--muted);padding-bottom:.25rem}
@@ -363,18 +423,19 @@ a.tile:hover{border-color:var(--control)}
 .value .i{color:var(--muted)}
 .danger-zone{border:1px solid var(--danger-bd);background:var(--danger-soft);border-radius:var(--r3);padding:1.125rem 1rem;display:grid;gap:.75rem;justify-items:start}
 .danger-zone h2{display:flex;align-items:center;gap:.5rem;font-size:1.125rem;color:var(--danger-text)}
-.danger-zone .confirm-body{padding-inline:0}
+.danger-zone>form.armed{justify-self:stretch}
 
-/* what shows from 1024 px only: the team page's title in the page, a kicker where the phone's top
-   bar names the club or team */
+/* what shows from 1024 px only: the team page's title in the page, the breadcrumb (.mob, its
+   opposite, is in the desktop block below) */
 @media (max-width:1023.98px){.desk{display:none!important}}
 
 /* desktop: every captain page in one frame (ui.mjs captainPage): the sidebar with the club, the
    team rows and the footer (the other clubs, Privacy, Log out); beside it the page, left-aligned,
    with one head (kicker, then the title with the page's action right beside it) at the same place
    on every page. The
-   phone's team switcher and the page's own footer give way to the sidebar; a back bar stays, as a
-   slim link line above the head in the page's column (row 1; without one the row collapses).
+   phone's top bar (team switcher or back bar) and the page's own footer give way to the sidebar; a
+   page below the overview says where it is in its breadcrumb line instead of the back bar and the
+   kicker (UI panel wave 3).
    Forms are one column of 46rem; the team page and the overview are 62rem wide, two columns. */
 @media (min-width:1024px){
   .app{display:grid;grid-template-columns:18.5rem minmax(0,1fr);grid-template-rows:auto 1fr;min-height:100vh}
@@ -388,14 +449,18 @@ a.tile:hover{border-color:var(--control)}
   .side .foot-clubs{flex:none;flex-flow:column nowrap;align-items:stretch;justify-content:flex-start}
   .side .foot-clubs button{justify-content:flex-start}
   .side .foot-label{flex:none;text-align:left;padding:0 .5rem}
-  .app>.topbar:not(.plain),.app>.page>.foot{display:none}
-  /* the back bar: no bar, no club name (the sidebar names it), the link where the head begins */
-  .app>.topbar.plain{grid-column:2;grid-row:1;position:static;background:none;-webkit-backdrop-filter:none;backdrop-filter:none;border:0;padding:1.25rem 0 0}
-  .app>.topbar.plain .topbar-row{max-width:51rem;min-height:0;margin:0;padding:0 2.5rem}
-  .app>.topbar.plain .topbar-club{display:none}
-  .app>.topbar.plain .back{min-height:2rem;margin-left:-.375rem}
+  .app>.topbar,.app>.page>.foot{display:none}
+  /* what shows on phones only: the short words of a button */
+  .mob{display:none!important}
   .app>.page{grid-column:2;grid-row:2;width:100%;max-width:51rem;margin:0;padding:2rem 2.5rem 3rem}
-  .app>.topbar.plain~.page{padding-top:.75rem}
+  /* the breadcrumb where the kicker was, the same height, so the title stays where it is */
+  .app .crumbs{min-height:1.25rem;margin:-.375rem 0 -.625rem}
+  .app .crumbs~.pagehead .kicker{display:none}
+  .headacts>.btn{flex:none}
+  /* a question's Cancel beside its confirm button */
+  .confirm-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+  /* the hub: the team tiles give way to the sidebar */
+  .hub-teams{display:none}
   .app>.page.wide{max-width:67rem}
   .nojs{max-width:51rem;margin:0 0 0 18.5rem;padding:.75rem 2.5rem 0}
   /* the head: kicker, then the title and the action beside it; the inner boxes give their items to it */
@@ -406,14 +471,19 @@ a.tile:hover{border-color:var(--control)}
   .app .kicker{min-height:1.25rem;margin:0}
   /* the action as tall as the title, so the title sits where it does on a page without one */
   .app :is(.pagehead,.clubhead) .btn{flex:none;margin-block:calc((2.3rem - var(--tap)) / 2)}
-  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   .page.wide{max-width:62rem;padding:2rem 2.5rem 3rem}
 }
 @media (min-width:1180px){
-  .teampage .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"a b" "c b";grid-template-rows:auto 1fr;column-gap:1.25rem}
-  .teampage .col-a{grid-area:a}.teampage .col-b{grid-area:b}.teampage .col-c{grid-area:c}
+  /* the hub: one line per thing to do, where the words keep 12rem; the buttons in a column of their
+     own width, so an open strip wraps under them and moves nothing (below this, stacked as on phones) */
+  .todo>li{grid-template-columns:1.25rem minmax(7rem,11rem) minmax(12rem,1fr) 21rem;align-items:start}
+  /* top-aligned (an open strip grows the row downwards only), each part centred on the 44 px buttons */
+  .todo>li>.i{margin-top:.75rem}
+  .todo-what{grid-column:3;margin-top:.55rem}
+  .todo-acts{grid-column:4}
+  .teampage .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:1.25rem}
   /* without the riders (no live plan) one column, no empty one beside it */
-  .teampage .cols:has(>.col-b:empty){grid-template-columns:minmax(0,46rem);grid-template-areas:"a" "c";grid-template-rows:auto}
+  .teampage .cols:has(>.col-b:empty){grid-template-columns:minmax(0,46rem)}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 

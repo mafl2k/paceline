@@ -2,19 +2,19 @@
 // former versions page at the same URL. Top to bottom: the plan head (label and race, LIVE or not
 // live, the outdated marks, Make live for a plan that is not live); the rider order of its newest
 // version; its versions newest first, each with its time, live mark, copy mark, first-version mark and
-// plan code, the summary of what it changed (diff.mjs) with all its lines in a fold, and "Back to vN"
+// plan code, the summary of what it changed (diff.mjs) with all its lines in a fold, and "Restore vN"
 // on every version but the newest, the live one and those with the live (else newest) version's plan
 // code (the live plan's always asks first); then the items of the former
-// "…" menu: New version, the race date, Remove event link, Delete plan behind its confirm. A used-up
+// "…" menu: New version, the race date, Remove event link, Delete plan asking first in its place. A used-up
 // plan shows the lists without buttons. Also the page a plan that is gone answers, and the question
-// before Back to vN (the no-script path of the in-page confirm). None of them reloads itself. Pure: it
+// before Restore vN (the no-script path of the in-page confirm). None of them reloads itself. Pure: it
 // reads the club it is given, and the clock is passed in. Every value goes through esc().
 import {esc, t} from './pages.mjs';
-import {captainPage, th, flashBlock, postForm, hidden, backBar} from './ui.mjs';
+import {captainPage, th, flashBlock, postForm, armForm, hidden, placeNav} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {atLabel, dateDay, backAsk, liveWords, linkedPlan, andList, nameOf, plannerHref} from './team-view.mjs';
+import {atLabel, dateDay, linkedPlan, andList, nameOf, plannerHref} from './team-view.mjs';
 import {isShare} from './club.mjs';
-import {makeLiveHtml} from './team-page.mjs';
+import {makeLiveHtml, restoreHtml, rowNote, inRow} from './team-page.mjs';
 import {ridersTable} from './upload-page.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
 import {planOfId, previousVersion, isUsed} from './plans.mjs';
@@ -26,21 +26,10 @@ const teamPath = slug => `/manage/team/${slug}`;
 const versionsPath = (slug, plan) => `/manage/team/${slug}/plan/${plan}`;
 
 
-// The Back to vN form of one version: for the live plan always an in-page confirm with what it does
-// (backAsk), for another plan a plain button (it only stores a version).
+// The Restore vN form of one version (restoreHtml): for the live plan it asks first in its place as
+// the Make live rule says, for another plan a plain button (it only stores a version).
 function backForm(club, slug, p, v, now) {
-    const team = club.teams[slug];
-    const fields = {team: slug, plan: p.id, n: v.n, version: team.version, back: 'versions'};
-    const button = t(p.live !== null ? 'vp-back-live' : 'vp-back', {n: v.n});
-    const words = backAsk(club, slug, {plan: p.id, n: v.n}, now);
-    if (words === null) {
-        return postForm('/manage/plan/back', fields, button);
-    }
-    return `<details class="confirm inline">
-            <summary class="btn secondary small">${esc(button)}</summary>
-            <div class="confirm-body"><p>${esc(words)}</p>
-            ${postForm('/manage/plan/back', {...fields, confirm: '1'}, t(words.endsWith('?') ? 'back-confirm-button' : 'vp-back', {n: v.n}), {cls: 'btn primary small'})}</div>
-          </details>`;
+    return restoreHtml(club, slug, p.id, v.n, now, {fields: {back: 'versions'}, button: t('vp-back-live', {n: v.n}), plain: t('vp-back', {n: v.n})});
 }
 
 
@@ -91,20 +80,25 @@ function versionLi(club, slug, p, [id, v], {now, used}) {
 // get it, or not live; the outdated marks of its newest version and Make live (back to this page) for
 // a plan that is not live; for a live plan whose newest version is not live, that version with Make vN
 // live, as on the team page. Nothing to press on a used-up plan.
-function headHtml(club, slug, p, {now, used, S}) {
+function headHtml(club, slug, p, {now, used, S, flash}) {
     const lines = [];
     const [id, newest] = p.newest;
-    const make = (button, sr) => makeLiveHtml({slug}, {id, label: newest.label}, {button, words: liveWords(club, slug, id, now), sr, back: 'plan'});
+    const make = (button, plain, sr) => makeLiveHtml(club, slug, id, {now, button, plain, sr, back: 'plan'});
     if (p.live !== null) {
         const gate = S === null ? null : S - PLAN_OPEN_MS;
         const key = (p.live === id ? 'pp-live' : 'pp-live-v') + (gate !== null && now >= gate ? '-open' : '');
         lines.push(gate === null ? `<p class="pp-state err-text">${esc(t('tp-gets-nothing'))}</p>`
             : `<p class="pp-state live">${esc(t(key, {at: atLabel(gate, now, club.tz), n: club.sheets[p.live].n}))}</p>`);
+        // the change of the live plan that made it live, with Undo, here where it was done (rowNote)
+        const note = rowNote(club, slug, p.id, now, flash, {back: 'plan', plan: p.id});
+        if (note) {
+            lines.push(note);
+        }
         if (p.live !== id && !used) {
             const at = Date.parse(newest.at);
             lines.push(`<div class="newer">
       <p>${ic('info')}<span>${esc(t('tp-newer', {n: newest.n, at: Number.isFinite(at) ? atLabel(at, now, club.tz) : '–'}))}</span></p>
-      ${make(t('tp-make-newer-live', {n: newest.n}), false)}
+      ${make(t('tp-make-newer-live', {n: newest.n}), t('tp-make-newer-live-now', {n: newest.n}), false)}
     </div>`);
         }
     } else {
@@ -114,10 +108,10 @@ function headHtml(club, slug, p, {now, used, S}) {
             lines.push(`<p class="outdated">${ic('alert')}${esc(t('tp-outdated', {marks: andList(marks.map(m => t('tp-outdated-mark', {name: m.name, team: nameOf(club, m.rides)})))}))}</p>`);
         }
         if (!used) {
-            lines.push(make(t('tp-make-live-ask'), true));
+            lines.push(make(t('tp-make-live-ask'), t('tp-confirm-live'), true));
         }
     }
-    return `<section class="card planhead stack">
+    return `<section class="card planhead stack" id="plan-${esc(p.id)}">
     ${lines.join('\n    ')}
   </section>`;
 }
@@ -166,16 +160,22 @@ function actionsHtml(club, slug, p, {used, planner}) {
             + `${ic('unlink')}${th('tp-unpin-menu', {id: `<span class="sub">${esc(t('tp-unpin-id', {id: pinned}))}</span>`})}</button></form>`);
     }
     if (!used) {
-        const del = p.live !== null ? t('tp-delete-live', {team: team.name}) : t('tp-delete-other');
-        items.push(`<details class="confirm">
-      <summary class="btn danger small">${ic('trash')}${esc(t('tp-delete-plan'))}</summary>
-      <div class="confirm-body"><p>${esc(del)}</p>
-      ${postForm('/manage/sheet/delete', {team: slug, sheet: id}, t('tp-delete-button', {label: p.label}), {cls: 'btn danger small', icon: 'trash'})}</div>
-    </details>`);
+        items.push(armForm('/manage/sheet/delete', {team: slug, sheet: id, version: team.version}, {key: `del-${id}`, button: t('tp-delete-plan'),
+            cls: 'btn secondary danger-text small', icon: 'trash', words: deletePlanWords(club, slug, id), yes: t('tp-delete-button', {label: p.label}),
+            yesCls: 'btn danger small'}));
     }
     return `<section class="card plan-actions stack">
     ${items.join('\n    ')}
   </section>`;
+}
+
+
+// What Delete plan of version `id` does, in words: with all its versions, for good; a live plan's team
+// then gives riders nothing.
+export function deletePlanWords(club, slug, id) {
+    const team = club.teams[slug];
+    const p = planOfId(club, slug, id);
+    return p.live !== null ? t('tp-delete-live', {team: team.name}) : t('tp-delete-other');
 }
 
 
@@ -189,10 +189,12 @@ export function versionsPage(club, slug, planId, {now, seen, others, flash = nul
     const race = S === null ? dateDay(p.date, club.tz) : localLabel(S, club.tz);
     const used = isUsed(club, p.newest[1], now);
     const rows = [...p.versions].reverse().map(entry => versionLi(club, slug, p, entry, {now, used}));
+    const nav = placeNav(club, [{href: teamPath(slug), label: team.name}, {label: p.label}]);
     const main = `<main class="page" id="main">
+  ${nav.crumbs}
   <header class="pagehead"><p class="kicker">${esc(team.name)}</p><h1>${esc(t('vp-heading', {label: p.label, race}))}</h1></header>
-  ${flashBlock(flash)}
-  ${headHtml(club, slug, p, {now, used, S})}
+  ${p.live !== null && inRow(flash, p.id) ? '' : flashBlock(flash)}
+  ${headHtml(club, slug, p, {now, used, S, flash})}
   ${ridersHtml(p)}
   <section class="card" aria-labelledby="pv-h">
     <div class="card-head"><h2 id="pv-h">${esc(t('pp-versions'))}</h2><p class="count">${p.versions.length}</p></div>
@@ -202,7 +204,7 @@ export function versionsPage(club, slug, planId, {now, seen, others, flash = nul
   </section>
   ${actionsHtml(club, slug, p, {used, planner})}
 </main>`;
-    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: backBar(teamPath(slug), team.name, club.name), main, cls: 'formpage'});
+    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: nav.bar, main, cls: 'formpage'});
 }
 
 
@@ -210,7 +212,9 @@ export function versionsPage(club, slug, planId, {now, seen, others, flash = nul
 // The caller sets the status (404 for a GET, the refusal's for a POST).
 export function planGonePage(club, slug, {now, seen, others, flash = null}) {
     const name = club.teams[slug].name;
+    const nav = placeNav(club, [{href: teamPath(slug), label: name}, {label: t('crumb-gone')}]);
     const main = `<main class="page" id="main">
+  ${nav.crumbs}
   ${flashBlock(flash)}
   <section class="card empty" aria-labelledby="gone-h">
     ${ic('noPlan', 'big')}
@@ -218,7 +222,7 @@ export function planGonePage(club, slug, {now, seen, others, flash = null}) {
     <a class="btn primary block" href="${esc(teamPath(slug))}">${esc(t('result-back', {team: name}))}</a>
   </section>
 </main>`;
-    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: backBar(teamPath(slug), name, club.name), main, needsScript: false});
+    return captainPage(club, {now, seen, others, here: teamPath(slug), bar: nav.bar, main, needsScript: false});
 }
 
 
@@ -231,12 +235,15 @@ export function backConfirmPage(club, slug, {now, seen, others, plan, n, version
     const k = Number(n);
     const fields = {team: slug, plan: p.id, n: k, version, ...(back === 'versions' ? {back} : {}), confirm: '1'};
     const home = back === 'versions' ? versionsPath(slug, p.id) : teamPath(slug);
+    // the crumbs end where the way back goes: the plan page, or the team page
+    const trail = [{href: teamPath(slug), label: team}, ...(back === 'versions' ? [{href: home, label: p.label}] : []), {label: t('crumb-confirm')}];
     const main = `<main class="page" id="main">
+  ${placeNav(club, trail, {back: false}).crumbs}
   <header class="pagehead"><p class="kicker">${esc(t('ui-club-team', {club: club.name, team}))}</p><h1>${esc(t('back-confirm-heading', {n: k, label: p.label}))}</h1></header>
   <p class="banner warn" role="note">${ic('alert')}<span>${esc(words)}</span></p>
   <section class="card stack">
-    ${postForm('/manage/plan/back', fields, t(words.endsWith('?') ? 'back-confirm-button' : 'vp-back', {n: k}), {cls: 'btn primary'})}
-    <a class="btn secondary" href="${esc(home)}">${ic('left')}${esc(t('live-confirm-back', {team: back === 'versions' ? p.label : team}))}</a>
+    <div class="confirm-acts">${postForm('/manage/plan/back', fields, t(words.endsWith('?') ? 'back-confirm-button' : 'vp-back', {n: k}), {cls: 'btn primary'})}
+    <a class="btn secondary" href="${esc(home)}">${ic('left')}${esc(t('live-confirm-back', {team: back === 'versions' ? p.label : team}))}</a></div>
   </section>
 </main>`;
     return captainPage(club, {now, seen, others, here: teamPath(slug), main, cls: 'formpage', needsScript: false});

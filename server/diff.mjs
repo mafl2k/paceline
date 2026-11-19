@@ -158,9 +158,8 @@ export function diffVersions(club, older, newer, now, {newPlan = false} = {}) {
 // 'Cleo in', 'Cleo and Eva in', '3 riders in': at most two names are listed.
 const who = names => (names.length <= 2 ? andList(names) : t('df-sum-riders', {n: names.length}));
 
-// The one-line version of the lines: who came and went, then what else changed; with none of these,
-// the first line's text. With `copyOf` it starts with "Back to v4: ".
-export function diffSummary(lines, {copyOf = null} = {}) {
+// Who came and went in the lines, "Cleo in, Ben out", or null when nobody did.
+export function diffPeople(lines) {
     const get = kind => lines.find(l => l.kind === kind) ?? null;
     const people = [];
     const inL = get('in');
@@ -171,9 +170,19 @@ export function diffSummary(lines, {copyOf = null} = {}) {
     if (outL) {
         people.push(t('df-sum-out', {who: who(outL.names)}));
     }
+    return people.length ? people.join(', ') : null;
+}
+
+
+// The one-line version of the lines: who came and went, then what else changed; with none of these,
+// the first line's text. With `n` (the version's own number) it starts with "v3: ", for a restored
+// version "v3 (restored v1): "; with only `copyOf` "Restored v1: ".
+export function diffSummary(lines, {copyOf = null, n = null} = {}) {
+    const get = kind => lines.find(l => l.kind === kind) ?? null;
     const parts = [];
-    if (people.length) {
-        parts.push(people.join(', '));
+    const people = diffPeople(lines);
+    if (people !== null) {
+        parts.push(people);
     }
     if (get('order')) {
         parts.push(t('df-sum-order'));
@@ -187,5 +196,8 @@ export function diffSummary(lines, {copyOf = null} = {}) {
         parts.push(targets.names.length === 1 ? t('df-sum-target') : t('df-sum-targets', {n: targets.names.length}));
     }
     const text = parts.length ? parts.join(' · ') : (lines[0]?.text ?? '');
+    if (n !== null) {
+        return copyOf === null ? t('df-sum-v', {k: n, text}) : t('df-sum-v-back', {k: n, n: copyOf, text});
+    }
     return copyOf === null ? text : t('df-sum-back', {n: copyOf, text});
 }

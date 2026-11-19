@@ -1,15 +1,61 @@
 // Paceline captain pages: the one first-party script, served as /static/app.js (static.mjs). The
 // captain pages need it (plan versions spec decision 13): the assign page redraws itself when a
-// choice changes, confirms are in-page, and the team pages reload themselves. Only Make live (also "Make vN live" and Back of the live plan) works without it, as a
-// plain POST and the server's confirm page. It writes text only through textContent and builds
+// choice changes, the team pages reload themselves, and an action that asks first does so in its
+// place (arm in place, UI panel wave 2). Every such action also works without it, as a plain POST
+// the server answers with its confirm page. It writes text only through textContent and builds
 // elements with createElement; every text comes from the server's page or a data-* attribute.
 // Without a DOM (node --test) importing it gives the pure helpers and does nothing else.
 
 
 // May the guarded reload run now? Not while the tab is hidden, a field has focus (input, select,
-// textarea), a <details> holds it (holdsReload) or a form was changed (spec §5.4 "Script").
-export function shouldReload({hidden, focused, openDetails, dirty}) {
-    return !hidden && !focused && !openDetails && !dirty;
+// textarea), a <details> holds it (holdsReload), a form was changed (spec §5.4 "Script") or an
+// action's confirm strip is open (`armed`, UI panel wave 2: its words would be gone).
+export function shouldReload({hidden, focused, openDetails, dirty, armed = false}) {
+    return !hidden && !focused && !openDetails && !dirty && !armed;
+}
+
+
+// Presses of a strip's confirm button this soon after the strip opened are ignored (UI panel wave 2):
+// a double-click or double-tap on the action never confirms it.
+export const ARM_GUARD_MS = 450;
+
+// Does a press of the confirm button at `now` count, the strip opened at `armedAt` (ms, the same
+// clock)? Not within ARM_GUARD_MS; always when no strip opened (null).
+export function armPress(armedAt, now) {
+    return armedAt === null || armedAt === undefined || now - armedAt >= ARM_GUARD_MS;
+}
+
+
+// What a submit of a POST form does (review M1, UI panel wave 2): a form that has posted already
+// (`sent`) and waits for its answer posts no second time ('block': a double click on Make live,
+// Undo or a strip's confirm button must not end on "Nothing was changed" after the change was made);
+// one the page stopped (arming a strip, the 450 ms guard: `prevented`) is no post ('ignore'); any
+// other posts once ('send'). A GET (the assign page's redraw goes another way) is never held.
+export function submitDecision({method, sent, prevented}) {
+    if (String(method).toLowerCase() !== 'post' || prevented) {
+        return 'ignore';
+    }
+    return sent ? 'block' : 'send';
+}
+
+
+// Does the trigger's press open the strip, or post at once? A form with data-arm-when asks only while
+// its field (`field`: {value, drawn}, the value it was drawn with; null when there is none) is
+// 'empty' (a start time cleared) or 'changed' (another zone); any other form always asks.
+export function armNeeded(when, field) {
+    if (!when) {
+        return true;
+    }
+    if (field === null || field === undefined) {
+        return false;
+    }
+    if (when === 'empty') {
+        return String(field.value ?? '').trim() === '';
+    }
+    if (when === 'changed') {
+        return field.value !== field.drawn;
+    }
+    return true;
 }
 
 
@@ -133,7 +179,8 @@ if (typeof document !== 'undefined') {
 
     guardedReload();
     switcher();
-    confirms();
+    arms();
+    submitOnce();
     copyButtons();
     assignRedraw();
     rhythmChoice();
@@ -199,6 +246,7 @@ function guardedReload() {
             focused: Boolean(active && active.matches('input, select, textarea')),
             openDetails: holdsReload(document.querySelectorAll('details')),
             dirty,
+            armed: document.querySelector('form[data-arm].armed') !== null,
         });
         if (!ok) {
             setTimeout(tick, 5000);
@@ -257,28 +305,133 @@ function switcher() {
 }
 
 
-// ---- in-page confirms: one open at a time, its button focused ----
-// The focus move must not turn a held key into a click: an Enter that opened the confirm repeats on
-// its (often destructive) button, so repeated key presses there do nothing.
-function confirms() {
+// ---- arm in place (UI panel wave 2): an action that asks first turns, in its place, into a strip ----
+// The trigger's press (data-arm-open, or Enter in a field of its form) opens the form's strip (what
+// it does, the confirm button and Cancel) instead of posting, when armNeeded says so; the confirm
+// button posts with confirm=1. One strip open at a time; no timeout; Esc and Cancel close it and
+// give the focus back to the trigger. The focus goes to the confirm button, whose description is the
+// words; presses of it within ARM_GUARD_MS of opening, and a held key's repeats, are ignored. A
+// span data-arm-fill="<field>" in the words shows that field's value (the Zwift ID typed).
+function arms() {
+    let open = null;
+    const strip = f => f.querySelector('[data-arm-strip]');
+    const close = focus => {
+        if (open === null) {
+            return;
+        }
+        const f = open.form;
+        open = null;
+        f.classList.remove('armed');
+        strip(f).hidden = true;
+        if (focus) {
+            f.querySelector('[data-arm-open]')?.focus();
+        }
+    };
+    const fill = f => {
+        for (const span of f.querySelectorAll('[data-arm-fill]')) {
+            span.textContent = f.elements.namedItem(span.dataset.armFill)?.value?.trim() ?? '';
+        }
+    };
+    const arm = f => {
+        if (open?.form !== f) {
+            close(false);
+        }
+        fill(f);
+        f.classList.add('armed');
+        strip(f).hidden = false;
+        open = {form: f, at: performance.now()};
+        const yes = f.querySelector('[data-arm-yes]');
+        yes?.focus({preventScroll: true});
+        yes?.scrollIntoView({block: 'nearest'});
+    };
+    const fieldOf = f => {
+        const el = f.elements.namedItem(f.dataset.armField ?? '');
+        if (!el || !('value' in el)) {
+            return null;
+        }
+        const drawn = el instanceof HTMLSelectElement ? ([...el.options].find(o => o.defaultSelected)?.value ?? el.options[0]?.value ?? '') : el.defaultValue;
+        return {value: el.value, drawn};
+    };
+    // the capture phase: before the assign page's own submit listener
+    document.addEventListener('submit', e => {
+        const f = e.target;
+        if (!(f instanceof HTMLFormElement) || !f.matches('[data-arm]')) {
+            return;
+        }
+        if (e.submitter?.matches('[data-arm-yes]')) {
+            if (!armPress(open?.form === f ? open.at : null, performance.now())) {
+                e.preventDefault();
+            }
+            return;
+        }
+        if (armNeeded(f.dataset.armWhen, f.dataset.armWhen ? fieldOf(f) : null)) {
+            e.preventDefault();
+            arm(f);
+        }
+    }, true);
+    document.addEventListener('click', e => {
+        if (e.target instanceof Element && e.target.closest('[data-arm-cancel]')) {
+            close(true);
+        }
+    });
+    // a field of the open strip's form edited after arming: the words follow it (review M3)
+    document.addEventListener('input', e => {
+        if (open !== null && e.target instanceof Element && open.form.contains(e.target)) {
+            fill(open.form);
+        }
+    });
     document.addEventListener('keydown', e => {
-        if (e.repeat && e.target instanceof Element && e.target.matches('details.confirm [type=submit]')) {
+        if (e.key === 'Escape' && open !== null) {
+            close(true);
+        }
+        if (e.repeat && e.target instanceof Element && e.target.matches('[data-arm-yes]')) {
             e.preventDefault();
         }
     }, true);
-    // toggle does not bubble: listen in the capture phase
-    document.addEventListener('toggle', e => {
-        const d = e.target;
-        if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('confirm') || !d.open) {
+}
+
+
+// ---- a POST form posts once (submitDecision): its submit buttons are disabled until the page
+// answers (after the submit, so the pressed button's confirm=1 still goes along); a page shown again
+// from the back-forward cache takes them back ----
+const RETRY_MS = 10000;
+
+function submitOnce() {
+    let sent = new WeakSet();
+    document.addEventListener('submit', e => {
+        const f = e.target;
+        if (!(f instanceof HTMLFormElement)) {
             return;
         }
-        for (const other of document.querySelectorAll('details.confirm[open]')) {
-            if (other !== d) {
-                other.open = false;
-            }
+        const d = submitDecision({method: f.getAttribute('method') ?? 'get', sent: sent.has(f), prevented: e.defaultPrevented});
+        if (d === 'block') {
+            e.preventDefault();
+        } else if (d === 'send') {
+            sent.add(f);
+            const buttons = [...f.querySelectorAll('button[type=submit], button:not([type])')];
+            setTimeout(() => {
+                for (const b of buttons) {
+                    b.disabled = true;
+                }
+            }, 0);
+            // still here after RETRY_MS (the captain stopped a slow POST: Esc or the browser's Stop):
+            // the buttons come back, so he can try again (a retry is safe: version checks, "gone")
+            setTimeout(() => {
+                sent.delete(f);
+                for (const b of buttons) {
+                    b.disabled = false;
+                }
+            }, RETRY_MS);
         }
-        d.querySelector('[type=submit]')?.focus();
-    }, true);
+    });
+    // every showing of the page (also Firefox keeping the disabled state across a reload, and the
+    // back-forward cache) starts with its buttons usable: the server never draws a disabled button
+    addEventListener('pageshow', () => {
+        sent = new WeakSet();
+        for (const b of document.querySelectorAll('form button[disabled]')) {
+            b.disabled = false;
+        }
+    });
 }
 
 

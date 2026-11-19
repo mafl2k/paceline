@@ -12,6 +12,10 @@ import {teamWeekday} from './select.mjs';
 import {isSlug, newRiderCode, riderCodeHash, ZWIFT_RE} from './ids.mjs';
 import {LOG_NAME_RE} from './logs.mjs';
 import {field, placePath, done, refuse, attempt, frameOf} from './manage-page.mjs';
+import {confirmPage} from './ui.mjs';
+import {raceWithin} from './team-view.mjs';
+import {decodeEntities} from '../pages/src/engine/plan.mjs';
+import {localDay, localHHMM} from './time.mjs';
 import {entryLine} from './erasures.mjs';
 import {operatorAddress, operatorRemovalMail} from './mail-content.mjs';
 
@@ -26,11 +30,38 @@ const DAY_MS = 24 * 3600 * 1000;
 const SETTINGS = {page: 'settings'};
 
 
+// The question a club settings form gets without confirm=1 (UI panel wave 2, the no-script path of
+// its in-page confirm): `heading`, `words`, the form's `fields` again to `action` with `button`, and
+// the way back to the club settings. Nothing changes.
+function clubAsk(res, ctx, cid, {heading, words, action, fields, button, danger = true}) {
+    const club = ctx.store.get(cid);
+    html(res, 200, confirmPage(club, {...frameOf(ctx, cid), here: placePath(SETTINGS), kicker: club.name,
+        trail: [{href: placePath(SETTINGS), label: t('tp-club-settings')}], heading, words, action, fields, button, danger,
+        back: {href: placePath(SETTINGS), label: t('cs-back')}}));
+}
+
+
+// The name a plan of the club gives Zwift ID `aid`, or null.
+function riderName(club, aid) {
+    for (const sheet of Object.values(club.sheets)) {
+        for (const list of [sheet.json?.riders, sheet.json?.roster]) {
+            const r = list && typeof list === 'object' && Object.hasOwn(list, aid) ? list[aid] : null;
+            const name = decodeEntities(r?.name).trim();
+            if (name) {
+                return name;
+            }
+        }
+    }
+    return null;
+}
+
+
 // POST /manage/club (name, tz, weekday). All are checked before the store sees them (a zone the
 // store refuses would be a 500): the name key is unique among active and trashed clubs other than
 // this one, the zone one of the form's, the weekday (the race day of weekly teams) 1-7; a form
 // without a weekday (a page from before it) keeps the club's. Each change is noted in the club log.
-// A refusal keeps the name as typed.
+// A refusal keeps the name as typed. Another zone while a plan of the club races within 7 days asks
+// first without confirm=1 (S11): the question, with the form's fields again, and nothing changes.
 function clubAction(req, res, ctx, cid, form) {
     const {store, cfg, now} = ctx;
     const club = store.get(cid);
@@ -55,6 +86,11 @@ function clubAction(req, res, ctx, cid, form) {
         done(res, ctx, cid, SETTINGS, t('club-saved'));
         return;
     }
+    if (tz !== club.tz && field(form, 'confirm') !== '1' && raceWithin(club, null, now)) {
+        clubAsk(res, ctx, cid, {heading: t('ask-tz', {club: club.name}), words: t('cs-tz-confirm', {club: club.name}), action: '/manage/club',
+            fields: {name: field(form, 'name'), tz, weekday: String(weekday)}, button: t('cs-tz-yes'), danger: false});
+        return;
+    }
     const saved = attempt(res, ctx, cid, c => {
         if (c.name !== name.name) {
             c.name = name.name;
@@ -75,7 +111,9 @@ function clubAction(req, res, ctx, cid, form) {
 }
 
 
-// POST /manage/rider/remove (zwiftId). When the rider's newest entry on the erasure list is still
+// POST /manage/rider/remove (zwiftId, confirm). Without confirm=1 (S13, UI panel wave 2: the no-script
+// path of the in-page confirm) a removal that would run asks first, naming the rider a plan of the
+// club gives that ID; nothing changes. When the rider's newest entry on the erasure list is still
 // live and nothing of his was stored since (no version, inbox entry, archived version or check lists
 // him, no recording of the club began since), there is no new line and no mail: an entry applied in
 // full means nothing to do at all; one that left failures is run again (steps 3 and 4) and marked
@@ -101,6 +139,14 @@ async function riderAction(req, res, ctx, cid, form) {
     const again = prior !== null && !heldSince(ctx, cid, aid, Date.parse(prior.at));
     if (again && ctx.erasures.isApplied(prior)) {
         done(res, ctx, cid, SETTINGS, t('rider-removed-already'));
+        return;
+    }
+    if (field(form, 'confirm') !== '1') {
+        const club = ctx.store.get(cid);
+        const name = riderName(club, aid);
+        const who = name === null ? t('rider-who-id', {id: aid}) : t('rider-who-name', {name, id: aid});
+        clubAsk(res, ctx, cid, {heading: t('ask-rider'), words: t('rider-confirm', {who, club: club.name}), action: '/manage/rider/remove',
+            fields: {zwiftId: aid}, button: t('rider-yes')});
         return;
     }
     // counted once it is recorded: a removal refused for an unwritable list costs nothing
@@ -199,11 +245,21 @@ export function riderRemovedText(plans, archived, {changed = 0, deleted = 0, fai
 }
 
 
-// POST /manage/logs/delete (slug, file): one of this club's recordings.
+// POST /manage/logs/delete (slug, file, confirm): one of this club's recordings. Without confirm=1
+// (review I1, UI panel wave 2: the no-script path of its in-page confirm) a recording that exists
+// is asked about first, naming the rider and the session; nothing changes.
 function deleteRecording(req, res, ctx, cid, form) {
     const slug = field(form, 'slug');
     const file = field(form, 'file');
-    if (!isSlug(slug) || !LOG_NAME_RE.test(file) || !ctx.logs.remove(cid, slug, file)) {
+    const rec = isSlug(slug) && LOG_NAME_RE.test(file) ? ctx.logs.list(cid).find(r => r.slug === slug && r.file === file) ?? null : null;
+    if (rec !== null && field(form, 'confirm') !== '1') {
+        const club = ctx.store.get(cid);
+        const rider = riderName(club, rec.athlete) ?? rec.athlete;
+        clubAsk(res, ctx, cid, {heading: t('ask-rec-delete'), words: t('rec-delete-confirm', {rider, day: localDay(rec.session, club.tz), time: localHHMM(rec.session, club.tz)}),
+            action: '/manage/logs/delete', fields: {slug, file}, button: t('rec-delete-yes')});
+        return;
+    }
+    if (rec === null || !ctx.logs.remove(cid, slug, file)) {
         refuse(res, ctx, cid, t('rec-gone'), {place: SETTINGS});
         return;
     }
@@ -216,9 +272,10 @@ function deleteRecording(req, res, ctx, cid, form) {
 // into no log, cookie, URL or later page, and only its HMAC is stored. The confirm form carries the
 // time of the code it replaces (riderCode.setAt, not secret): a code made since then (another
 // captain, or this code page sent again) is not replaced (409). Without CODE_SECRET no code can
-// be made (409), but a club still private can be made open (F11). `new` without confirm=1 (there is
-// no confirm page of its own, decision 13) is refused as a form not understood. Anything else that
-// fits no state goes back to the club settings unchanged, without a flash.
+// be made (409), but a club still private can be made open (F11). `on` and `new` without confirm=1
+// (the no-script path of their in-page confirms, S2, UI panel wave 2) answer with the question and
+// change nothing. Anything else that fits no state goes back to the club settings unchanged, without
+// a flash.
 function codeAction(req, res, ctx, cid, form) {
     const {store, cfg, now} = ctx;
     const action = field(form, 'action');
@@ -230,15 +287,17 @@ function codeAction(req, res, ctx, cid, form) {
         refuse(res, ctx, cid, t('private-disabled'), {status: 409, place: SETTINGS});
         return;
     }
-    // `new` asks first in the page only (decision 13): without confirm=1 the form is not understood
-    if (action === 'new' && field(form, 'confirm') !== '1') {
-        refuse(res, ctx, cid, t('manage-bad-form'), {place: SETTINGS});
-        return;
-    }
     const club = store.get(cid);
     const priv = isPrivate(club);
     if (action === 'new' && priv && field(form, 'setAt') !== club.riderCode.setAt) {
         refuse(res, ctx, cid, t('code-changed'), {status: 409, place: SETTINGS});
+        return;
+    }
+    // both ask first: on a page of their own without confirm=1
+    if (field(form, 'confirm') !== '1' && ((action === 'on' && !priv) || (action === 'new' && priv))) {
+        clubAsk(res, ctx, cid, action === 'on'
+            ? {heading: t('ask-code-on', {club: club.name}), words: t('private-on-confirm', {club: club.name}), action: '/manage/code', fields: {action}, button: t('private-on-yes')}
+            : {heading: t('ask-code-new'), words: t('code-confirm'), action: '/manage/code', fields: {action, setAt: field(form, 'setAt')}, button: t('private-new')});
         return;
     }
     if ((action === 'on' && !priv) || (action === 'new' && priv)) {

@@ -153,7 +153,7 @@ test('client.mjs imports without a DOM', async () => {
 test('appPage: a note without the script', () => {
     // the captain pages need the script (plan versions spec decision 13); only Make live works without it
     const note = '<noscript><div class="nojs"><p class="banner warn" role="note"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false">';
-    const words = '<span>This page needs JavaScript. Make live still works without it.</span></p></div></noscript>';
+    const words = '<span>This page needs JavaScript. Make live and every button that asks first still work without it.</span></p></div></noscript>';
     for (const p of [appPage({body: '<main id="main"></main>'}), appPage({body: '<main id="main"></main>', refresh: '/manage/team/rollers', updated: '19:12'})]) {
         assert.equal(count(p, note), 1);
         assert.equal(count(p, words), 1);

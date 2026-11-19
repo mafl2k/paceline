@@ -58,9 +58,9 @@ async function push(srv, token, body, {headers = {}, query = true} = {}) {
 
 const plan = (name = 'Rollers fast', riders = ROLLERS.slice(0, 6)) => planJson(name, riders);
 
-// The "Plan on ZwiftGopher" link of a team page (the empty card's button, or the link beside
-// "Upload a plan"), or null.
-const plannerOf = body => /<a class="(?:btn secondary block|uplink)" href="([^"]*)" target="_blank" rel="noopener noreferrer">/.exec(body)?.[1]
+// The "Plan on ZwiftGopher" link of a team page (the empty card's button, or the head's button beside
+// "Upload a plan", UI panel wave 3), or null.
+const plannerOf = body => /<a class="btn secondary (?:block|small)" href="([^"]*)" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">/.exec(body)?.[1]
     .replaceAll('&amp;', '&') ?? null;
 
 async function pageOf(srv, cookie, p) {
@@ -80,10 +80,13 @@ test('push: the team page links to the planner with a fresh token; the upload pa
     const body = await pageOf(srv, kf.cookie, '/manage/team/rollers');
     const href = plannerOf(body);
     assert.equal(href, `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'rollers')}&plhost=paceline.example.org`);
-    assert.match(body, /<section class="card empty"[\s\S]*?Upload a plan<\/a>\s*<a class="btn secondary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer">[\s\S]*?Plan on ZwiftGopher<\/a>\s*<\/section>/);
-    // a team with plans: beside "Upload a plan" under the plans
+    assert.match(body, /<section class="card empty"[\s\S]*?Upload a plan<\/a>\s*<a class="btn secondary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">[\s\S]*?Plan on ZwiftGopher<\/a>\s*<\/section>/);
+    // no second pair in the head: the empty card has them
+    assert.ok(!body.includes('class="headacts"'), body);
+    // a team with plans: in the head, beside "Upload a plan" (UI panel wave 3; "ZwiftGopher" alone on phones)
     const other = await pageOf(srv, kf.cookie, '/manage/team/sprockets');
-    assert.match(other, /<div class="uplinks"><a class="uplink" href="\/manage\/upload\?team=sprockets">[\s\S]*?<\/a><a class="uplink" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=/);
+    assert.match(other, /<div class="headacts"><a class="btn secondary small" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a plan<\/a><a class="btn secondary small" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[^"]*" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)"><svg[^>]*>[\s\S]*?<\/svg><span class="desk">Plan on ZwiftGopher<\/span><span class="mob">ZwiftGopher<\/span><\/a><\/div>/);
+    assert.ok(!other.includes('uplink'), 'no links under the plans any more');
     assert.equal(plannerOf(other), `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'sprockets')}&plhost=paceline.example.org`);
     assert.notEqual(new URL(plannerOf(other)).searchParams.get('paceline'), new URL(href).searchParams.get('paceline'));
     // the upload page is for the file only, and never reloads
@@ -177,7 +180,7 @@ test('push: New ZwiftGopher link ends every link of the team, a fresh one too; t
     assert.match(settings, /New ZwiftGopher link/);
     const fresh = new URL(plannerOf(await pageOf(srv, kf.cookie, '/manage/team/rollers'))).searchParams.get('paceline');
     const sprockets = tokenFor(secretOf(srv), 'sprockets');
-    const done = await followPost(srv, kf.cookie, '/manage/team', {action: 'push-link', team: 'rollers'});
+    const done = await followPost(srv, kf.cookie, '/manage/team', {action: 'push-link', team: 'rollers', confirm: '1'});
     assert.equal(done.location, '/manage/team/rollers/settings');
     assert.deepEqual(done.flash, {kind: 'ok', text: 'Rollers has a new ZwiftGopher link. Every earlier link no longer works.'});
     assert.equal(srv.store.get(CID).teams.rollers.pushGen, 1);
@@ -380,10 +383,11 @@ test('push: the team page lists every received plan, newest first; picker and si
 
     const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
     const text = textOf(page);
-    assert.match(text, /2 new plans from ZwiftGopher Sent 19:20 In the planner: Rollers slow · 4 riders Review and store Discard Sent 19:05 In the planner: Rollers & <b>fast<\/b> · 6 riders Review and store Discard/);
+    // Discard asks first in its place, naming the riders (B1, UI panel wave 2)
+    assert.match(text, /2 new plans from ZwiftGopher Sent 19:20 In the planner: Rollers slow · 4 riders Review and store Discard… 4 riders \(Ben, Cleo …\) Discards the plan with 4 riders \(Ben, Cleo …\)\. [^]* Discard plan Cancel Sent 19:05 In the planner: Rollers & <b>fast<\/b> · 6 riders Review and store Discard… /);
     assert.match(page, /In the planner: Rollers &amp; &lt;b&gt;fast&lt;\/b&gt;/, 'the name is escaped');
     assert.ok(page.indexOf(`href="/manage/inbox/${second.id}"`) < page.indexOf(`href="/manage/inbox/${first.id}"`), 'newest first');
-    assert.match(page, new RegExp(`<form method="post" action="/manage/inbox/${first.id}/discard"><input type="hidden" name="club" value="${CID}"><input type="hidden" name="back" value="/manage/team/rollers">`));
+    assert.match(page, new RegExp(`<form class="discard" method="post" action="/manage/inbox/${first.id}/discard" data-arm><input type="hidden" name="club" value="${CID}"><input type="hidden" name="back" value="/manage/team/rollers">`));
     // the rows: the sidebar (and switcher) of every page, and the picker's tile
     assert.equal(count(page, '<span class="newplans">2 new plans</span>'), 2, 'switcher and sidebar');
     const picker = await pageOf(srv, kf.cookie, '/manage');
@@ -395,7 +399,7 @@ test('push: the team page lists every received plan, newest first; picker and si
     assert.match(sprockets, /<span class="trow-name">Rollers <span class="newplans">2 new plans<\/span>/);
 
     // Discard from the team page comes back to it, with one plan left
-    const gone = await followPost(srv, kf.cookie, `/manage/inbox/${first.id}/discard`, {back: '/manage/team/rollers'});
+    const gone = await followPost(srv, kf.cookie, `/manage/inbox/${first.id}/discard`, {back: '/manage/team/rollers', confirm: '1'});
     assert.equal(gone.location, '/manage/team/rollers');
     assert.match(textOf(gone.page), /New plan from ZwiftGopher Sent 19:20/);
     assert.match(gone.page, /<span class="newplans">1 new plan<\/span>/);
@@ -520,7 +524,7 @@ test('push: deleting a team takes its waiting plans out of the inbox, so other t
     }
     srv.clock.now = NOW;
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 409, 'full');
-    const done = await followPost(srv, kf.cookie, '/manage/team', {action: 'delete', team: 'sprockets'});
+    const done = await followPost(srv, kf.cookie, '/manage/team', {action: 'delete', team: 'sprockets', confirm: '1'});
     assert.equal(done.flash.kind, 'ok');
     assert.deepEqual(srv.store.get(CID).inbox, []);
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 201);

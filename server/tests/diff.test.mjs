@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ordinal, diffVersions, diffSummary} from '../diff.mjs';
+import {ordinal, diffVersions, diffSummary, diffPeople} from '../diff.mjs';
 import {removeRider} from '../club.mjs';
 import {club, sheet, T} from './helpers.mjs';
 
@@ -123,7 +123,7 @@ test('diff: a version that differs only in its event link is no "Same as"', () =
     assert.deepEqual(lines.map(l => [l.kind, l.text]), [['event', 'Event link changed']]);
     lines = diff(at(3, 4567890), at(4, null));
     assert.deepEqual(lines.map(l => [l.kind, l.text]), [['event', 'Event link removed']]);
-    assert.equal(diffSummary(lines, {copyOf: 1}), 'Back to v1: Event link removed');
+    assert.equal(diffSummary(lines, {copyOf: 1}), 'Restored v1: Event link removed');
     lines = diff(at(3, 4567890), at(4, 4567890));
     assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as v3']]);
     // with other changes, after the type line
@@ -167,8 +167,15 @@ test('diffSummary: names, counts and limits', () => {
     p2.json.riders['1001'].pull_wkg = 4.1;
     assert.equal(diffSummary(diff(p1, p2)), '2 targets');
 
-    assert.equal(diffSummary(diff(p1, p1), {copyOf: 4}), 'Back to v4: Same as v1');
-    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {copyOf: 4}), 'Back to v4: Cleo in');
+    assert.equal(diffSummary(diff(p1, p1), {copyOf: 4}), 'Restored v4: Same as v1');
+    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {copyOf: 4}), 'Restored v4: Cleo in');
+    // with the version's own n (the team page's live row, UI panel 19 Nov 2026): "v3: …", a restore
+    // "v3 (restored v1): …"
+    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {n: 2}), 'v2: Cleo in');
+    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {n: 3, copyOf: 1}), 'v3 (restored v1): Cleo in');
+    // who came and went alone, or null
+    assert.equal(diffPeople(diff(ver(['1001', '1003'], {n: 1}), ver(['1002', '1001'], {n: 2}))), 'Cleo in, Dan out');
+    assert.equal(diffPeople(diff(ver(['1001', '1002'], {n: 1}), ver(['1002', '1001'], {n: 2}))), null);
 });
 
 test('diff: a rider removed by Remove a rider appears nowhere', () => {
