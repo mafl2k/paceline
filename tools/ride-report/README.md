@@ -1,13 +1,13 @@
 # Paceline ride report
 
 The standard analysis that runs on every Paceline ride recording (the `.jsonl` a rider exports or
-uploads). It replaces the one-off scripts of earlier analyses: the same checks, in the same order,
+uploads, or the `.jsonl.gz` the plan server stores; a gzip'd file is read as it is). It replaces the one-off scripts of earlier analyses: the same checks, in the same order,
 for every ride, so two races can be compared. Not part of the mod (only `manifest.json`,
 `README.md` and `pages/` are deployed). Plain Node 22, no dependencies; the replays use the mod's
 own engine (`pages/src/engine/`), so they always show what the current engine would do.
 
 ```
-node tools/ride-report/report.mjs <recording.jsonl> [--plan <SIG>=<plan.json> ...] [--plan-all <SIG>=<plan.json>]
+node tools/ride-report/report.mjs <recording.jsonl[.gz]> [--plan <SIG>=<plan.json> ...] [--plan-all <SIG>=<plan.json>]
                                   [--out <dir>] [--names]
 ```
 
@@ -21,10 +21,16 @@ node tools/ride-report/report.mjs <recording.jsonl> [--plan <SIG>=<plan.json> ..
   overview still lists the plan codes as they ran live, with times, and says how long another plan
   was live, so the wrong-plan period stays visible. The replay also runs with this plan.
 - `--out`: where `report.md` and `report.json` go (default: `<recording>-report/` next to the
-  recording).
+  recording, without `.jsonl` or `.jsonl.gz`).
 - Riders are shown by plan position (`#1 … #n` of the plan active at the finish, `ICH (#k)` for the
   recorder, `<code>#k` for riders only in another plan, `B1 …` for the bench). `--names` adds the
   plan's first names and the file name: for local use only.
+
+**From the plan server.** The operator page `/admin` → a club's **Recordings** offers each stored
+recording and, per team and race day, **Download race**: a tar with the day's recordings, the plans
+they name in the server's stored form (`plans/<SIG>.json`, for `--plan`), `MISSING-PLANS.txt` for
+codes the server no longer has, and a `README.txt` with the report line of each recording. Unpack it
+outside this repository (the reports land next to the recordings).
 
 `report.md` has one section per check, each with a one-line verdict (German); `report.json` has the
 same numbers. Times are race times from the roll-off (`+mm:ss`).

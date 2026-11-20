@@ -121,8 +121,8 @@ function riderCard(club) {
 }
 
 
-// Zwift ID -> display name, from any of the club's plans.
-function riderNames(club) {
+// Zwift ID -> display name, from any of the club's plans (the operator's recordings page too).
+export function riderNames(club) {
     const names = new Map();
     for (const sheet of Object.values(club.sheets)) {
         for (const list of [sheet.json?.riders, sheet.json?.roster]) {

@@ -85,6 +85,7 @@ no-referrer` and a neutral title.
 | `/manage/settings` | club settings: name and zone, race day of weekly teams, address, private club, remove a rider, recordings, activity, delete the club |
 | `/static/app.css`, `/static/app.js` | the captain pages' stylesheet and script; each has an ETag of its content, and a link with the matching `?v=` is cached for a year |
 | `/admin` | the operator page (below) |
+| `/admin/recordings?cid=<cid>`, `/admin/recordings/file`, `/admin/recordings/race` | an active club's recordings for the operator to download (below, Recordings for analysis) |
 | `/privacy` | what is kept, who sees it, for how long and where it is processed; with a club cookie a back bar to `/manage` |
 
 **Several clubs in one browser.** One address may own several clubs, and one captain may plan for
@@ -379,10 +380,36 @@ address as the server sees it, the registration switch (stored in `paceline.db`,
 `REGISTRATION`), the clubs with status, creation time and size, the database (below) and the last
 20 mail results (time, kind and SMTP reply code, never an address or text). Per club: "Show a new link once" (works while
 mail is down; the link is shown in that one answer and not logged), Restore (within 7 days of a
-deletion; ends all links and mails a new one) and Purge (deletes at once and frees the name).
+deletion; ends all links and mails a new one) and Purge (deletes at once and frees the name); an
+active club also links to its recordings (below).
 The throttle on wrong logins is described under Limits: **choose `ADMIN_PASS` long and random**
 (`openssl rand -base64 24`), because correct credentials always pass and the throttle cannot stop
 guessing by design.
+
+**Recordings for analysis.** "Recordings (n)" in an active club's row opens
+`/admin/recordings?cid=<cid>`: the club's recordings by team and race day in the club's time zone
+(as captains see them on `/manage/settings`), each with the rider's name as the club's plans give
+it (else the Zwift ID), the start time and size, and a Download link
+(`/admin/recordings/file?cid=&slug=&file=`: the stored `.jsonl.gz` as it is, named
+`<team>-<day>-<HHMM>-<rider>.jsonl.gz`). **Download race** per group
+(`/admin/recordings/race?cid=&slug=&day=YYYY-MM-DD`) gives one uncompressed tar,
+`<team>-<day>/`: the recordings (`<rider>-<session>.jsonl.gz`), `plans/<SIG>.json` for every plan
+code they name (the team's versions, then its archived ones, in the server's stored form that
+`--plan` reads), `MISSING-PLANS.txt` for codes no version holds any more, and `README.txt` with the
+`node "$PACELINE/tools/ride-report/report.mjs" … --plan SIG=plans/SIG.json` line of each recording
+and a reminder to delete the folder after the analysis (retention and Remove a rider do not reach
+downloaded copies) (the ride report reads `.jsonl.gz` as it is; see `tools/ride-report/README.md`). Unpack it outside
+the repository. Only indexed recordings are served, by paths built from checked parts, streamed from
+disk; a file that changes while it is sent ends the answer. Held back (no link, not in the tar, 404)
+are the recordings the reconcile holds until a check of them against the erasure list succeeds (a
+failed or unreadable one stays held), and every
+recording that began before a removal not applied in full yet (a Remove a rider still running, or one
+that failed and runs again at the next start); while `erasures.jsonl` cannot be read nothing is served
+(503). GET only, `no-store`; each download logs one line without names or Zwift IDs:
+`admin: download <cid> <slug> file (1 files, <bytes> bytes)` or
+`admin: download <cid> <slug> <day> (<n> files, <bytes> bytes)` (n: the recordings in the tar).
+The links carry the file name (`<session>-<Zwift ID>`) in the query string: keep the proxy's access
+log off for `/admin`, or treat it as holding Zwift IDs.
 
 The **Database** section of `/admin` shows the size of `paceline.db` and the last nightly dump
 ("Last dump: <date>, <size> KB.", or "No dump yet; the first is written after 03:00."). When the
@@ -811,10 +838,10 @@ same transaction (see Remove a rider below). If the archive cannot be written, t
 logs once and tries again on its next run; a captain's Delete that the database refuses changes
 nothing. Only the operator reads the archive; captains never see archived versions.
 
-**Who sees recordings.** Only the operator opens the files, straight from `DATA_DIR/logs/`, to analyse
-the teams' rides. The club's captains see the list on `/manage/settings` and can delete a recording
+**Who sees recordings.** Only the operator opens the files, to analyse the teams' rides: on `/admin`
+(Recordings for analysis, above) or straight from `DATA_DIR/logs/`. The club's captains see the list on `/manage/settings` and can delete a recording
 (`POST /manage/logs/delete`, also how a rider's withdrawn consent reaches files already uploaded);
-there is no download route, and `GET /manage/logs/...` answers 404. `/privacy` says so, with the
+captains have no download route, and `GET /manage/logs/...` answers 404. `/privacy` says so, with the
 legal bases (6(1)(a) for the uploading rider's own data, 6(1)(f) for the other plan riders' rows).
 
 **Remove a rider** (`POST /manage/rider/remove`, the club settings; for data-protection requests)

@@ -665,7 +665,8 @@ export function makeLogStore(dataDir, {db, now = Date.now, erasures = null}) {
     // {deleted, changed, failed, unreadable}. A file that fails stays as it was and is logged (the
     // club and the team, no Zwift ID): a recording no check reads counts as unreadable (another run
     // cannot fix it: a captain deletes it), any other failure as failed (a run again finishes it).
-    async function checkFiles(files, extra = new Map()) {
+    // Each file that failed either way is pushed to `failedOut` when given.
+    async function checkFiles(files, extra = new Map(), failedOut = null) {
         const out = {deleted: 0, changed: 0, failed: 0, unreadable: 0};
         for (const f of files) {
             try {
@@ -674,6 +675,7 @@ export function makeLogStore(dataDir, {db, now = Date.now, erasures = null}) {
                     out[r]++;
                 }
             } catch (e) {
+                failedOut?.push(f);
                 if (e.code === 'unreadable') {
                     out.unreadable++;
                     // once per file while the server runs: the reconcile finds it again every sweep
@@ -726,16 +728,56 @@ export function makeLogStore(dataDir, {db, now = Date.now, erasures = null}) {
     // Files reconcile held back or found changed (a restore of logs/ brings back what the list took
     // out): key -> {cid, slug, name, indexed}. checkHeld checks them in one pass.
     const held = new Map();
+    // the keys of the held files checkHeld is checking now (out of `held` already)
+    const checking = new Set();
 
     function checkHeld() {
-        return queued(() => {
+        return queued(async () => {
             if (listBroken()) {
                 return {deleted: 0, changed: 0, failed: 0, unreadable: 0};
             }
             const files = [...held.values()];
             held.clear();
-            return checkFiles(files);
+            const keys = files.map(f => `${f.cid}/${f.slug}/${f.name}`);
+            keys.forEach(k => checking.add(k));
+            // a file whose check failed or that could not be read stays held until a check of it
+            // succeeds (the next sweep's reconcile would hold it again anyway; until then it is not
+            // served on /admin either)
+            const failed = [];
+            try {
+                return await checkFiles(files, new Map(), failed);
+            } finally {
+                for (const f of failed) {
+                    const key = `${f.cid}/${f.slug}/${f.name}`;
+                    if (!held.has(key)) {
+                        held.set(key, f);
+                    }
+                }
+                keys.forEach(k => checking.delete(k));
+            }
         });
+    }
+
+    // Whether the reconcile holds the recording back until it is checked against the erasure list
+    // (held, or being checked now). The operator's download (admin-recordings.mjs) serves none such.
+    const isHeld = (cid, slug, name) => held.has(`${cid}/${slug}/${name}`) || checking.has(`${cid}/${slug}/${name}`);
+
+    // The plan codes stored with the recording (recording_sigs), sorted.
+    function sigsOf(cid, slug, name) {
+        checkPath(cid, slug, name);
+        return q.sigsOf.all(cid, slug, name).map(r => r.sig);
+    }
+
+    // The recording's file opened for reading (a FileHandle the caller closes), null when it is gone.
+    async function openFile(cid, slug, name) {
+        try {
+            return await fs.promises.open(fileOf(cid, slug, name), 'r');
+        } catch (e) {
+            if (e.code === 'ENOENT') {
+                return null;
+            }
+            throw e;
+        }
     }
 
     // True when an archived version of the club (deleted teams' too) lists the Zwift ID.
@@ -990,6 +1032,7 @@ export function makeLogStore(dataDir, {db, now = Date.now, erasures = null}) {
         get, has, incoming, discard, matches, put, adopt, remove, list, recordingCount, circleBytes, totalBytes, reconcile, sweep,
         addSigs, codes, archived, archiveVersions, prune, removeRider, dropClub,
         erasedFor, rewrite, eraseRider, eraseRiders, checkHeld, archiveLists, erasuresBroken: listBroken,
+        isHeld, sigsOf, openFile,
     };
 }
 

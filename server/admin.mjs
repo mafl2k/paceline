@@ -1,7 +1,8 @@
 // The operator page /admin (spec §5.3): HTTP Basic auth with the ADMIN_* login (else UPLOAD_*),
 // a throttle on failed logins, the clubs with name, status, created and size, "Show a new link
 // once", restore, purge, the registration switch, the database with its last dump, and the last
-// mail results. Without a login configured every /admin* path answers 404, like any unknown path.
+// mail results, and an active club's recordings to download (admin-recordings.mjs). Without a login
+// configured every /admin* path answers 404, like any unknown path.
 // Plain forms, no scripts. GETs only look; every change is a POST from this site. A link shown here
 // leaves only in that one answer (no-store): never in a URL, a mail of ours (except the restore
 // mail to the club), the club log or the server log.
@@ -15,6 +16,7 @@ import {addLink, endAllLinks} from './tokens.mjs';
 import {leftoverFolders, LEFTOVER_DAYS} from './dump.mjs';
 import {parseEntry} from './erasures.mjs';
 import {FORM_BYTES, refuseCrossSite, methodNotAllowed, mailLink} from './web.mjs';
+import {RECORDING_PATHS, handleRecordings} from './admin-recordings.mjs';
 
 // Failed logins per client address (spec §8): 10 in 15 min, then 429 until the window has passed.
 export const ADMIN_FAILS_MAX = 10;
@@ -107,17 +109,19 @@ ${notes.join('\n')}${notes.length ? '\n' : ''}${button('/admin/registration', {s
 
 
 // Active, pending, then trashed clubs. Size: the club's JSON plus its recordings and archived
-// versions (a trashed club: its JSON and archived versions as they were when it was trashed).
+// versions (a trashed club: its JSON and archived versions as they were when it was trashed). An
+// active club links to its recordings (admin-recordings.mjs).
 function clubRows({store, logs}) {
+    const recLink = c => `<a href="/admin/recordings?cid=${esc(c.id)}">${esc(t('admin-rec-link', {n: logs.recordingCount(c.id)}))}</a>`;
     const rows = [
-        ...store.active().map(c => ({c, status: t('admin-status-active'), bytes: clubBytes(c) + logs.circleBytes(c.id), actions: ['link', 'purge']})),
+        ...store.active().map(c => ({c, status: t('admin-status-active'), bytes: clubBytes(c) + logs.circleBytes(c.id), actions: ['link', 'purge'], rec: recLink(c)})),
         ...store.pending().map(c => ({c, status: t('admin-status-pending'), bytes: clubBytes(c), actions: ['link', 'purge']})),
         ...store.trashed().map(c => ({c, status: t('admin-status-trashed', {at: minute(c.deletedAt)}), bytes: c.bytes, actions: ['restore', 'purge']})),
     ];
     const label = {link: 'admin-link-button', restore: 'admin-restore-button', purge: 'admin-purge-button'};
-    return rows.map(({c, status, bytes, actions}) => `<tr id="club-${esc(c.id)}"><td>${esc(c.name)}</td><td>${esc(status)}</td>`
+    return rows.map(({c, status, bytes, actions, rec = null}) => `<tr id="club-${esc(c.id)}"><td>${esc(c.name)}</td><td>${esc(status)}</td>`
         + `<td>${esc(minute(c.createdAt))}</td><td class="n">${esc(t('admin-size', {kb: Math.ceil(bytes / 1024)}))}</td>`
-        + `<td>${actions.map(a => button(`/admin/${a}`, {cid: c.id}, t(label[a]))).join(' ')}</td></tr>`);
+        + `<td>${rec === null ? '' : `<p>${rec}</p>`}${actions.map(a => button(`/admin/${a}`, {cid: c.id}, t(label[a]))).join(' ')}</td></tr>`);
 }
 
 
@@ -367,7 +371,8 @@ function registration(req, res, ctx, state) {
 
 // The routes of this module; false when the path is not one of them. `method` has HEAD as GET.
 // ctx: {store, cfg, mailer, now (ms), logs, admin (makeAdminState(), one per server), dumps (the
-// dump job, makeDumpJob())}.
+// dump job, makeDumpJob()), erasures (makeEraser())}. The recordings' GET routes are in
+// admin-recordings.mjs, behind the same gate.
 export async function handleAdmin(req, res, ctx, p, method) {
     if (p !== '/admin' && !p.startsWith('/admin/')) {
         return false;
@@ -382,6 +387,14 @@ export async function handleAdmin(req, res, ctx, p, method) {
     if (p === '/admin') {
         if (method === 'GET') {
             adminPage(req, res, ctx);
+        } else {
+            methodNotAllowed(res, 'GET');
+        }
+        return true;
+    }
+    if (RECORDING_PATHS.has(p)) {
+        if (method === 'GET') {
+            await handleRecordings(req, res, ctx, p);
         } else {
             methodNotAllowed(res, 'GET');
         }

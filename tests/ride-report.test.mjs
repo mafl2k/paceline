@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import {analyse, publicResult} from '../tools/ride-report/analyse.mjs';
 import {parseRecording, readPlan, parsePlanArg} from '../tools/ride-report/load.mjs';
 import {renderMarkdown} from '../tools/ride-report/render.mjs';
 import {frontPerTick, markSwaps, turnsOf, groundTruth} from '../tools/ride-report/checks/pulls.mjs';
 import {simulateView, judgeView, viewsCheck, MODELS} from '../tools/ride-report/checks/views.mjs';
 import {makeRide} from '../tools/ride-report/ride.mjs';
-import {run, parseArgs} from '../tools/ride-report/report.mjs';
+import {run, parseArgs, readRecording} from '../tools/ride-report/report.mjs';
 import {planSig} from '../pages/src/engine/plan.mjs';
 import * as M from './fixtures/ride-report/make.mjs';
 
@@ -574,6 +575,29 @@ test('CLI: arguments, report.md and report.json', () => {
         assert.equal(json.countdown.jumps.n, 1);
         assert.match(fs.readFileSync(path.join(dir, 'out', 'report.md'), 'utf8'), /^# Fahrtbericht Testers/);
         assert.equal(run([], {log: () => {}}), 2);
+    } finally {
+        fs.rmSync(dir, {recursive: true, force: true});
+    }
+});
+
+
+test('CLI: a gzip\'d recording (the server\'s .jsonl.gz) gives the same report as the plain one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ride-report-'));
+    try {
+        const text = M.makeRecording();
+        fs.writeFileSync(path.join(dir, 'rec.jsonl'), text);
+        fs.writeFileSync(path.join(dir, 'gz.jsonl.gz'), zlib.gzipSync(text));
+        fs.writeFileSync(path.join(dir, 'p2.json'), JSON.stringify(M.PLAN2));
+        assert.equal(readRecording(path.join(dir, 'gz.jsonl.gz')), text);
+        assert.equal(readRecording(path.join(dir, 'rec.jsonl')), text);
+        const plan = `P2TEST=${path.join(dir, 'p2.json')}`;
+        assert.equal(run([path.join(dir, 'rec.jsonl'), '--plan', plan], {log: () => {}}), 0);
+        assert.equal(run([path.join(dir, 'gz.jsonl.gz'), '--plan', plan], {log: () => {}}), 0);
+        // the default folder drops .jsonl.gz as it drops .jsonl
+        const plain = fs.readFileSync(path.join(dir, 'rec-report', 'report.json'), 'utf8');
+        const gz = fs.readFileSync(path.join(dir, 'gz-report', 'report.json'), 'utf8');
+        assert.equal(gz, plain);
+        assert.equal(JSON.parse(gz).countdown.jumps.n, 1);
     } finally {
         fs.rmSync(dir, {recursive: true, force: true});
     }
