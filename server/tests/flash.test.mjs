@@ -96,6 +96,23 @@ test('redirectWithFlash: 303 to the path, the cookie appended', () => {
 });
 
 
+test('redirectWithFlash: a query goes on the Location, the flash stays bound to the path', () => {
+    const ctx = {web: {flashes: makeFlashes()}, now: 1000};
+    const res = fakeRes();
+    const path = '/manage/team/rollers/cockpit';
+    redirectWithFlash(res, ctx, CID, path, {kind: 'ok', text: 'Done.'}, {query: '?v=c00004', hash: 'panel'});
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.Location, '/manage/team/rollers/cockpit?v=c00004#panel');
+    const id = res.cookies[0].split(';')[0].slice(FLASH_COOKIE.length + 1);
+    assert.equal(ctx.web.flashes.take(id, CID, `${path}?v=c00004`, 1000), null);    // the path, never the query
+    assert.deepEqual(ctx.web.flashes.take(id, CID, path, 1000), {kind: 'ok', text: 'Done.'});
+    // a query alone, no hash
+    const res2 = fakeRes();
+    redirectWithFlash(res2, ctx, CID, path, {kind: 'ok', text: 'Done.'}, {query: '?e=c00006'});
+    assert.equal(res2.headers.Location, '/manage/team/rollers/cockpit?e=c00006');
+});
+
+
 test('takeFlash: GET only, a hit or a dead id clears the cookie, a flash meant elsewhere keeps it', () => {
     const ctx = {web: {flashes: makeFlashes()}, now: 1000};
     const put = (cid = CID, p = '/manage') => ctx.web.flashes.put(cid, p, {kind: 'ok', text: 'Saved.'}, 1000);

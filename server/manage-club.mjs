@@ -7,8 +7,7 @@ import {html} from './http.mjs';
 import {t} from './pages.mjs';
 import {checkClubName, zoneOk, redirect, RIDER_REMOVALS_PER_DAY} from './web.mjs';
 import {codePage} from './settings-page.mjs';
-import {removeRider, setRiderCode, clearRiderCode, isPrivate, addLog, clubListsBefore} from './club.mjs';
-import {teamWeekday} from './select.mjs';
+import {removeRider, setRiderCode, clearRiderCode, setTargetUnit, TARGET_UNITS, isPrivate, addLog, clubListsBefore} from './club.mjs';
 import {isSlug, newRiderCode, riderCodeHash, ZWIFT_RE} from './ids.mjs';
 import {LOG_NAME_RE} from './logs.mjs';
 import {field, placePath, done, refuse, attempt, frameOf} from './manage-page.mjs';
@@ -56,17 +55,22 @@ function riderName(club, aid) {
 }
 
 
-// POST /manage/club (name, tz, weekday). All are checked before the store sees them (a zone the
-// store refuses would be a 500): the name key is unique among active and trashed clubs other than
-// this one, the zone one of the form's, the weekday (the race day of weekly teams) 1-7; a form
-// without a weekday (a page from before it) keeps the club's. Each change is noted in the club log.
-// A refusal keeps the name as typed. Another zone while a plan of the club races within 7 days asks
-// first without confirm=1 (S11): the question, with the form's fields again, and nothing changes.
+// POST /manage/club (name, tz, unit). All are checked before the store sees them (a zone the store
+// refuses would be a 500): the name key is unique among active and trashed clubs other than this
+// one, the zone one of the form's, the unit the targets are shown in 'wkg' or 'watts' (team cockpit
+// spec §7; a form without it, from a page before it, keeps the club's). A weekday (from a page
+// before races spec §4c, when the club had a race day) is ignored: every weekly team has its own.
+// Each change is noted in the club log. A refusal keeps the name as typed. Another zone while a plan
+// of the club races within 7 days asks first without confirm=1 (S11): the question, with the form's
+// fields again, and nothing changes. The unit is a display setting: no team's version changes (an
+// Undo on offer stays; an open team page draws the new unit when it next loads).
 function clubAction(req, res, ctx, cid, form) {
     const {store, cfg, now} = ctx;
     const club = store.get(cid);
     const name = checkClubName(store, field(form, 'name'), cid);
     const tz = field(form, 'tz');
+    const unitNow = club.targetUnit ?? 'wkg';
+    const unit = form.get('unit') === null ? unitNow : field(form, 'unit');
     const typed = {name: field(form, 'name')};
     if (!name.ok) {
         refuse(res, ctx, cid, t(name.error), {status: name.error === 'name-taken' ? 409 : 400, place: SETTINGS, typed});
@@ -76,19 +80,17 @@ function clubAction(req, res, ctx, cid, form) {
         refuse(res, ctx, cid, t('register-tz-bad'), {place: SETTINGS, typed});
         return;
     }
-    const typedDay = form.get('weekday');
-    if (typedDay !== null && !/^[1-7]$/.test(typedDay)) {
-        refuse(res, ctx, cid, t('club-bad-weekday'), {place: SETTINGS, typed});
+    if (!TARGET_UNITS.includes(unit)) {
+        refuse(res, ctx, cid, t('set-unit-bad'), {place: SETTINGS, typed});
         return;
     }
-    const weekday = typedDay === null ? teamWeekday(club, null) : Number(typedDay);
-    if (name.name === club.name && tz === club.tz && weekday === teamWeekday(club, null)) {
+    if (name.name === club.name && tz === club.tz && unit === unitNow) {
         done(res, ctx, cid, SETTINGS, t('club-saved'));
         return;
     }
     if (tz !== club.tz && field(form, 'confirm') !== '1' && raceWithin(club, null, now)) {
         clubAsk(res, ctx, cid, {heading: t('ask-tz', {club: club.name}), words: t('cs-tz-confirm', {club: club.name}), action: '/manage/club',
-            fields: {name: field(form, 'name'), tz, weekday: String(weekday)}, button: t('cs-tz-yes'), danger: false});
+            fields: {name: field(form, 'name'), tz, unit}, button: t('cs-tz-yes'), danger: false});
         return;
     }
     const saved = attempt(res, ctx, cid, c => {
@@ -100,10 +102,7 @@ function clubAction(req, res, ctx, cid, form) {
             c.tz = tz;
             addLog(c, {at: iso(now), what: 'club-tz', label: tz});
         }
-        if (teamWeekday(c, null) !== weekday) {
-            c.weekday = weekday;
-            addLog(c, {at: iso(now), what: 'club-weekday', label: t(`weekday-${weekday}`)});
-        }
+        setTargetUnit(c, unit, now);
     }, {place: SETTINGS, typed});
     if (saved) {
         done(res, ctx, cid, SETTINGS, t('club-saved'));

@@ -2,6 +2,9 @@
 // how long until my pull, who is on my wheel, and the power-bar helper.
 
 import {MAX_AGE_MS, selfEntry} from './recording.mjs';
+import {initialOrder, orderStep, orderBad, orderCount, orderOutIds, classifyChange} from './order.mjs';
+import {handoverStep, freshState} from './handover.mjs';
+import {initialEff, effCut, effStep, teamE, teamH} from './efficiency.mjs';
 
 export const HOLD_MS = 3000;
 // Chaos (several changes at the front in a short time): while the last puller change is less than
@@ -36,12 +39,36 @@ export const RUN_ON_S = 3;
 // values (a round factor from my own recoveries, per-rider medians, all × factor) were not more
 // accurate across riders, and all × factor was late more often (67/146). Nothing is learned or kept
 // per rider: the squad changes from week to week.
+// By pull length (user, 20 Nov 2026): the effective overhead from the recoveries of the same
+// races shrinks with the plan, about +9 / +7 / +5 / +3.5 s for plans of up to 20 / 21–40 / 41–80 /
+// over 80 s (a fixed part of the changeover plus a share that grows with the pull's length). So
+// pulls up to LONG_PULL_S count CHANGE_ALLOWANCE_S, longer ones CHANGE_ALLOWANCE_LONG_S. In the
+// replay of the races the error split 13.0 against 13.5 s with one value, and about 30 % fewer
+// small downward jumps.
+// Since 21 Nov 2026 (user; design 2026-11-21-paceline-beta5 §2) the countdown counts the team's
+// learned turn time instead (efficiency.mjs): every rider still to pull before me plan + E, the
+// rider directly before me plan + E - H. CHANGE_ALLOWANCE_S / CHANGE_ALLOWANCE_LONG_S are now E's
+// prior (by the same plan length) and the fixed rule of the shadow countdown (`eff` null). Why: in
+// the analysis of the recorded races (21 Nov 2026) the error against T0 (the rider before me easing
+// off) went from 10 to 7.3 s abs over 23 rider views.
 export const CHANGE_ALLOWANCE_S = 10;
+export const CHANGE_ALLOWANCE_LONG_S = 5;
+export const LONG_PULL_S = 40;
 
 // The countdown's expected length of a pull: its plan (pullS, the start bonus included for the
-// start puller) plus CHANGE_ALLOWANCE_S, or the plan alone for the rider directly before me.
-export function expectedPullS(pullS, beforeMe) {
-    return pullS + (beforeMe ? 0 : CHANGE_ALLOWANCE_S);
+// start puller) plus the change overhead, or the plan alone for the rider directly before me.
+// The overhead is chosen by planS, the plan's pull without the start bonus (default: pullS).
+// With `eff` (the learner's state, efficiency.mjs; 21 Nov 2026, design §2): plan + E, the rider
+// before me plan + E - H, E with the prior chosen by planS. `eff` null: the fixed rule above.
+export function expectedPullS(pullS, beforeMe, planS = pullS, eff = null) {
+    if (eff) {
+        return pullS + teamE(eff, planS <= LONG_PULL_S ? CHANGE_ALLOWANCE_S : CHANGE_ALLOWANCE_LONG_S) -
+            (beforeMe ? teamH(eff) : 0);
+    }
+    if (beforeMe) {
+        return pullS;
+    }
+    return pullS + (planS <= LONG_PULL_S ? CHANGE_ALLOWANCE_S : CHANGE_ALLOWANCE_LONG_S);
 }
 export const CHAIN_GAP_M = 20;
 export const WARN_S = 10;
@@ -56,7 +83,8 @@ export const SMOOTH_S = 3;
 export const ROT_MAX_AGE_MS = 5000;
 // My own pull from my power and draft (1 Hz samples). Start: a jump of JUMP_W over my rest power
 // while I am the next rider, confirmed by my draft (or position) within CONFIRM_MS; or my draft
-// alone. End: a sharp drop below END_W. Climbs and descents pause the rotation, the final sprint
+// alone. End: a sharp drop below my end threshold (END_W, or END_FRAC of my target when that is
+// lower), the median of END_N samples. Climbs and descents pause the rotation, the final sprint
 // ends it.
 export const JUMP_W = 40;
 export const JUMP_TARGET_FRAC = 0.8;
@@ -87,7 +115,14 @@ export const SUSTAIN_S = 8;
 export const SUSTAIN_TARGET_FRAC = 0.85;
 export const END_W = 130;
 export const END_MIN_S = 20;
-export const END_FRAC = 0.6;           // shadow end rule (recorded only): below END_FRAC x target
+// My end threshold is min(END_W, END_FRAC x target), END_W without a target (audit fixes, 20 Nov
+// 2026, C1): with END_W alone a rider with a target under about 140 W lost every pull at END_MIN_S
+// (probe p03: a 120 W target ridden at 120 W ended each pull at 20 s, my window showed my pull in
+// 61 of 210 s; now 204). Not END_FRAC x target alone: above about 217 W that ends pulls at a
+// higher power than before, and in the six-ride replay it gave one race a new 373 s chaos phase
+// and cost another puller-right (93 -> 91 %); with min() the replay is unchanged. The shadow rule
+// (recorded only) stays END_FRAC x target.
+export const END_FRAC = 0.6;
 // The final sprint: within this distance of the finish the rotation is off.
 export const FINISH_M = 500;
 export const STOP_KMH = 2;             // my speed below this: standing (start pen, a stop)
@@ -107,6 +142,12 @@ export const START_QUIET_MS = 40000;
 // over again; the end of the lock counts as a change (chaos hold), so a front rider other than
 // #1 counts only after CHAOS_HOLD_MS. Only a roll-off after standing at least START_PEN_MS (the
 // start pen) is a start; a stop during the ride is none.
+// Plan #1 means the first plan rider present in the pen (startPuller; audit fixes, 20 Nov 2026,
+// I9; probe p08: with plan #1 not in the race the lock named him anyway, the puller for everyone's
+// first 75 s). With no plan rider but me in my chain there is no lock: a plain roll-off
+// (START_QUIET_MS), the front rider is tracked as after a stop. Standing START_PEN_MS ends the last
+// start (startAt null; M8, probe p41), so a second race in the same session starts like the first;
+// not a stand after the finish line (M-4, see rotationStep).
 export const START_BONUS_S = 30;
 export const START_PEN_MS = 30000;
 export const START_LOCK_MS = 60000;
@@ -118,7 +159,11 @@ export const MAX_GRADE = 30;
 // otherwise his pull counted from 0 again).
 export const RESUME_MS = 60000;
 const REST_MIN_N = 5;                  // rest samples needed before a jump counts
-const END_N = 2;
+// The end: the median of the last END_N samples (audit fixes, 20 Nov 2026, C1; was the mean of 2).
+// One dropped sample (0 W) ended my pull at every target up to 259 W (probe p02: at 250 W one zero
+// at 30 s ended it, and only the 30 s back hold gave it back, 39 s on the rest countdown while I
+// was in front).
+const END_N = 3;
 // Enough for the longer of the two jump rules plus a full rest window.
 const HIST_KEEP = REST_WINDOW_S + Math.max(SMOOTH_S, SUSTAIN_S);
 
@@ -193,13 +238,15 @@ export function selfLive(nearby, selfId) {
 
 
 export function initialFront() {
-    return {puller: null, since: null, cand: null, candSince: null, changedAt: null};
+    return {puller: null, since: null, cand: null, candSince: null, changedAt: null, adopt: null, held: null,
+            lost: null, fired: null};
 }
 
 
 function clearCand(s) {
     s.cand = null;
     s.candSince = null;
+    s.lost = null;
 }
 
 
@@ -224,25 +271,89 @@ function clearCand(s) {
 //   SELF_IGNORE_MS I do not count as front rider (I stay frontmost for a while as I fade), and no
 //   start of mine is taken; nor later a start whose `at` lies in that window (a draft run that
 //   began while I faded in front, before the next rider came past).
+//   Audit fixes, 20 Nov 2026 (C1; probe p02: one 0 W sample at 30 s of a 250 W pull ended it, and
+//   only the back hold gave it back at 69 s, 39 s of rest countdown while I was in front): my end
+//   can be undone like a wrong start. `prev` keeps my pull (`end: true`); if I am in front again
+//   right after the ignore window with `selfOn` (my draft says I lead and my power is back, see
+//   powerBack), my pull comes back with its old since ('back'). Once the rider my end named is in
+//   front, `prev` is dropped. And no back hold against me while the pull my end handed over runs
+//   (handOffCand): the chaos hold applies, as after any change.
 // `last` {kind: 'start' | 'draftStart' | 'end' | 'revert', at} is the latest of these (see
 // selfEvent). A start that is not newer than it is ignored, so one jump or draft run still in the
 // history is not taken twice.
-export function trackFront(state, {now, frontId, selfStart, draftStart, selfEnd, confirm, slowId = null, backId = null}) {
-    const s = {...state};
+// `adopt` says how the puller changed in this step: 'front' (the front rider after his hold, or the
+// first sighting), 'self' (my start), 'end' (the hand-off at my end), 'back' (my wrong start or end undone),
+// 'resume' (resumeFront); null when he did not change. Only 'front' and 'self' are changes seen at
+// the front, which rotationStep classifies against the plan order (order.mjs).
+// `held` is 'back' while the back hold (BACK_HOLD_MS) holds the candidate in this step, else null;
+// rotationStep counts a held back candidate who leaves unadopted (backHeldStep).
+// In chaos (the order does not hold; user, 20 Nov 2026, spec 2026-11-20-paceline-chaos-counter
+// sections 4 and 7) the back hold (backId) and the skip hold (slowId) are off: both assume the plan's
+// order is right, and in the mock-plan race of 19 Nov they fired every round (23 stalls, puller right
+// only 72 %). HOLD_MS and CHAOS_HOLD_MS stay. My end hands the pull to nobody: the plan's next is a
+// guess there, so I stay the puller (ignored as front rider as always) until the next front rider is
+// adopted by tracking; a second end of the same pull is not taken.
+//
+// The hand-over detector (handover.mjs; user, 21 Nov 2026; design 2026-11-21-paceline-beta5 §1):
+// `fired` {id, since, kind: 'arm', slow} is the next rider out of the draft and level with the
+// puller within 8 s of the puller's power drop (the arm); `since` is the arm moment and `slow` says
+// he would skip the planned next (skipsAhead). rotationStep passes it only outside chaos, a roller,
+// a pause, the start lock and finish mode, and never while I am the puller or the puller is unseen;
+// never for me or a joiner; and only when the fired rider is the front rider of my chain or the
+// puller still is (final review of beta.5, I-1, 21 Nov 2026; see rotationStep). A fire makes him
+// the candidate with candSince = the arm moment, no earlier than the puller's since + HOLD_MS, and
+// HOLD_MS and the chaos hold count as satisfied: he is adopted in this step. The back hold (backId)
+// and the skip hold (`slow`, outside chaos) still apply, from that candSince. The early returns (my
+// end, my draft start, my pending start) ignore the fire. `fired` in the state is 'arm' in the step
+// whose adoption came from a fire, else null.
+// Every rule of the detector that counts samples (2 samples out of the draft, median of 5) assumes
+// one step per second, as Sauce delivers it. Replay of six recorded races (21 Nov 2026): puller
+// right 91 -> 92, 93 -> 96 and 93 -> 94 % in the three races of 12 Nov, 92 -> 94 % in the race of
+// 19 Nov; pull start error 4 -> 2 s, decision 7 -> 5 s (medians); no new chaos.
+// A fire never moves the candSince of the same rider later, whether he is the candidate or the
+// candidate just lost (`lost`, while the old puller is still frontmost): the earlier of his candSince
+// and the arm counts (decision 4, 21 Nov 2026). Why: re-arming every 8 s re-dated a held back
+// candidate, and a skip candidate in front, at every arm; in synthetic back cases that gave two
+// false rule-2 flags and chaos at 77-78 s, and in the mock-plan race of 19 Nov (a chaos check only)
+// 30 s more chaos. With the rule: puller right 93 -> 94 % in the ZRL race of 17 Nov and 94 -> 95 %
+// in one race of 12 Nov, chaos in the mock-plan race 1394 -> 1364 s, countdown abs against T0
+// 7.85 -> 7.60 s (five races); the `lost` part changed no real-data number (it keeps the synthetic
+// case of a back rider level with the puller, never in front, free of chaos).
+// What the rule does not cover (checked 21 Nov 2026, with the guard of I-1): a skip candidate level
+// with the fading puller while the puller is still frontmost. Between fires followCand drops him (no
+// long hold: this step's slowId is null, the track rider is the puller), so he is neither the
+// candidate nor `lost`, and each re-arm re-dates him (synthetic probe, the rider two places on level
+// with the puller from 33 s: candSince 32, 41, 50, 59, 68 s). The fire never adopts him; he waits
+// for the position rule once he is in front. No flag and no chaos come of it. The guard leaves this
+// case as it was (the puller is the front rider, so the fire passes); it stops the fires of a rider
+// behind another front rider, which no longer reach this function.
+export function trackFront(state, {now, frontId, selfStart, draftStart, selfEnd, confirm, slowId = null, backId = null,
+                                   chaos = false, selfOn = false, fired = null}) {
+    const s = {...state, adopt: null, held: null, fired: null};
+    // The fired candidate of this step ({id, kind}), set below; never stored in the state.
+    let firedCand = null;
     const ignored = id => !!s.ignore && id === s.ignore.id && now - s.ignore.at < SELF_IGNORE_MS;
     const fromIgnored = x => !!s.ignore && x.id === s.ignore.id && x.at >= s.ignore.at &&
         x.at < s.ignore.at + SELF_IGNORE_MS;
     const fresh = x => !!x && x.id !== s.puller && !(x.at <= s.last?.at) && !ignored(x.id) &&
         !fromIgnored(x);
-    if (selfEnd && selfEnd.id === s.puller && selfEnd.nextId != null && selfEnd.nextId !== selfEnd.id) {
-        s.puller = selfEnd.nextId;
-        s.since = selfEnd.at;
+    if (chaos && selfEnd && selfEnd.id === s.puller && !(s.last?.kind === 'end' && s.last.at >= s.since)) {
         s.pending = null;
         s.prev = null;
         s.ignore = {id: selfEnd.id, at: selfEnd.at};
         s.last = {kind: 'end', at: selfEnd.at};
+    } else if (!chaos && selfEnd && selfEnd.id === s.puller && selfEnd.nextId != null &&
+               selfEnd.nextId !== selfEnd.id) {
+        // My pull is kept for the undo (C1): `end` marks it.
+        s.prev = {puller: selfEnd.id, since: s.since, at: selfEnd.at, end: true};
+        s.puller = selfEnd.nextId;
+        s.since = selfEnd.at;
+        s.pending = null;
+        s.ignore = {id: selfEnd.id, at: selfEnd.at};
+        s.last = {kind: 'end', at: selfEnd.at};
         s.resumed = null;
         s.changedAt = now;
+        s.adopt = 'end';
         clearCand(s);
         return s;
     }
@@ -257,6 +368,41 @@ export function trackFront(state, {now, frontId, selfStart, draftStart, selfEnd,
     if (ignored(frontId)) {
         frontId = null;
     }
+    // The hold for candidate `id` (in front since `since`), with the state as it is now:
+    // Back right after my wrong start: he keeps the since he had, and the normal hold applies (he
+    // is the puller we remember, not a new one).
+    // The same for my own pull after my end (`prev.end`), but only with selfOn (see rotationStep;
+    // audit fixes, 20 Nov 2026, C1, probe p02: two 0 W samples at 300 W gave my pull back after
+    // 39 s, now 12 s).
+    // No back hold against me right after my end (audit fixes, 20 Nov 2026, C1; probe p02: it kept
+    // my rest countdown 39 s while I was in front): while I fade in front as the rider before the
+    // plan's next, the chaos hold applies. Only until he has been in front (`prev.end` cleared
+    // below), not for his whole pull (21 Nov 2026, review probe q1: me in front 85-92 s during his
+    // pull made me the puller 88-107 s, his clock restarted and one bad flag; the 12 Nov flip that
+    // BACK_HOLD_MS stops).
+    const holdOf = (id, since) => {
+        const back = id != null && !!s.prev && s.prev.puller === id &&
+            since - s.prev.at <= SELF_IGNORE_MS + HOLD_MS && (!s.prev.end || selfOn);
+        const recent = !back && (now - (s.changedAt ?? -Infinity) < CHAOS_WINDOW_MS ||
+            (!chaos && slowId != null && id === slowId));
+        const backHold = !back && !chaos && backId != null && id === backId && s.resumed !== s.puller &&
+            !(s.prev?.end && id === s.ignore?.id && handOffEnd(s));
+        // A fired candidate (handover.mjs) has HOLD_MS and the chaos hold satisfied; the back hold and
+        // the skip hold still run from his candSince (user, 21 Nov 2026; design 2026-11-21-paceline-
+        // beta5 §1).
+        if (firedCand && id != null && id === firedCand.id) {
+            return {back, backHold, hold: backHold ? BACK_HOLD_MS : (!chaos && fired?.slow) ? CHAOS_HOLD_MS : 0};
+        }
+        return {back, backHold, hold: backHold ? BACK_HOLD_MS : recent ? CHAOS_HOLD_MS : HOLD_MS};
+    };
+    // Only a candidate under a hold longer than HOLD_MS (back or chaos hold) keeps his since across a
+    // short gap (followCand). Asked with this step's slowId, so not the skip hold (see followCand).
+    const longHold = (id, since) => holdOf(id, since).hold > HOLD_MS;
+    // The rider my end named is in front: the hand-off happened, no undo of my end any more (audit
+    // fixes, 20 Nov 2026, C1). This also ends the exception from the back hold below.
+    if (s.prev?.end && frontId != null && frontId === s.puller) {
+        s.prev = null;
+    }
     if (s.pending) {
         if (confirm) {
             takeOver(s, s.pending, now);
@@ -265,29 +411,35 @@ export function trackFront(state, {now, frontId, selfStart, draftStart, selfEnd,
             return s;
         }
         if (now - s.pending.at < CONFIRM_MS) {
-            followCand(s, frontId, now);
+            followCand(s, frontId, now, longHold);
             return s;
         }
         s.pending = null;
         s.last = {kind: 'revert', at: now};
     }
-    followCand(s, frontId, now);
-    // Back right after my wrong start: he keeps the since he had, and the normal hold applies (he
-    // is the puller we remember, not a new one).
-    const back = s.cand != null && !!s.prev && s.prev.puller === s.cand &&
-        s.candSince - s.prev.at <= SELF_IGNORE_MS + HOLD_MS;
-    const chaos = !back && (now - (s.changedAt ?? -Infinity) < CHAOS_WINDOW_MS ||
-        (slowId != null && s.cand === slowId));
-    const backHold = !back && backId != null && s.cand === backId && s.resumed !== s.puller;
-    const hold = backHold ? BACK_HOLD_MS : chaos ? CHAOS_HOLD_MS : HOLD_MS;
+    followCand(s, frontId, now, longHold);
+    // A fire replaces any position candidate. candSince: the earlier of the arm and the candSince he
+    // already has (as the candidate, or as the candidate just lost), no earlier than the puller's
+    // since + HOLD_MS (decision 4, 21 Nov 2026; see above).
+    if (fired && fired.id !== s.puller && !ignored(fired.id)) {
+        const was = s.cand === fired.id ? s.candSince : s.lost?.id === fired.id ? s.lost.since : null;
+        const base = was != null ? Math.min(was, fired.since) : fired.since;
+        s.cand = fired.id;
+        s.candSince = Math.max(base, (s.since ?? -Infinity) + HOLD_MS);
+        firedCand = {id: fired.id, kind: fired.kind};
+    }
+    const {back, backHold, hold} = holdOf(s.cand, s.candSince);
     if (s.cand != null && (s.puller == null || now - s.candSince >= hold)) {
         s.puller = s.cand;
         s.since = back ? s.prev.since : s.candSince;
         s.prev = null;
         s.resumed = null;
         s.changedAt = now;
+        s.adopt = back ? 'back' : 'front';
+        s.fired = firedCand?.id === s.puller ? firedCand.kind : null;
         clearCand(s);
     }
+    s.held = s.cand != null && backHold ? 'back' : null;
     return s;
 }
 
@@ -295,8 +447,14 @@ export function trackFront(state, {now, frontId, selfStart, draftStart, selfEnd,
 // True when the front rider would skip the planned next rider: one or two places further on in
 // plan order (12 Nov 2026: while Cora handed over to Selma, Aldo was in front for a moment and
 // counted as the puller for 18 s, so the countdown fell by 92 s and rose again).
-export function skipsAhead(plan, {pullerId, nextId, frontId}) {
-    const ids = (plan?.riders || []).map(r => r.id);
+// Places count on the line (`lineIds`: the plan riders in it plus the puller, the next and the front
+// rider; null: the whole plan), and rotationStep passes the line (audit fixes, 20 Nov 2026, M1;
+// probe p22 P23: in a plan of six with #3 and #4 not in the race, #5 in front for 6 s in the change
+// from #1 to #2 was one past the next on the line but four places on in the plan, so no skip hold:
+// he was the puller 103-120 s; now #1 until 108, #2 from 109).
+export function skipsAhead(plan, {pullerId, nextId, frontId, lineIds = null}) {
+    const on = lineIds ? new Set([...lineIds, pullerId, nextId, frontId]) : null;
+    const ids = (plan?.riders || []).map(r => r.id).filter(id => !on || on.has(id));
     const n = ids.length;
     const p = ids.indexOf(pullerId), x = ids.indexOf(nextId), f = ids.indexOf(frontId);
     if (p < 0 || x < 0 || f < 0 || f === x) {
@@ -308,7 +466,11 @@ export function skipsAhead(plan, {pullerId, nextId, frontId}) {
 
 
 // The present rider directly before `pullerId` in plan order (the one who pulled before him), or
-// null.
+// null. rotationStep passes the line (lineIds: riders sitting out are not in it).
+// Null in a line of two (fewer than 3 plan riders in `presentIds` plus the puller), as classifyChange
+// has no 'back' there (audit fixes, 20 Nov 2026, I3; probe p01 A and C: in a plan of 2, and in a plan
+// of 5 with only me and #2 present, #2 coming past me at 40 s was held by the back hold until 70 s,
+// so my pull view stayed 27 s too long while I rested; now he pulls from 43 s, since 40 s).
 export function riderBefore(plan, {pullerId, presentIds}) {
     const ids = (plan?.riders || []).map(r => r.id);
     const n = ids.length;
@@ -317,6 +479,9 @@ export function riderBefore(plan, {pullerId, presentIds}) {
         return null;
     }
     const present = new Set(presentIds || []);
+    if (ids.filter(id => id === pullerId || present.has(id)).length < 3) {
+        return null;
+    }
     for (let k = 1; k < n; k++) {
         const id = ids[(p - k + n) % n];
         if (present.has(id)) {
@@ -327,9 +492,24 @@ export function riderBefore(plan, {pullerId, presentIds}) {
 }
 
 
+// `id` is the candidate during the hand-off of his own pull: the puller is the one his end named
+// (the last event is that end, at the puller's since). trackFront passes the ignored rider (me after
+// my end), backHeldStep me.
+function handOffCand(front, id) {
+    return front.cand != null && front.cand === id && handOffEnd(front);
+}
+
+
+// The last event is the end that named the puller (at his since).
+function handOffEnd(front) {
+    return front.last?.kind === 'end' && front.last.at === front.since;
+}
+
+
 // I take the pull from the current puller (start or draftStart {id, at}).
 function takeOver(s, {id, at}, now) {
     s.changedAt = now;
+    s.adopt = 'self';
     s.prev = s.puller == null ? null : {puller: s.puller, since: s.since, at: now};
     s.ignore = s.puller == null ? null : {id: s.puller, at: now};
     s.puller = id;
@@ -341,13 +521,48 @@ function takeOver(s, {id, at}, now) {
 
 // The candidate: the front rider when he is not the puller, with when he got there. No data
 // drops the candidate, so it is not backdated across the gap.
-function followCand(s, frontId, now) {
-    if (frontId == null || frontId === s.puller) {
-        clearCand(s);
-    } else if (frontId !== s.cand) {
-        s.cand = frontId;
-        s.candSince = now;
+// Under a hold longer than HOLD_MS (`longHold(id, since)`: the back or chaos hold), a
+// candidate who stops being one (another front rider, the puller in front, nobody) is kept as
+// `lost` {id, since, at, n}: not for more than CAND_GAP_N steps without him (n counts them), nor
+// HOLD_MS or more after the first of them (`at`). Front rider again meanwhile, and still under a
+// long hold, he is the candidate with his old `candSince` (audit fixes, 20 Nov 2026, I5; probe p06
+// B: #1 frontmost 60-71 s with one sample of the puller at 66 s restarted his hold and was two
+// rule-2 flags, 91 s of chaos from one episode; probe p51: the puller's nose in front for one
+// sample every 10 s never let the back hold run out, #1 was named at 83 s after two flags, 161 s of
+// chaos, now at 90 s, none). Only one rider is kept.
+// Under the plain HOLD_MS a candidate who drops out starts over (21 Nov 2026, review of I5: with
+// the restore for everyone, two single samples 3 s apart adopted a new puller; the plan's next on
+// the puller's wheel with position noise, 1 m gap and 0.8 m noise, was adopted early in 51 of 100
+// runs instead of 3).
+// Nor under the skip hold (final review, 21 Nov 2026, M-1): longHold is asked with this step's
+// slowId, and rotationStep sets that only for the rider in front in this step (skipsAhead), never
+// for the candidate just lost. Probe c1 (plan of 6, #1 pulls, #3 in front from 100 s with #1's nose
+// in front every 6th sample): #3's hold restarted (candSince 107 s), no adoption in 120 s, as before
+// I5. Keeping it would need the skip status stored with the candidate (not done).
+export const CAND_GAP_N = 2;
+function followCand(s, frontId, now, longHold = () => false) {
+    const id = frontId == null || frontId === s.puller ? null : frontId;
+    if (id !== null && id === s.cand) {
+        s.lost = ageLost(s.lost, now);
+        return;
     }
+    const back = id !== null && s.lost?.id === id && now - s.lost.at < HOLD_MS && longHold(id, s.lost.since);
+    const lost = s.cand != null && longHold(s.cand, s.candSince) ?
+        {id: s.cand, since: s.candSince, at: now, n: 1} :
+        back ? null : ageLost(s.lost, now);
+    s.candSince = id === null ? null : back ? s.lost.since : now;
+    s.cand = id;
+    s.lost = lost;
+}
+
+
+// One more step without the lost candidate (followCand): null once he is gone too long.
+function ageLost(lost, now) {
+    if (!lost) {
+        return null;
+    }
+    const n = lost.n + 1;
+    return n > CAND_GAP_N || now - lost.at >= HOLD_MS ? null : {...lost, n};
 }
 
 
@@ -362,7 +577,7 @@ function followCand(s, frontId, now) {
 // the puller, side by side at 67 km/h, and the chaos hold then kept that wrong puller for 16 s.
 export const RESUME_NEAR_M = 2;
 export function resumeFront(front, {now, frontId, chain = []}) {
-    const s = {...front};
+    const s = {...front, adopt: null, held: null, fired: null};
     clearCand(s);
     s.changedAt = now;
     const f = chain.find(c => c.id === frontId), p = chain.find(c => c.id === s.puller);
@@ -374,6 +589,7 @@ export function resumeFront(front, {now, frontId, chain = []}) {
         s.since = now;
         s.prev = null;
         s.resumed = frontId;    // adopted from a scrambled order: no BACK_HOLD_MS against him
+        s.adopt = 'resume';     // not classified against the plan order (spec 20 Nov 2026, section 3)
     }
     return s;
 }
@@ -433,11 +649,26 @@ export function presence(seen, {now, chainIds}) {
 }
 
 
+// The line (20 Nov 2026, spec 2026-11-20-paceline-chaos-counter section 2): the present riders
+// minus those sitting out (skipped at the front, order.mjs). Everything that counts who comes next
+// uses it: the countdown (rotationView), the skip hold (its expected next), riderBefore, planWheel,
+// the next rider for my end. A rider who sits out is in the group but no longer pulls (12 Nov: #4 of
+// one team, #6 of another; 19 Nov: #3/#4/#6 of one team after the climb), and the countdown kept
+// counting his pull every round. orderStep never takes me out.
+export function lineIds(presentIds, order) {
+    const out = new Set(orderOutIds(order));
+    return (presentIds || []).filter(id => !out.has(id));
+}
+
+
 // Why there is no rotation view, or null. Order: no plan, not a plan rider, no live data of mine,
 // standing still, just rolled off (START_QUIET_MS), final sprint, climb or descent, alone (no
-// fresh teammate in my chain).
+// fresh teammate in my chain), and last chaos (the team does not ride the plan's order, order.mjs;
+// user, 20 Nov 2026: "if nothing fits any more, go silent until a stable line is visible again").
+// Chaos is the one reason that comes with a view (rotationStatus): the windows still show who
+// really pulls and my own pull.
 export function dashReason({plan, selfId, live, finish, climbing, descent = false, chain, still = false,
-                            starting = false}) {
+                            starting = false, chaos = false}) {
     if (!plan || !Array.isArray(plan.riders)) {
         return 'noplan';
     }
@@ -462,16 +693,16 @@ export function dashReason({plan, selfId, live, finish, climbing, descent = fals
     if (!(chain || []).some(c => c.id !== selfId)) {
         return 'alone';
     }
-    return null;
+    return chaos ? 'chaos' : null;
 }
 
 
-// The action window's dash for a reason: 'climb' (dim ▲), 'descent' (dim ▼), 'unknown' (amber ?) or
-// 'none'.
+// The action window's dash for a reason: 'climb' (dim ▲), 'descent' (dim ▼), 'chaos' (dim ≠, 20 Nov
+// 2026), 'unknown' (amber ?) or 'none'.
 // started: a puller has been seen in this ride. Before that (the start pen) nothing is wrong, so
 // no amber "?", just the quiet dash.
 export function dashKind(reason, {started = true} = {}) {
-    if (reason === 'climb' || reason === 'descent') {
+    if (reason === 'climb' || reason === 'descent' || reason === 'chaos') {
         return reason;
     }
     const unknown = reason === 'alone' || reason === 'nolive' || reason === 'nofront';
@@ -570,14 +801,53 @@ export function sustainedJump(hist, target) {
 }
 
 
-// End: my last 2 samples average below `below` (END_W). Returns the t of the first of them, else
-// null.
-export function powerDrop(hist, below = END_W) {
-    if (!hist || hist.length < END_N || !Number.isFinite(below)) {
+// A plan target I can judge my power by: a number above 0 W (plan.mjs keeps pull_power as given).
+function hasTarget(target) {
+    return Number.isFinite(target) && target > 0;
+}
+
+
+// The median power of my last END_N samples, or null with fewer.
+function lastMedian(hist) {
+    if (!hist || hist.length < END_N) {
         return null;
     }
-    const last = hist.slice(-END_N);
-    return mean(last) < below ? last[0].t : null;
+    const ws = hist.slice(-END_N).map(x => x.w).sort((a, b) => a - b);
+    return ws[(END_N - 1) >> 1];
+}
+
+
+// End: the median of my last END_N samples is below `below` (END_W; ownPull passes my end
+// threshold). Returns the t of the first of those samples below it, else null.
+export function powerDrop(hist, below = END_W) {
+    const med = Number.isFinite(below) ? lastMedian(hist) : null;
+    if (med === null || !(med < below)) {
+        return null;
+    }
+    return hist.slice(-END_N).find(x => x.w < below).t;
+}
+
+
+// My power is back (the undo of my end, trackFront's selfOn): the median of my last END_N samples
+// reaches JUMP_TARGET_FRAC of my target. Without a target (or one of 0 W or less), never (audit
+// fixes, 20 Nov 2026, C1: without a target nothing tells pull power from rest power).
+export function powerBack(hist, target) {
+    const med = hasTarget(target) ? lastMedian(hist) : null;
+    return med !== null && med >= JUMP_TARGET_FRAC * target;
+}
+
+
+// My power at pull power (audit fixes, final review 21 Nov 2026, I-3): the median of my last END_N
+// samples reaches JUMP_TARGET_FRAC of my target, or END_W without a target (or one of 0 W or less).
+// rotationStep keeps whether it did since I became the puller (st.pulled); only then can my end
+// fire. Why: 5 riders, 300 W target, I pulled 30 s and rode on in front at 100 W with nobody
+// passing (probe a1): my end at 31 s, the chaos hold adopted me again at 55 s (past END_MIN_S at
+// once, its since backdated), my rest power ended it at 60 s, and so on every 28 s without end
+// (24 s rest countdown, 5 s my pull), never chaos. Now I stay the puller from 55 s; my end comes
+// again once I pull at power.
+export function pullPower(hist, target) {
+    const med = lastMedian(hist);
+    return med !== null && med >= (hasTarget(target) ? JUMP_TARGET_FRAC * target : END_W);
 }
 
 
@@ -644,7 +914,10 @@ export function hillMode(climb, {now, terrain}) {
 }
 
 
-export function rotationView(plan, {selfId, chainIds, wheelId, front, now}) {
+// eff: the learner's state for the countdown (expectedPullS), null for the fixed rule. toMyPullS is
+// not rounded (decision 3 of the beta.5 plan, 21 Nov 2026: the windows floor the smoothed clock; in
+// the replay of five recorded races Math.round took abs against T0 from 7.85 to 8.0 s).
+export function rotationView(plan, {selfId, chainIds, wheelId, front, now, eff = null}) {
     const riders = plan?.riders;
     if (!riders) {
         return null;
@@ -695,10 +968,12 @@ export function rotationView(plan, {selfId, chainIds, wheelId, front, now}) {
             }
             break;
         }
-        between += expectedPullS(r.pullS, r === beforeMe);
+        between += expectedPullS(r.pullS, r === beforeMe, r.pullS, eff);
     }
-    // The puller's expected end: his plan plus the allowance, his plan alone when he is before me.
-    const endS = expectedPullS(pullS, puller === beforeMe);
+    // The puller's expected end (expectedPullS): his plan + E, plan + E - H when he is the rider
+    // before me; with the fixed rule (eff null) his plan plus the overhead, his plan alone when he
+    // is before me.
+    const endS = expectedPullS(pullS, puller === beforeMe, puller.pullS, eff);
     let toMyPullS = null;
     if (!mine && reachedMe) {
         // Past his expected end the countdown runs on for RUN_ON_S, then waits for the change.
@@ -741,11 +1016,23 @@ export function initialRotation() {
         run: {n: 0, at: null},     // my draft run (draftRun)
         still: {still: false, since: null},    // I stand still (stillStep): no rotation
         rolledAt: null,            // when I last rolled off after standing still (startQuiet)
-        startAt: null,             // when the start lock began (my first roll-off with a plan)
+        startAt: null,             // when the start lock began; null again after START_PEN_MS standing
+                                   // (not after the finish line: `over`)
         locked: false,             // in the start lock (START_LOCK_MS)
         startFront: null,          // since when the start puller is in front, in the lock
         startFound: false,         // he has been in front for HOLD_MS: the start chaos is over
         pause: null,               // the puller before the last climb or alone phase (pauseClock)
+        order: initialOrder(),     // does the team ride the plan's order (order.mjs): chaos, riders out
+        backHeld: null,            // the back candidate being held (backHeldStep)
+        backFlags: {},             // ... and when each rider's last rule-2 flag was (backHeldStep)
+        joiner: null,              // a rider being caught from ahead (joinerStep)
+        pullerAt: null,            // when the last turn began (rule 1's quick; not at my hand-off)
+        unseen: null,              // 'alone' | 'start' | 'end': the puller not seen in front since
+        unseenFront: null,         // ... and since when he is the front rider of my chain (unseenStep)
+        pulled: false,             // I am the puller and my power reached pull power since (pullPower)
+        over: false,               // I stand after the finish line (M-4): standing keeps startAt
+        hand: null,                // the hand-over detector (handover.mjs), in memory only
+        eff: initialEff(),         // the team-efficiency learner (efficiency.mjs), in memory only
     };
 }
 
@@ -777,6 +1064,17 @@ export function startQuiet(st, now) {
         return now - st.startAt < START_LOCK_MS && !st.startFound;
     }
     return now - st.rolledAt < START_QUIET_MS;
+}
+
+
+// The start puller: the first plan rider (plan order) in `presentIds` (the riders seen in my chain
+// in the pen), or null when no plan rider but me is in it (nobody known: no start lock). Audit fixes,
+// 20 Nov 2026 (I9; probe p08: plan #1 was not in the race, the lock named him anyway and he was the
+// puller for everyone's first 75 s while #2 pulled; now #2 from the roll-off).
+export function startPuller(plan, {presentIds, selfId}) {
+    const ids = new Set(presentIds || []);
+    const riders = (plan?.riders || []).filter(r => ids.has(r.id));
+    return riders.some(r => r.id !== selfId) ? riders[0].id : null;
 }
 
 
@@ -813,15 +1111,23 @@ export function pauseClock(pause, {now, pausedBefore, pausedNow, before, front})
 // clock does not restart), climb, presence and my own pull state are kept; only references to
 // riders no longer in the plan are dropped. Otherwise (no plan, or the puller left the plan) it
 // starts over, except the climb and the roll-off time, which do not depend on the plan.
+// Either way the order state starts fresh (user, 20 Nov 2026, spec section 7): a new plan is the
+// captain's deliberate act and gets its chance; if it is wrong too, 2 bad changes bring the silence
+// back. The held back candidate and the joiner (spec section 8) go with it.
+// The learned E and H stay either way, the open turn is dropped (effCut; design 2026-11-21-paceline-
+// beta5 §2: no reset after a plan change; decision 5, 21 Nov 2026).
 export function carryRotation(st, plan) {
     const ids = new Set((plan?.riders || []).map(r => r.id));
     if (!plan || (st.front.puller != null && !ids.has(st.front.puller))) {
         return {...initialRotation(), climb: st.climb, hill: st.hill ?? initialHill(), rolledAt: st.rolledAt ?? null,
-                startAt: st.startAt ?? null};
+                startAt: st.startAt ?? null, eff: effCut(st.eff)};
     }
     const front = {...st.front};
     if (front.cand != null && !ids.has(front.cand)) {
         clearCand(front);
+    }
+    if (front.lost && !ids.has(front.lost.id)) {
+        front.lost = null;
     }
     if (front.pending && !ids.has(front.pending.id)) {
         front.pending = null;
@@ -831,7 +1137,8 @@ export function carryRotation(st, plan) {
     }
     const seen = Object.fromEntries(Object.entries(st.seen || {}).filter(([id]) => ids.has(id)));
     const pause = st.pause && ids.has(st.pause.puller) ? st.pause : null;
-    return {...st, front, seen, pause, present: (st.present || []).filter(id => ids.has(id))};
+    return {...st, front, seen, pause, present: (st.present || []).filter(id => ids.has(id)),
+            order: initialOrder(), backHeld: null, backFlags: {}, joiner: null, hand: null, eff: effCut(st.eff)};
 }
 
 
@@ -839,16 +1146,43 @@ export function carryRotation(st, plan) {
 // a current sample of my own rider; without one, counting down from the last known puller would
 // be misleading. `quietStart`: the windows' view, quiet for START_QUIET_MS after rolling off
 // ('start'); the engine's own calls leave it out, so tracking goes on meanwhile.
+// In chaos (st.order) the reason is 'chaos' and the view is built all the same (20 Nov 2026): the
+// windows show the real puller and my own pull, but no countdown or READY from it.
 export function rotationStatus(st, {now, plan, selfId, live, quietStart = false}) {
     const reason = dashReason({plan, selfId, live, finish: st.finish, climbing: st.hill?.mode === 'pause',
                                descent: !!st.hill?.descent, chain: st.chain, still: !!st.still?.still,
-                               starting: quietStart && startQuiet(st, now) && st.front?.puller !== selfId});
-    if (reason) {
+                               starting: quietStart && startQuiet(st, now) && st.front?.puller !== selfId,
+                               chaos: !!st.order?.chaos});
+    if (reason && reason !== 'chaos') {
         return {view: null, reason};
     }
-    const wheel = planWheel(plan, {selfId, pullerId: st.front.puller, presentIds: st.present});
-    const view = rotationView(plan, {selfId, chainIds: st.present, wheelId: wheel, front: st.front, now});
-    return view ? {view, reason: null} : {view: null, reason: 'nofront'};
+    const line = lineIds(st.present, st.order);
+    const wheel = planWheel(plan, {selfId, pullerId: st.front.puller, presentIds: line});
+    // The countdown counts the state's learned E and H (21 Nov 2026, design 2026-11-21-paceline-beta5
+    // §2); a state without them (older states, a test) the fixed rule.
+    const view = rotationView(plan, {selfId, chainIds: line, wheelId: wheel, front: st.front, now,
+                                     eff: st.eff ?? null});
+    return view ? {view, reason} : {view: null, reason: 'nofront'};
+}
+
+
+// What the recorder keeps of the learned countdown (21 Nov 2026, design 2026-11-21-paceline-beta5 §3;
+// for a check after the next TTT): `te`, the team's learned turn time E (plans up to LONG_PULL_S /
+// longer), the hand-over time H and how many values each rests on; `cdOld`, the countdown the fixed
+// rule would have shown (no E, no H) next to the one shown, so a ride report can compare both
+// against the real change. Neither names a rider. `view` is the view shown (rotationStatus).
+export function teamDet(st, {now, plan, selfId, view}) {
+    const eff = st.eff ?? initialEff();
+    const tenth = x => Math.round(x * 10) / 10;
+    const te = {eS: tenth(teamE(eff, CHANGE_ALLOWANCE_S)), eL: tenth(teamE(eff, CHANGE_ALLOWANCE_LONG_S)),
+                h: tenth(teamH(eff)), n: eff.e.length, hn: eff.h.length};
+    let cdOld = null;
+    if (view && !view.mine && Number.isFinite(view.toMyPullS)) {
+        const old = rotationView(plan, {selfId, chainIds: lineIds(st.present, st.order), wheelId: null,
+                                        front: st.front, now});
+        cdOld = old && Number.isFinite(old.toMyPullS) ? {t: old.toMyPullS, standing: !!old.standing} : null;
+    }
+    return {te, cdOld};
 }
 
 
@@ -868,12 +1202,16 @@ function ownPull(st, {now, plan, selfId, hist, grade}) {
     const target = Number.isFinite(view.me.watts) ? view.me.watts : null;
     const chainIds = st.chain.map(c => c.id);
     if (view.mine) {
-        const next = rotationView(plan, {selfId, chainIds, wheelId: null, front: st.front, now}).next;
+        const next = rotationView(plan, {selfId, chainIds: lineIds(chainIds, st.order), wheelId: null,
+                                         front: st.front, now}).next;
         if (view.elapsedS < END_MIN_S || !next) {
             return out;
         }
+        // The shadow rule (END_FRAC x target) equals the live one where that is under END_W.
         out.shadowEnd06 = target === null ? null : powerDrop(hist, END_FRAC * target);
-        const at = grade !== null && grade <= DESCENT_GRADE ? null : powerDrop(hist);
+        // Not before a pull of mine at power since I became the puller (I-3, see pullPower).
+        const at = (grade !== null && grade <= DESCENT_GRADE) || st.pulled === false ? null :
+            powerDrop(hist, endThreshold(target));
         if (at !== null) {
             out.own = {selfEnd: {id: selfId, at, nextId: next.id}};
         }
@@ -895,6 +1233,13 @@ function ownPull(st, {now, plan, selfId, hist, grade}) {
         out.own = {draftStart: {id: selfId, at: st.run.at}};
     }
     return out;
+}
+
+
+// My end threshold (C1, see END_FRAC): END_FRAC of my target where that is under END_W; END_W
+// without a target or with one of 0 W or less (a 0 W target turned my end off).
+function endThreshold(target) {
+    return hasTarget(target) ? Math.min(END_W, END_FRAC * target) : END_W;
 }
 
 
@@ -920,6 +1265,7 @@ function startGate(view, {chainIds, selfId}) {
 export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, drafts, grade, sampleT,
                                     terrain = undefined}) {
     const st = {...prev};
+    st.order = Array.isArray(prev.order?.hist) ? prev.order : initialOrder();    // older states have none
     st.chain = selfId === null || selfId === undefined ? [] :
         teamChain(alignedPositions(nearby, riderIds), selfId);
     st.frontId = frontOf(st.chain, riderIds);
@@ -932,10 +1278,27 @@ export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, d
     st.rolledAt = live && prev.still?.still && !st.still.still ? now : (prev.rolledAt ?? null);
     st.finish = finishStep(prev.finish, {live, entry: selfEntry(nearby), still: st.still.still});
     ({seen: st.seen, ids: st.present} = presence(prev.seen, {now, chainIds: st.chain.map(c => c.id)}));
-    // The start (START_LOCK_MS): my first roll-off with a plan sets plan #1 as the puller.
-    const starting = st.rolledAt === now && prev.rolledAt !== now && prev.still?.since != null &&
+    st.joiner = st.still.still ? null : joinerStep(prev, {now, frontId: st.frontId, plan, selfId});
+    const trackId = st.joiner ? null : st.frontId;    // the front rider for front tracking
+    // The start (START_LOCK_MS): a roll-off after the pen with a plan sets the first plan rider
+    // present as the puller (startPuller); with nobody known it is a plain roll-off.
+    const rollOff = st.rolledAt === now && prev.rolledAt !== now && prev.still?.since != null &&
         now - prev.still.since >= START_PEN_MS && !!plan?.riders?.length;
-    st.startAt = starting ? now : prev.startAt ?? null;
+    const p1 = rollOff ? startPuller(plan, {presentIds: st.present, selfId}) : null;
+    const starting = p1 !== null;
+    // Standing START_PEN_MS (a pen) ends the last start (audit fixes, 20 Nov 2026, M8; probe p41:
+    // startAt stayed set from the first race, so in the pen of a second race in the same session
+    // penModel did not arm plan #1; now it is null from 30 s of standing).
+    // Not while I stand after the finish line (`over`; final review, 21 Nov 2026, M-4; probe m8: plan
+    // #1 standing from 140 s after the line at 120 s got READY from 170 s on, while the gate was
+    // still open): the stand that began in finish mode keeps the start until I ride on or Sauce
+    // shows another event (an event distance or time not at its finish: the next race's pen).
+    const entry = selfEntry(nearby);
+    const another = live && !!entry && entry.remainingType === 'event' && Number.isFinite(entry.remaining) &&
+        !finishMode(entry);
+    st.over = st.still.still && !another && (!!prev.finish || !!prev.over);
+    const stood = st.still.still && st.still.since != null && now - st.still.since >= START_PEN_MS && !st.over;
+    st.startAt = starting ? now : rollOff || stood ? null : prev.startAt ?? null;
     const locked = st.startAt !== null && now - st.startAt < START_LOCK_MS;
     const unlocked = !locked && !!prev.locked;
     st.locked = locked;
@@ -962,27 +1325,45 @@ export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, d
         st.front = initialFront();
         st.run = {n: 0, at: null};
         st.pause = null;
+        st.order = initialOrder();    // chaos and riders sitting out start over (20 Nov 2026)
+        st.backHeld = null;
+        st.backFlags = {};
+        st.unseen = null;
+        st.unseenFront = null;
+        st.pulled = false;
+        st.hand = null;
+        // E and H stay, the open turn goes (design 2026-11-21-paceline-beta5 §2: no reset; decision 5,
+        // 21 Nov 2026).
+        st.eff = effCut(prev.eff);
         return {state: st, self: null, shadowEarly, shadowEnd06};
     }
+    // Outside the tracking branch below (start, lock, pause, resume, roller) the hand-over detector is
+    // off: its arm and runs are dropped, the puller's history is kept (design 2026-11-21-paceline-
+    // beta5 §1).
+    st.hand = prev.hand ? {...prev.hand, arm: null, out: {}} : null;
     // The lock's end counts as a change at the front (chaos hold for anyone else).
     const pf = unlocked ? {...prev.front, changedAt: now} : prev.front;
+    // The line before this step's change, and chaos: the order state (order.mjs) is updated below.
+    const line = lineIds(st.present, st.order);
+    const chaos = st.order.chaos;
     if (starting) {
-        const p1 = plan.riders[0].id;
         st.front = {...initialFront(), puller: p1, since: now, changedAt: now,
-                    bonus: {id: p1, since: now, s: START_BONUS_S}};
+                    bonus: {id: p1, since: now, s: START_BONUS_S}, adopt: 'start'};
     } else if (locked) {
-        st.front = prev.front;
+        st.front = {...prev.front, adopt: null, fired: null};
     } else if (paused) {
         st.front = trackFront(pf, {now, frontId: null});
     } else if (pausedBefore) {
         st.front = resumeFront(pf, {now, frontId: st.frontId, chain: st.chain});
     } else if (st.hill.mode === 'flag') {
         // A roller: the puller or the plan's next may take the front; anyone else in front is
-        // ignored. No own pull from my power or draft (both swing on a roller).
-        const expected = rotationView(plan, {selfId, chainIds: st.present, wheelId: null, front: pf, now});
-        const ok = pf.puller == null || st.frontId === pf.puller ||
-            (st.frontId != null && st.frontId === expected?.next?.id);
-        st.front = trackFront(pf, {now, frontId: ok ? st.frontId : null});
+        // ignored. No own pull from my power or draft (both swing on a roller). In chaos the rule is
+        // off (spec 20 Nov 2026, section 7): it assumes the plan's order, like the back and skip
+        // holds, so the real front rider is followed and the change is classified like any other.
+        const expected = rotationView(plan, {selfId, chainIds: line, wheelId: null, front: pf, now});
+        const ok = chaos || pf.puller == null || trackId === pf.puller ||
+            (trackId != null && trackId === expected?.next?.id);
+        st.front = trackFront(pf, {now, frontId: ok ? trackId : null, chaos});
     } else {
         let own = {};
         if (live && !st.finish) {
@@ -990,11 +1371,58 @@ export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, d
         }
         const confirm = live && !st.finish &&
             startConfirmed({drafts, chain: st.chain, selfId, frontId: st.frontId});
-        const expected = rotationView(plan, {selfId, chainIds: st.present, wheelId: null, front: pf, now});
+        const expected = rotationView(plan, {selfId, chainIds: line, wheelId: null, front: pf, now});
         const slowId = skipsAhead(plan, {pullerId: pf.puller, nextId: expected?.next?.id,
-                                         frontId: st.frontId}) ? st.frontId : null;
-        const backId = riderBefore(plan, {pullerId: pf.puller, presentIds: st.present});
-        st.front = trackFront(pf, {now, frontId: st.frontId, ...own, confirm, slowId, backId});
+                                         frontId: trackId, lineIds: line}) ? trackId : null;
+        const backId = riderBefore(plan, {pullerId: pf.puller, presentIds: line});
+        // For the undo of my end (C1): my draft says I lead and my power is back. Both, as I fade in
+        // front with my draft 0 until the next rider comes past; the power tells a real end (rest
+        // power) from a dropped sample (the existing test with 2 riders and a late pass, `late(52)`,
+        // got my pull back at 53 s with the draft alone).
+        const selfOn = live && !st.finish && draftFront({drafts, chain: st.chain, selfId}) &&
+            powerBack(hist, plan?.riders?.find(r => r.id === selfId)?.watts);
+        // The hand-over detector (handover.mjs; user, 21 Nov 2026; design 2026-11-21-paceline-beta5
+        // §1). Off while I am the puller, while the puller is unseen, in finish mode and in chaos (the
+        // start lock, pauses, rollers and standing still never reach this branch).
+        const off = !live || st.finish || chaos || pf.puller == null || pf.puller === selfId ||
+            (prev.unseen ?? null) !== null;
+        const byId = new Map((nearby || []).map(e => [String(e.athleteId), e]));
+        const ho = handoverStep(prev.hand ?? null, {now, puller: pf.puller, since: pf.since, frontId: st.frontId,
+                                                    chain: st.chain, byId, lineIds: line, selfId, off});
+        st.hand = ho.hand;
+        // Never me; never a joiner (front tracking ignores him, joinerStep). And only for the front
+        // rider of my chain, or while the puller is still the front rider (final review of beta.5,
+        // I-1, 21 Nov 2026). Why: the detector fires for the frontmost rider out of the draft, so
+        // when the real front rider has a draft (the team behind another team), a stale row, or is
+        // me, a rider behind him fired instead, and each fire threw the front rider back to the start
+        // of his hold. Synthetic probes (5 riders, 30 s plan): with the plan's next in front from
+        // 36 s and a rider behind him without draft, the puller who eased off at 30 s stayed the
+        // puller until 106 s (39 s without the detector); within 30 s of a change a rider who was
+        // never in front was the puller for 16-31 s, with one bad flag and riders wrongly out; as the
+        // plan's next in front I saw a rest countdown until 106 s instead of my pull from 38 s; in
+        // 40 noisy rides 2 had chaos and 4 a rider wrongly out (none without the detector). With the
+        // guard every probe equals the position rule or better (noisy rides: puller right 88.6 %
+        // against 82.1 %, no chaos, nobody out), and clean lines are unchanged. A rider level with
+        // the fading puller while the puller is still frontmost (the back case) still fires.
+        let fired = ho.fired && ho.fired.id !== selfId && ho.fired.id !== st.joiner?.id &&
+            (ho.fired.id === st.frontId || st.frontId === pf.puller) ? ho.fired : null;
+        if (fired) {
+            fired = {...fired, slow: skipsAhead(plan, {pullerId: pf.puller, nextId: expected?.next?.id,
+                                                       frontId: fired.id, lineIds: line})};
+            // Diagnostics (fires, lastFire): read by the replay scripts, never by the engine.
+            st.hand = {...st.hand, fires: (st.hand.fires ?? 0) + 1, lastFire: {...fired, at: now, puller: pf.puller}};
+        }
+        st.front = trackFront(pf, {now, frontId: trackId, ...own, confirm, slowId, backId, chaos, selfOn, fired});
+    }
+    // My re-adoption by tracking while the rider my end named is still unseen (unseen 'end') is no
+    // change at the front (fix wave ruling, 21 Nov 2026; as I8 and M1: it is not classified either):
+    // it keeps the changedAt of my end, so it opens no chaos window. Why: after I-3 (see pullPower) a
+    // late pass after my end waited CHAOS_HOLD_MS from my re-adoption; review probe e1 (late 26-38 s,
+    // 3 rounds) 91 -> 169 s of a wrong puller, fuzz g1 runs with chaos 91 -> 98 and riders out at the
+    // end 0 -> 6. Now the named rider gets the plain HOLD_MS once my end's chaos window is over.
+    if (st.front.adopt === 'front' && st.front.puller === selfId && prev.front.puller !== selfId &&
+        (prev.unseen ?? null) === 'end') {
+        st.front = {...st.front, changedAt: pf.changedAt ?? null};
     }
     // In the lock: is the start puller in front yet (HOLD_MS)? Then the start chaos is over.
     const inFront = locked && st.frontId != null && st.frontId === st.front.puller;
@@ -1005,8 +1433,228 @@ export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, d
         now, pausedBefore, pausedNow: paused,
         before: prev.front, front: st.front,
     }));
+    // Does the team ride the plan's order (user, 20 Nov 2026; spec 2026-11-20-paceline-chaos-counter
+    // sections 1-3 and 7)? Only changes seen at the front are classified: the front rider adopted by
+    // tracking ('front') and my start ('self'), from a known puller. Not the start (and its lock),
+    // the adoption after a pause ('resume': the order is scrambled then), the hand-off at my end
+    // ('end': given to the plan's next without seeing him) or the undo of my false start ('back').
+    // Nor the first adoption while the old puller is `unseen` (unseenStep): after riding alone and
+    // after a start whose puller never led, the change from him was not seen at the front.
+    // Any new puller is back in the line: he pulls, so he no longer sits out.
+    // Every new puller is a turn of the round (audit fixes, 20 Nov 2026, I1; probe p16: my hand-off
+    // was no turn, a rider who missed one turn came back "within the round", 120 s of false chaos):
+    // classified ones through orderStep, the others through orderCount. Not the undo of my false
+    // start or my end ('back'): it gives the old puller his pull back, no new turn.
+    // The rider my hand-off names (unseen 'end', audit fixes, 20 Nov 2026, I8; probe p09 P11: a rider
+    // after me who sits out was named by my end every round and was the puller for 16 s each time,
+    // my countdown snapped 134 → 92): when another rider is adopted at the front before he has been
+    // in front, the change is classified from me, so the named rider is skipped and sits out. An
+    // adoption of me meanwhile is not classified.
+    // My end counted a turn for the rider it named (orderCount). While he is unseen ('end') that turn
+    // has not happened, so the change counts from the turn before it (audit fixes, 21 Nov 2026, review
+    // of I1/I8): another rider adopted first takes that turn (classified from me), and the undo of my
+    // end or an adoption of me (I pulled on) is no new puller. Why: with the hand-off's turn kept,
+    // Ann → Cleo skipping Ben, Cleo, Dan, me, my end naming Ann and Ben through instead read Ben's
+    // return as a full round later (no flag) instead of within the round (two flags, chaos 177-282 s).
+    // `quick` (spec section 8 rule 1): the previous change at the front is less than
+    // CHAOS_WINDOW_MS old, so a return of the rider it skipped undoes that skip (orderStep). It
+    // counts from the last new puller (`pullerAt`), not from `changedAt` (20 Nov 2026, final
+    // review): the end of a climb and the end of the start lock set that without a change, and a
+    // skip, a climb and the skipped rider back 65 s after the skip counted as quick (one flag
+    // instead of two).
+    // `pullerAt` moves only with a turn that has happened: not at my hand-off (its turn is the named
+    // rider's only once he pulls), nor at a change that is no turn (audit fixes, 21 Nov 2026, review
+    // of I1/I8). Why: with the hand-off's turn taken back, the change just before is my start; my
+    // start skipping Dan, my pull and Dan adopted 16 s after my end counted as quick from my end (one
+    // flag), though a whole pull of mine lies between the skip and the return (two flags).
+    const to = st.front.puller;
+    const changed = to != null && to !== prev.front.puller;
+    const unseen = prev.unseen ?? null;
+    const noTurn = changed && (st.front.adopt === 'back' || (unseen === 'end' && to === selfId));
+    if (changed) {
+        const order = unseen === 'end' ?
+            {...st.order, turns: (st.order.turns ?? st.order.n) - 1} : st.order;
+        const fromEnd = unseen === 'end' && to !== selfId;
+        const seen = (st.front.adopt === 'front' || st.front.adopt === 'self') && prev.front.puller != null &&
+            (!unseen || fromEnd);
+        st.order = seen ?
+            orderStep(order, plan, {fromId: fromEnd ? selfId : prev.front.puller, toId: to,
+                                    presentIds: st.present, selfId,
+                                    quick: now - (prev.pullerAt ?? -Infinity) < CHAOS_WINDOW_MS}) :
+            noTurn ? backIn(order, to) : orderCount(backIn(order, to));
+    }
+    // A resume that is not the line's next counts once (20 Nov 2026, spec section 8 rule 3): the
+    // adoption after a pause stays unclassified (no sit-outs: the order is scrambled after a climb),
+    // but a new puller other than the line's next after the old one is one bad flag. Why: in a team's
+    // race on 19 Nov both climb resumes near the end were skips, the back-and-forth after them never
+    // reached the counter, and the windows kept counting until 14 s before the finish sprint; with
+    // this rule they are silent from the end of the second climb (+29:23). It rests on that race alone
+    // (no other resume adoptions in six rides): check after the next TTT.
+    // The same for the first adoption after riding alone (unseen 'alone', 20 Nov 2026, final review):
+    // that is the end of an alone pause too, but it comes from normal tracking ('front'), as the
+    // alone phase's end does not reach resumeFront.
+    const resumed = st.front.adopt === 'resume' || (changed && unseen === 'alone');
+    if (resumed && prev.front.puller != null &&
+        classifyChange(plan, {fromId: prev.front.puller, toId: to, presentIds: st.present, out: st.order.out}).kind !== 'next') {
+        st.order = orderBad(st.order);
+    }
+    ({unseen: st.unseen, front: st.unseenFront} = unseenStep({unseen, front: prev.unseenFront ?? null}, {
+        now, alone: st.alone, start: st.front.adopt === 'start', end: st.front.adopt === 'end',
+        changed: to !== prev.front.puller, inFront: st.frontId != null && st.frontId === to}));
+    st.pullerAt = changed && st.front.adopt !== 'end' && !noTurn ? now : prev.pullerAt ?? null;
+    const held = backHeldStep(prev.backHeld ?? null, st.front, {now, locked, selfId, flags: prev.backFlags});
+    st.backHeld = held.held;
+    st.backFlags = held.flags;
+    if (held.bad) {
+        st.order = orderBad(st.order);
+    }
+    // Since I became the puller, has my power been at pull power (I-3, see pullPower)? A new
+    // adoption of me starts over; an older state without it counts as yes.
+    st.pulled = selfId != null && st.front.puller === selfId &&
+        ((prev.front.puller === selfId && prev.pulled !== false) ||
+         pullPower(hist, plan?.riders?.find(r => r.id === selfId)?.watts));
+    // The team-efficiency learner (efficiency.mjs; user, 21 Nov 2026; design 2026-11-21-paceline-beta5
+    // §2; analysis of five recorded races: abs against T0 10 -> 7.3 s): the puller's fresh power (me
+    // included; a stale row is no power, freshState) dates his ease-off. Not fed from a step that
+    // is not live, in the start lock, in finish mode, in chaos, on a climb or alone. It only feeds
+    // the countdown (rotationStatus), never the tracking above.
+    // The only front reset (initialFront(), standing still) returns above with effCut, and a start
+    // sets its puller at once, so no effCut is needed here (only standing still and carryRotation
+    // cut). Until a puller is known again (a new window, or after a stop until the first front
+    // rider), effStep gets puller null and keeps no open turn.
+    const pid = st.front.puller;
+    const pb = st.front.bonus;
+    st.eff = effStep(prev.eff ?? initialEff(), {
+        now, puller: pid, since: st.front.since,
+        planS: plan?.riders?.find(r => r.id === pid)?.pullS ?? null,
+        bonus: !!(pb && pb.id === pid && pb.since === st.front.since),
+        power: freshState((nearby || []).find(e => String(e.athleteId) === String(pid)), 'power'),
+        bad: !live || locked || st.finish || !!st.order.chaos || st.hill.mode === 'pause' || st.alone,
+        nextId: rotationView(plan, {selfId, chainIds: lineIds(st.present, st.order), wheelId: null,
+                                    front: st.front, now})?.next?.id ?? null,
+        rolledAt: st.rolledAt, selfId,
+    });
     const self = selfEvent(prev.front, st.front);
     return {state: st, self, shadowEarly, shadowEnd06};
+}
+
+
+// The order state with `id` no longer sitting out.
+function backIn(order, id) {
+    if (!Object.hasOwn(order.out, id)) {
+        return order;
+    }
+    const out = {...order.out};
+    delete out[id];
+    return {...order, out};
+}
+
+
+// The puller not seen in front since (20 Nov 2026, final review; spec sections 1, 3 and 7: the
+// adoption at the end of an alone pause and the start lock are not classified): 'alone' while I ride
+// alone and after it, 'start' from the start (plan #1 set at the roll-off), until the puller is the
+// front rider of my chain (for HOLD_MS, see below) or another puller is adopted. While it is set, the
+// next adoption is not classified (rotationStep), and after 'alone' it gets rule 3's one flag when it
+// is not the line's next; after 'start' it gets none. Why: the alone phase's end never reaches
+// resumeFront (`paused` reads the alone flag of the step before), so the first adoption after it was
+// classified, and a team that rode the plan while I was dropped for 70 s gave a skip there, a rider
+// wrongly out for 97 s and 120 s of false chaos (scenario of the final review, 5 riders, 40 s pulls).
+// At the start: plan #1 never in front and #4 first gave a skip #1 → #4 and 160 s of false chaos for a
+// team riding the plan from #4 on; in two of six recorded races the start puller was never found.
+// Replay of the six rides: unchanged.
+// 'end' (audit fixes, 20 Nov 2026, I8): the rider my hand-off names, set at my end, until he is in
+// front; the next adoption before that is classified from me (rotationStep).
+// It clears only after the puller has been the front rider for HOLD_MS (not while I ride alone), like
+// startFound (audit fixes, 20 Nov 2026, I6; probe p05 B: plan #1 frontmost for one sample 10 s after
+// the roll-off cleared 'start', Ann → Dan was classified as a skip, 160 s of false chaos). `front`:
+// since when he is in front, null while he is not.
+function unseenStep({unseen, front}, {now, alone, start, end, changed, inFront}) {
+    let u = changed ? null : unseen;
+    const f = changed ? null : front;
+    if (alone) {
+        u = 'alone';
+    }
+    if (start) {
+        u = 'start';
+    }
+    if (end) {
+        u = 'end';
+    }
+    if (!u || alone || !inFront) {
+        return {unseen: u, front: null};
+    }
+    const since = f ?? now;
+    return now - since >= HOLD_MS ? {unseen: null, front: null} : {unseen: u, front: since};
+}
+
+
+// A held back candidate counts once (20 Nov 2026, spec section 8 rule 2). `held` {id, since, ripe}:
+// the candidate the back hold holds (front.held 'back', not in the start lock), since when, and
+// whether he has been there HOLD_MS. When he stops being that candidate (another front rider, the
+// puller in front again, a pause) without being adopted ('front', or 'back' for the undo of my
+// start), and was ripe, it is one bad flag (`bad`): no change, so nobody is taken out. Adopted, the
+// change itself is classified (a back). Why: in a team's race on 19 Nov the back hold swallowed the
+// back-and-forth at the end (#1 13 s and #2 23 s in front, never adopted), and the counter went
+// silent only 14 s before the finish sprint. Counting him at HOLD_MS already, before he leaves,
+// gave a false 782 s chaos phase in the ZRL race on 17 Nov.
+// Not me during the hand-off of my own pull (20 Nov 2026, final review; spec section 7: my hand-off
+// is not classified): after my end the puller is the plan's next from my end's time, I fade in front
+// as the rider before him, and when he comes past late (19 s after my end in the review's scenario)
+// that was one bad flag.
+// Still held while he is the lost candidate (front.lost, same since: back within CAND_GAP_N
+// samples, see followCand), and at most one flag per rider per BACK_HOLD_MS (`flags` {id: ms of his
+// last flag}; audit fixes, 20 Nov 2026, I5; probe p06 B: one episode with one stray sample was two
+// flags, 91 s of chaos; Ann in front 80-85 s and 90-95 s, two holds 10 s apart, was two flags and
+// 74 s of chaos, now one flag and none; two holds 40 s apart are still two flags).
+function backHeldStep(held, front, {now, locked, selfId, flags}) {
+    let bad = false;
+    const f = Object.fromEntries(Object.entries(flags || {}).filter(([, at]) => now - at < BACK_HOLD_MS));
+    const here = h => (front.cand === h.id && front.candSince === h.since) ||
+        (front.lost?.id === h.id && front.lost.since === h.since);
+    if (held && !here(held)) {
+        const adopted = (front.adopt === 'front' || front.adopt === 'back') && front.puller === held.id;
+        if (held.ripe && !adopted && !Object.hasOwn(f, held.id)) {
+            bad = true;
+            f[held.id] = now;
+        }
+        held = null;
+    }
+    if (front.cand != null && front.held === 'back' && !locked && !handOffCand(front, selfId)) {
+        held = held || {id: front.cand, since: front.candSince, ripe: false};
+        if (!held.ripe && now - front.candSince >= HOLD_MS) {
+            held = {...held, ripe: true};
+        }
+    }
+    return {held, bad, flags: f};
+}
+
+
+// Caught from ahead (20 Nov 2026, spec section 8 rule 5): a plan rider (not me, not the puller)
+// who was not present in the step before (out of my chain for PRESENT_GRACE_MS or longer) and is
+// frontmost the moment he joins my chain is being caught, not taking the front. Front tracking
+// ignores him while he stays frontmost, at most BACK_HOLD_MS: no candidate, no hold, no
+// classification. Only after a group (present riders other than me: I am always in my own chain,
+// so after more than PRESENT_GRACE_MS alone the front rider of the group I rejoin was a joiner, and
+// the puller stayed wrong for 30 s more; final review, 20 Nov 2026) before; rotationStep skips it
+// while standing still. Returns {id, at} or null. Why: in a team's race on 19 Nov #4 had started
+// in the wrong group and was caught at +4:45, frontmost 20 m ahead and alone for 17 s; held as a
+// back candidate and counted when he left (rule 2), he gave a false 180 s chaos phase. Also a
+// puller who rode away and is caught again.
+function joinerStep(prev, {now, frontId, plan, selfId}) {
+    if (frontId == null) {
+        return null;
+    }
+    const j = prev.joiner;
+    if (j && j.id === frontId && now - j.at < BACK_HOLD_MS) {
+        return j;
+    }
+    const before = prev.present || [];
+    const planRider = (plan?.riders || []).some(r => r.id === frontId);
+    if (planRider && frontId !== selfId && frontId !== prev.front.puller && before.some(id => id !== selfId) &&
+        !before.includes(frontId)) {
+        return {id: frontId, at: now};
+    }
+    return null;
 }
 
 
@@ -1055,11 +1703,16 @@ export function wheelToFollow(plan, selfId, view) {
 // The captain's "Next" line: who pulls next. While the rotation runs, the live next rider. When
 // it is paused or unknown (climb, alone, no data), the plan's next after the last puller (the
 // engine keeps that puller through those phases), marked planned; before any puller is known
-// (before the start), plan #1, also planned. Nothing in the final sprint or without a plan.
+// (before the start), plan #1, also planned. Nothing in the final sprint or without a plan. In chaos
+// {chaos: true}: the line shows that the order differs from the plan, not the plan's guess (spec
+// 20 Nov 2026, section 7).
 export function captainNext({plan, view, reason, pullerId}) {
     const riders = plan?.riders;
     if (!riders || !riders.length || reason === 'finish') {
         return null;
+    }
+    if (reason === 'chaos') {
+        return {chaos: true};
     }
     if (view && view.next) {
         return {rider: view.next, planned: false};
@@ -1103,11 +1756,14 @@ export function planWheel(plan, {selfId, pullerId, presentIds}) {
 // (presentIds; null = everyone, as before the start; the puller always counts). Riders not with the
 // group (dropped: out of my chain for PRESENT_GRACE_MS) come last, in plan order, so the rows above
 // are the rotation as it really turns and the dropped ones stay put below it (user, 14 Nov 2026).
-export function rotationTable(plan, {pullerId = null, presentIds = null} = {}) {
+// Riders sitting out (outIds: orderOutIds of the rotation's order) are shown the same way, in normal
+// running too, so the table and the Next line agree (spec 20 Nov 2026, section 7).
+export function rotationTable(plan, {pullerId = null, presentIds = null, outIds = []} = {}) {
     const riders = plan?.riders || [];
     const pi = riders.findIndex(r => r.id === pullerId);
     const start = Math.max(0, pi);
-    const present = presentIds ? new Set(presentIds) : null;
+    const out = new Set(outIds || []);
+    const present = presentIds ? new Set(presentIds.filter(id => !out.has(id))) : null;
     const rows = riders.map((_, k) => {
         const i = (start + k) % riders.length;
         const r = riders[i];

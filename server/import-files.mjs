@@ -13,16 +13,17 @@ const iso = ms => new Date(ms).toISOString();
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 
-// Reads and checks one club file, after the load rule. Throws Error(`<prefix>: <reason>`). With
-// `warn` (true for console.warn, or a function), logs the sheets the load rule dropped.
-export function readClub(file, cid, prefix, {warn = false} = {}) {
+// Reads and checks one club file, after the load rule (store.mjs normalizeLoaded, which converts a
+// club in the 0.3 shape to races at `now`). Throws Error(`<prefix>: <reason>`). With `warn` (true for
+// console.warn, or a function), logs the sheets the load rule dropped.
+export function readClub(file, cid, prefix, {warn = false, now = Date.now()} = {}) {
     let c;
     try {
         c = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
         throw new Error(`${prefix}: ${e.message}`);
     }
-    const dropped = normalizeLoaded(c);
+    const dropped = normalizeLoaded(c, now);
     const why = damage(c, cid);
     if (why) {
         throw new Error(`${prefix}: ${why}`);
@@ -214,7 +215,7 @@ function readLayout(dataDir, {now, tz, warn}) {
             continue;
         }
         const cid = name.slice(0, -5);
-        clubs.set(cid, readClub(path.join(circlesDir, name), cid, `damaged circle file circles/${name}`, {warn}));
+        clubs.set(cid, readClub(path.join(circlesDir, name), cid, `damaged circle file circles/${name}`, {warn, now}));
     }
 
     const trashed = new Map();        // cid -> trash row
@@ -233,7 +234,7 @@ function readLayout(dataDir, {now, tz, warn}) {
             continue;
         }
         const file = path.join(trashDir, name, 'circle.json');
-        const c = readClub(file, name, `damaged trash/${name}/circle.json`);
+        const c = readClub(file, name, `damaged trash/${name}/circle.json`, {now});
         const clubName = String(c.name ?? '');
         trashed.set(name, {
             cid: name, json: JSON.stringify(c), name: clubName, name_key: nameKey(clubName) ?? '',

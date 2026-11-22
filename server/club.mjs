@@ -1,9 +1,12 @@
-// Club operations (spec §3–§5.2): teams, sheet uploads with their defaults, the live pointer, Back
-// to vN (plan versions §8), rider removal, the sweep and the caps. Pure and synchronous: every function changes the club
-// object it is given (the store passes a clone), and the clock is always passed in.
+// Club operations (spec §3–§5.2): teams, sheet uploads with their defaults, the live pointer and its
+// Undo, rider removal, the sweep and the caps (Restore went with the team cockpit, team cockpit spec
+// §4.1: an old copy keeps the number of the version it copied, no new version gets one). Pure and
+// synchronous: every function changes the club object it is given (the store passes a clone), and
+// the clock is always passed in.
 import {CID_RE, SHEET_RE, ZWIFT_RE, isSlug, isEventId, cleanName, freeSlug, nameKey} from './ids.mjs';
-import {isDate, HHMM_RE, localDate, localDay, zonedToUtc, addDays, isZone} from './time.mjs';
-import {plannedStart, usedUp, teamWeekday, raceStart} from './select.mjs';
+import {isDate, isWeekday, HHMM_RE, localDate, localDay, zonedToUtc, addDays, isZone} from './time.mjs';
+import {plannedStart, teamWeekday, raceStart, raceOver, raceTime, STILL_TO_RACE_MS} from './select.mjs';
+import {toRaces, tidyRaces, emptyRace, raceOf, raceOfSheet, racesOf} from './races.mjs';
 import {t} from './pages.mjs';
 import {
     isUsed, SHARED_SHARE, plansOf, planOfId, planLabel, typeKey, rememberType, previousVersion, freeVersionId,
@@ -84,6 +87,54 @@ function changed(club, slug, team, now, what, label) {
 }
 
 
+// A page drawn with another version of the team is refused (`changed`); null skips the check.
+function checkVersion(team, version) {
+    if (version !== null && Number(version) !== team.version) {
+        throw new ClubError('changed');
+    }
+}
+
+
+// The race of team `slug` on `date`, else not-found.
+function raceAt(club, slug, date) {
+    const race = raceOf(club, slug, date);
+    if (race === null) {
+        throw new ClubError('not-found');
+    }
+    return race;
+}
+
+
+// A race that is over (races spec §2: from S + 2 h) takes no change: race-done, with its day.
+function checkStillToRace(club, slug, date, now) {
+    if (raceOver(club, slug, date, now)) {
+        throw new ClubError('race-done', {day: raceDay(club, date)});
+    }
+}
+
+
+// Is a race on `date` at local `time` ('HH:MM', or null: none) over at `now`: from its S + 2 h;
+// without a time once `date` has passed in the club's zone (select.mjs raceOver).
+function overAt(club, date, time, now) {
+    return time === null ? date < localDate(now, club.tz) : now > zonedToUtc(date, time, club.tz) + STILL_TO_RACE_MS;
+}
+
+
+const isBlank = v => v == null || (typeof v === 'string' && v.trim() === '');
+const validTime = v => typeof v === 'string' && HHMM_RE.test(v);
+
+
+// The start a race of `team` stores for a posted time (setRace): a weekly team's blank is null (the
+// team's time), and so is an 'HH:MM' equal to the team's start; another 'HH:MM' is stored. A special
+// team needs an 'HH:MM'. Anything else is bad-start.
+function storedStart(team, posted) {
+    if (team.kind === 'special' ? !validTime(posted) : !isBlank(posted) && !validTime(posted)) {
+        throw new ClubError('bad-start');
+    }
+    return isBlank(posted) || (team.kind !== 'special' && posted === team.start) ? null : posted;
+}
+
+
 // Older first: by S, else by date, then by upload time.
 function older(club, a, b) {
     const Sa = plannedStart(club, a);
@@ -115,6 +166,23 @@ export function addLog(club, entry) {
 }
 
 
+// The conversion of a club stored by 0.3 to races (races.mjs toRaces), plus one club log entry per
+// event link it dropped: 'race-link-dropped' (another plan of the race decided it) or
+// 'race-link-newer-dropped' (a newer version of the live plan had it), label '5123456 (Tue 24 Nov)'.
+// Never throws on odd data: a zone it cannot use writes the date, and a log that is no list gets no
+// entry. Returns true when it changed the club.
+export function convertClub(club, now = Date.now()) {
+    const {changed, dropped} = toRaces(club);
+    if (Array.isArray(club?.log)) {
+        for (const {team, date, eventId, newer} of dropped) {
+            const day = isZone(club.tz) ? raceDay(club, date) : date;
+            addLog(club, {at: iso(now), what: newer ? 'race-link-newer-dropped' : 'race-link-dropped', team, label: `${eventId} (${day})`});
+        }
+    }
+    return changed;
+}
+
+
 // A pending club. The page checks the name key and the address; an id or zone the server cannot
 // use is a programming error.
 export function newClub({id, name, email, tz, now}) {
@@ -130,7 +198,7 @@ export function newClub({id, name, email, tz, now}) {
     }
     return {
         id, name: clean, status: 'pending', email, tz, createdAt: iso(now), confirmedAt: null, riderCode: null, tokens: [],
-        teams: {}, sheets: {}, log: [], inbox: [], weekday: 4,
+        teams: {}, sheets: {}, log: [], inbox: [],
     };
 }
 
@@ -163,6 +231,23 @@ export function clearRiderCode(club, now) {
 }
 
 
+// The unit the captain pages show pull targets in (team cockpit spec §7): 'wkg' (also when absent)
+// or 'watts'. Additive: a club stored without it reads as 'wkg'. The log names the unit; nothing
+// happens when it stays. Only the captain pages read it, never the mod or the rider API.
+export const TARGET_UNITS = ['wkg', 'watts'];
+
+export function setTargetUnit(club, unit, now) {
+    if (!TARGET_UNITS.includes(unit)) {
+        throw new TypeError('bad target unit');
+    }
+    if ((club.targetUnit ?? 'wkg') === unit) {
+        return;
+    }
+    club.targetUnit = unit;
+    addLog(club, {at: iso(now), what: 'unit', label: unit});
+}
+
+
 function checkStart(start) {
     if (start !== null && (typeof start !== 'string' || !HHMM_RE.test(start))) {
         throw new ClubError('bad-start');
@@ -179,31 +264,35 @@ function checkTeamName(name) {
 }
 
 
-// The race rhythm's checks (setKind, addTeam).
+// The race rhythm's checks (setKind, addTeam): a weekly team needs its weekday 1-7 (races spec §4c:
+// there is no club's race day to follow); a special team has none, so its weekday is null or 1-7
+// (what the form sent along) and is not stored. Returns the weekday to store.
 function checkKind(kind, weekday) {
     if (kind !== 'weekly' && kind !== 'special') {
         throw new ClubError('bad-kind');
     }
-    if (weekday !== null && !(Number.isInteger(weekday) && weekday >= 1 && weekday <= 7)) {
+    if (kind === 'weekly' ? !isWeekday(weekday) : weekday !== null && !isWeekday(weekday)) {
         throw new ClubError('bad-weekday');
     }
+    return kind === 'special' ? null : weekday;
 }
 
 
 // The slug is unique across all clubs and never reused: `slugTaken` answers for the store
 // (other clubs, retired slugs), this club's own teams are checked here. `kind` and `weekday` as
-// setKind takes them (user, 19 Nov 2026: Add a team asks for the race rhythm); a special team gets
-// its start time with each plan, so it ignores `start` and has none.
-export function addTeam(club, {name, start = null, kind = 'weekly', weekday = null}, {slugTaken, now}) {
+// setKind takes them (user, 19 Nov 2026: Add a team asks for the race rhythm), weekly on Thursday
+// by default; a special team gets its start time with each plan, so it ignores `start` and has
+// none, and it has no weekday.
+export function addTeam(club, {name, start = null, kind = 'weekly', weekday = 4}, {slugTaken, now}) {
     if (Object.keys(club.teams).length >= MAX_TEAMS) {
         throw new ClubError('cap-teams', {max: MAX_TEAMS});
     }
     const clean = checkTeamName(name);
-    checkKind(kind, weekday);
+    const day = checkKind(kind, weekday);
     const own = kind === 'special' ? null : start;
     checkStart(own);
     const slug = freeSlug(clean, s => Object.hasOwn(club.teams, s) || slugTaken(s));
-    club.teams[slug] = {name: clean, start: own, live: null, version: 1, changedAt: iso(now), kind, weekday};
+    club.teams[slug] = {name: clean, start: own, version: 1, changedAt: iso(now), kind, weekday: day, races: {}};
     addLog(club, {at: iso(now), what: 'team-add', team: slug, label: clean});
     return slug;
 }
@@ -230,18 +319,42 @@ export function setStart(club, slug, start, now) {
 }
 
 
-// Weekly (on `weekday` 1-7, or null for the club's) or special (plan versions spec §3.1, user 17 Nov
-// 2026). The log label is "weekly, Thursday" (the day it then races on) or "special". The team's
-// start time stays as it is: a special team's plans have their own (startOf), and a team made
-// weekly again races at it.
+// Weekly (on `weekday` 1-7) or special (plan versions spec §3.1, user 17 Nov 2026; a special team's
+// weekday is null). The log label is "weekly, Thursday" (the day it then races on) or "special".
+// The team's start time stays as it is, and so do its races' own start times: a special team's
+// plans have their own (startOf), and a team made weekly again races at it.
 export function setKind(club, slug, {kind, weekday}, now) {
     const team = teamOf(club, slug);
-    checkKind(kind, weekday);
+    const day = checkKind(kind, weekday);
     team.kind = kind;
-    team.weekday = weekday;
+    team.weekday = day;
     bump(team, now);
     const label = kind === 'special' ? 'special' : `weekly, ${t(`weekday-${teamWeekday(club, slug)}`)}`;
     addLog(club, {at: iso(now), what: 'team-kind', team: slug, label});
+}
+
+
+// The race day and time of the team settings in one change (user, 22 Nov 2026): setKind, and for a
+// weekly team setStart with `start` (null clears it). A special team ignores `start`, even one that
+// is no time: its stored start stays, as setKind keeps it. Each part applies only when it changes
+// something, so a save of the start alone bumps and logs only the start. Everything is checked
+// first: a refusal changes nothing. Returns {rhythm, start}: whether each changed.
+export function setRhythm(club, slug, {kind, weekday, start}, now) {
+    const team = teamOf(club, slug);
+    const day = checkKind(kind, weekday);
+    const weekly = kind === 'weekly';
+    if (weekly) {
+        checkStart(start);
+    }
+    const rhythm = team.kind !== kind || team.weekday !== day;
+    const moved = weekly && start !== (team.start ?? null);
+    if (rhythm) {
+        setKind(club, slug, {kind, weekday}, now);
+    }
+    if (moved) {
+        setStart(club, slug, start, now);
+    }
+    return {rhythm, start: moved};
 }
 
 
@@ -260,15 +373,17 @@ export function deleteTeam(club, slug, now) {
 }
 
 
-// Does an upload for `slug` look like another team's plan (spec §5.2 result page)? `json` is the
+// Does an upload for `slug` look like another team's plan (spec §5.2, the Store preview and flash)? `json` is the
 // planner JSON, `riderIds` its riders' Zwift IDs. The first that applies:
 // - {kind: 'name', team}: the JSON's team name has the name key of another team's name or of the
 //   planner name of one of its versions (`jsonName`; labels start with the team name and would match
 //   by accident). A name without a key (e.g. one character or non-Latin) never matches;
 // - {kind: 'overlap', team, shared, total}: another team's live version lists at least 60 % of these
-//   riders as riders, and more of them than this team's live version does (the most shared wins);
+//   riders as riders, and more of them than this team's live version does (the most shared wins; a
+//   team's count is the most that any of its races' live versions still served at `now` shares:
+//   isUsed, so a race already raced, which keeps its live plan until the sweep, never counts);
 // - null.
-export function teamHint(club, slug, json, riderIds) {
+export function teamHint(club, slug, json, riderIds, now) {
     const others = Object.keys(club.teams).filter(s => s !== slug);
     const key = typeof json?.team?.name === 'string' ? nameKey(json.team.name) : null;
     if (key !== null) {
@@ -279,10 +394,17 @@ export function teamHint(club, slug, json, riderIds) {
         }
     }
     const ids = [...new Set((riderIds || []).map(String))];
+    // a team's: the most that any of its races' live versions still served shares
     const sharedWith = s => {
-        const id = Object.hasOwn(club.teams, s) ? club.teams[s].live : null;
-        const riders = typeof id === 'string' && Object.hasOwn(club.sheets, id) ? club.sheets[id].json?.riders : null;
-        return riders && typeof riders === 'object' ? ids.filter(a => Object.hasOwn(riders, a)).length : 0;
+        let most = 0;
+        for (const [, race] of Object.hasOwn(club.teams, s) ? racesOf(club, s) : []) {
+            const id = race.live;
+            const sheet = typeof id === 'string' && Object.hasOwn(club.sheets, id) ? club.sheets[id] : null;
+            const riders = sheet !== null && !isUsed(club, sheet, now) ? sheet.json?.riders : null;
+            const shared = riders && typeof riders === 'object' ? ids.filter(a => Object.hasOwn(riders, a)).length : 0;
+            most = Math.max(most, shared);
+        }
+        return most;
     };
     const own = sharedWith(slug);
     let best = null;
@@ -409,83 +531,65 @@ const VIAS = ['file', 'paste', 'import', 'receive', 'zwiftgopher'];
 
 // The cap of versions per plan for a new version of `plan` (labelled `label`): with MAX_VERSIONS
 // stored, the lowest version that is not live goes. {dropped, dropIds}.
-function versionCap(team, plan, label) {
+function versionCap(plan, label) {
     if (plan.versions.length < MAX_VERSIONS) {
         return {dropped: null, dropIds: []};
     }
-    const [vid, v] = plan.versions.find(([i]) => i !== team.live);
+    const [vid, v] = plan.versions.find(([i]) => i !== plan.live);
     return {dropped: {kind: 'version', n: v.n, label}, dropIds: [vid]};
 }
 
 
-// A new version's event fields: from the plan's live version when the plan is live, else from its
-// newest. A given link (`pinnedEventId`, or null) wins; the learned event carries over only without
-// a link. {pin, eventId, boundAt}.
-function eventFields(club, plan, pinnedEventId) {
-    const src = plan.live !== null ? club.sheets[plan.live] : plan.newest[1];
-    const pin = pinnedEventId ?? src.pinnedEventId ?? null;
-    return pin === null ? {pin, eventId: src.eventId ?? null, boundAt: src.boundAt ?? null} : {pin, eventId: null, boundAt: null};
-}
-
-
-// The race start a Store of special team `slug`'s plan for `date` sets (user, 19 Nov 2026: the
-// time belongs to the race, team and date, and the newest upload sets it): the posted 'HH:MM'; a
-// blank one keeps the race's start (raceStart: the stored one, else the team's), and is refused
-// without one (bad-start), as is a posted value that is no time. `own` is the plan the Store makes
-// a version of, or null. {start, moved}: `moved` {date, start, was, others} when the date had plans
-// already and their start changes (`was` null when they had none), `others` the labels of that
-// date's other plans, which move with it; else null.
-function specialStart(club, slug, date, posted, own) {
+// The start time a Store of team `slug`'s plan for `date` gives its race (races spec §1; user, 19
+// Nov 2026: the time belongs to the race, and the newest upload sets it). A special team: the posted
+// 'HH:MM'; a blank one keeps the race's start (raceStart: the stored one, else the team's), and is
+// refused without one (bad-start). A weekly team: a blank keeps the race's stored start (a new
+// race: null, the team's time); an 'HH:MM' equal to the team's start stores null, another one is
+// stored. A posted value that is no time is bad-start for both. `own` is the plan the Store makes a
+// version of, or null. {stored, start, moved}: `stored` race.start, `start` the race's time then
+// ('HH:MM', or null without any), `moved` {date, start, was, others} when the date had plans already
+// and their start changes (raceStart before and after; `was` null when they had none), `others` the
+// labels of that date's other plans, which move with it; else null.
+function storeStart(club, slug, date, posted, own) {
+    const team = club.teams[slug];
     const current = raceStart(club, slug, date);
-    let start;
-    if (posted == null || (typeof posted === 'string' && posted.trim() === '')) {
-        if (current === null) {
-            throw new ClubError('bad-start');
-        }
-        start = current;
-    } else if (typeof posted !== 'string' || !HHMM_RE.test(posted)) {
+    let stored;
+    if (!isBlank(posted)) {
+        stored = storedStart(team, posted);
+    } else if (team.kind !== 'special') {
+        stored = raceOf(club, slug, date)?.start ?? null;
+    } else if (current === null) {
         throw new ClubError('bad-start');
     } else {
-        start = posted;
+        stored = current;
     }
+    const start = raceTime(team, stored);
     const plans = plansOf(club, slug).filter(p => p.date === date);
     if (!plans.length || start === current) {
-        return {start, moved: null};
+        return {stored, start, moved: null};
     }
     const others = plans.filter(p => own === null || p.id !== own.id).map(p => p.label).sort();
-    return {start, moved: {date, start, was: current, others}};
-}
-
-
-// Drops the race starts (team.raceStarts) whose date has no plan of the team left, for team `slug`
-// or every team; a team left without any loses the field. Cheap: at most MAX_PLANS dates a team.
-export function pruneRaceStarts(club, slug = null) {
-    for (const [s, team] of Object.entries(club.teams)) {
-        if ((slug !== null && s !== slug) || team.raceStarts === null || typeof team.raceStarts !== 'object') {
-            continue;
-        }
-        const dates = new Set(Object.values(club.sheets).filter(sh => sh.team === s).map(sh => sh.date));
-        for (const date of Object.keys(team.raceStarts)) {
-            if (!dates.has(date)) {
-                delete team.raceStarts[date];
-            }
-        }
-        if (!Object.keys(team.raceStarts).length) {
-            delete team.raceStarts;
-        }
-    }
+    return {stored, start, moved: {date, start, was: current, others}};
 }
 
 
 // Stores one upload as a version: of a new plan (`as` 'new') or of the plan `as` names by any of its
-// ids. Without `as` it is refused (pick-plan: the assign page never stores a plan the captain did
-// not see chosen); only `live` true makes it live. For a version, `type` undefined keeps the plan's
-// type, and the date is the plan's. Every Store of a special team's plan (a new plan or a version)
-// sets its race's start time, team.raceStarts[date], from `start` (specialStart; the same content
-// stores no version, but a new time still applies); a weekly team's plans start at the team's start
-// time. Checks run in a fixed order, so the page shows the first problem. Returns {id, planId, n,
-// prev, live, created, same, dropped, changedAt, plan, startMoved}; `startMoved` is specialStart's
-// `moved`, else null.
+// ids. Without `as` it is refused (pick-plan: the Store form never stores a plan the captain did
+// not see chosen); only `live` true makes it live, in its own race only (races spec §1: a live plan
+// per race). A version always keeps its plan's type, whatever `type` says (Rename is the only way
+// to change it), and the date is the plan's; `type` counts for a new plan only. A version stored
+// live, or made live by this Store (the same file again), gets `liveAt`, the time it last became
+// its race's live version. A race that is over takes no version (plan-used). The race of the date
+// (team.races[date]) is made with its first plan. Every Store sets the race's start time from `start` (storeStart; the same
+// content stores no version, but a new time still applies); a new plan, and a Store with a time,
+// is refused when the race would be over at it (race-over-time with a posted time, else
+// race-over). A Store with an event link (`pinnedEventId`) sets the race's link and clears the event
+// it learned; so does a new start time of a race with plans (spec §7, the link stays); one without
+// leaves the race's link as it is. Versions carry no event field. Checks run in a fixed order, so the
+// page shows the first problem. Returns {id, planId, n, prev, live, created, same, dropped,
+// changedAt, plan, startMoved, linkMoved}; `startMoved` is storeStart's `moved`, `linkMoved` {date,
+// id, was, others} when the date had plans and the link differs from the race's (`others` the
+// labels of the date's other plans, which share it), else null.
 export function uploadSheet(club, input, {now, newId}) {
     const {slug, base} = input;
     const team = teamOf(club, slug);
@@ -507,7 +611,7 @@ export function uploadSheet(club, input, {now, newId}) {
     let date;
     if (target !== null) {
         date = target.date;
-        if (isUsed(club, target.newest[1], now)) {
+        if (raceOver(club, slug, date, now)) {
             throw new ClubError('plan-used', {label: target.label});
         }
     } else {
@@ -515,52 +619,80 @@ export function uploadSheet(club, input, {now, newId}) {
         if (!isDate(date)) {
             throw new ClubError('bad-date');
         }
-    }
-    const special = team.kind === 'special';
-    const {start, moved: startMoved} = special ? specialStart(club, slug, date, input.start, target) : {start: null, moved: null};
-    // a new plan, and a special team's version (also one of the same content): never a start time
-    // that is over already (an AM/PM slip would end the race at once)
-    if (target === null || special) {
-        const S = special ? zonedToUtc(date, start, club.tz) : plannedStart(club, {team: slug, date});
-        if (S !== null && usedUp(S, now)) {
-            // a special race names its time: a version can't change the date, only the time
-            throw special ? new ClubError('race-over-time', {date, time: start}) : new ClubError('race-over', {date});
+        // a race that is over takes no new plan, whatever time is posted: a later one would move
+        // the race and serve its raced plan again (races spec §2)
+        if (raceOf(club, slug, date) !== null && raceOver(club, slug, date, now)) {
+            throw new ClubError('race-over', {date});
         }
     }
+    const {stored, start, moved: startMoved} = storeStart(club, slug, date, input.start, target);
+    // a new plan, and a Store with a time: never a race that is over at it (an AM/PM slip would end
+    // the race at once)
+    const posted = !isBlank(input.start);
+    // (the team's own time, which the form prefills for a race on the rhythm, is no time the captain
+    // typed: stored null and the race's time now, so it ends a race that is over with "choose a later
+    // date", not "check the start time"; the check itself is the same for every posted time)
+    const untouched = stored === null && start === raceStart(club, slug, date);
+    if ((target === null || posted) && overAt(club, date, start, now)) {
+        throw posted && !untouched ? new ClubError('race-over-time', {date, time: start}) : new ClubError('race-over', {date});
+    }
 
-    const type = typeFor(club, slug, {as: target === null ? 'new' : target.id, type: input.type, date}, now);
+    const type = typeFor(club, slug, {as: target === null ? 'new' : target.id, type: target === null ? input.type : undefined, date}, now);
     const label = planLabel(team.name, type);
     const changedAt = Number(base) !== team.version ? team.changedAt : null;
-    // the race's start (a special team): set at every Store, also one that stores no version
-    const newStart = special && raceStart(club, slug, date) !== start;
-    const setStart = () => {
-        if (special) {
-            team.raceStarts = {...(team.raceStarts && typeof team.raceStarts === 'object' ? team.raceStarts : {}), [date]: start};
+    const before = raceOf(club, slug, date);
+    // the race's time changed: set at every Store, also one that stores no version
+    const newStart = before !== null && raceStart(club, slug, date) !== start;
+    const datePlans = plansOf(club, slug).filter(p => p.date === date);
+    const wasLink = before?.pinnedEventId ?? null;
+    const linkMoved = pinnedEventId !== null && datePlans.length > 0 && wasLink !== pinnedEventId
+        ? {date, id: pinnedEventId, was: wasLink, others: datePlans.filter(p => target === null || p.id !== target.id).map(p => p.label).sort()}
+        : null;
+    // the race of the date, made with its first plan (after every check: a refusal leaves no race
+    // without a plan); then its start time and event link. True when the link changed.
+    const fileRace = () => {
+        const race = raceOf(club, slug, date) ?? (team.races[date] = emptyRace());
+        race.start = stored;
+        if (startMoved !== null) {
+            race.eventId = null;
+            race.boundAt = null;
         }
+        if (pinnedEventId !== null && race.pinnedEventId !== pinnedEventId) {
+            race.pinnedEventId = pinnedEventId;
+            race.eventId = null;
+            race.boundAt = null;
+            return true;
+        }
+        return false;
     };
 
-    // The same content (json, text, type and event link) as the plan's newest version stores nothing;
-    // the live box still applies.
+    // The same content (json, text and type) as the plan's newest version stores nothing; the live
+    // box still applies, and so does a new start time or event link (they belong to the race).
     if (target !== null) {
         const [nid, newest] = target.newest;
         if (JSON.stringify(newest.json) === JSON.stringify(json) && JSON.stringify(newest.text ?? null) === JSON.stringify(text)
-            && (newest.type ?? null) === type && (pinnedEventId === null || pinnedEventId === newest.pinnedEventId)) {
-            setStart();
-            const prevLive = team.live;
-            if (live === true && team.live !== nid) {
-                team.live = nid;
-                changed(club, slug, team, now, 'live', newest.label);
+            && (newest.type ?? null) === type) {
+            const newLink = fileRace();
+            const race = raceOf(club, slug, date);
+            const prevLive = race.live;
+            if (live === true && prevLive !== nid) {
+                race.live = nid;
+                newest.liveAt = iso(now);
+                changed(club, slug, team, now, 'live', `${newest.label} v${newest.n}`);
             }
             if (newStart) {
                 changed(club, slug, team, now, 'race-start', `${raceDay(club, date)} ${start}`);
             }
-            if (team.live !== prevLive) {
+            if (newLink) {
+                changed(club, slug, team, now, 'race-link', `${raceDay(club, date)} · ${pinnedEventId}`);
+            }
+            if (race.live !== prevLive) {
                 // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
-                rememberLive(club, team, prevLive, true, now);
+                rememberLive(club, team, race, prevLive, true, now);
             }
             return {
                 id: nid, planId: target.id, n: newest.n, prev: previousVersion(club, nid)?.[0] ?? null,
-                live: team.live === nid, created: false, same: true, dropped: null, changedAt, plan, startMoved,
+                live: race.live === nid, created: false, same: true, dropped: null, changedAt, plan, startMoved, linkMoved,
             };
         }
     }
@@ -583,13 +715,10 @@ export function uploadSheet(club, input, {now, newId}) {
             dropIds = used[0].versions.map(([vid]) => vid);
         }
     } else {
-        ({dropped, dropIds} = versionCap(team, target, label));
+        ({dropped, dropIds} = versionCap(target, label));
     }
 
-    const {pin, eventId, boundAt} = target === null ? {pin: pinnedEventId, eventId: null, boundAt: null}
-        : eventFields(club, target, pinnedEventId);
-
-    setStart();
+    fileRace();
     // the id before the drops: a dropped plan's ids stay taken in this change
     const id = freeVersionId(club, newId);
     const planId = target === null ? id : target.id;
@@ -600,55 +729,62 @@ export function uploadSheet(club, input, {now, newId}) {
     club.sheets[id] = {
         team: slug, label, date, sig: plan.sig, json, text,
         uploadedAt: iso(now), via: VIAS.includes(input.via) ? input.via : 'file',
-        eventId, boundAt, pinnedEventId: pin,
-        plan: planId, n, at: iso(now), copyOf: null, jsonName: nameKey(input.json?.team?.name), type, recSig: plan.sig,
+        plan: planId, n, at: iso(now), jsonName: nameKey(input.json?.team?.name), type, recSig: plan.sig,
         ...(zgShare === null ? {} : {zgShare}),
     };
-    const prevLive = team.live;
+    const race = raceOf(club, slug, date);
+    const prevLive = race.live;
     if (live === true) {
-        team.live = id;
-    } else if (dropIds.includes(team.live)) {
-        team.live = null;
+        race.live = id;
+        club.sheets[id].liveAt = iso(now);
     }
+    // a dropped version's live pointer, a dropped plan's race
+    tidyRaces(club, slug);
     rememberType(team, type);
-    pruneRaceStarts(club, slug);
     changed(club, slug, team, now, 'upload', `${label} v${n}`);
     if (live === true && prevLive !== id) {
         // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
-        rememberLive(club, team, prevLive, true, now);
+        rememberLive(club, team, race, prevLive, true, now);
     }
     return {
-        id, planId, n, prev: target === null ? null : target.newest[0], live: team.live === id,
-        created: target === null, same: false, dropped, changedAt, plan, startMoved,
+        id, planId, n, prev: target === null ? null : target.newest[0], live: race.live === id,
+        created: target === null, same: false, dropped, changedAt, plan, startMoved, linkMoved,
     };
 }
 
 
-// Make live keeps upload times. `version` is the team's version the page was drawn with: another
-// one is refused (`changed`), so a page drawn before another captain's change cannot replace a newer
-// live plan (UI panel, 19 Nov 2026); null (a page from before the check) skips it. With `undo` (the
-// default) the team keeps what Undo needs (rememberLive); the Undo itself passes false.
+// Make live of version `id`: the live plan of its own race (races spec §1), and of no other race;
+// the team's other races keep theirs. Upload times stay. `version` is the team's version the page
+// was drawn with: another one is refused (`changed`), so a page drawn before another captain's
+// change cannot replace a newer live plan (UI panel, 19 Nov 2026); null (a page from before the
+// check) skips it. A race that is over is refused (race-done). With `undo` (the default) the team
+// keeps what Undo needs (rememberLive); the Undo itself passes false. Checks: the team, `version`,
+// the version (`not-found`), its race over.
 export function makeLive(club, slug, id, now, {version = null, undo = true} = {}) {
     const team = teamOf(club, slug);
-    if (version !== null && Number(version) !== team.version) {
-        throw new ClubError('changed');
-    }
+    checkVersion(team, version);
     const {sheet} = sheetOf(club, slug, id);
-    const prev = team.live;
-    team.live = id;
-    changed(club, slug, team, now, 'live', sheet.label);
-    rememberLive(club, team, prev, undo, now);
+    const race = raceAt(club, slug, sheet.date);
+    checkStillToRace(club, slug, sheet.date, now);
+    const prev = race.live;
+    race.live = id;
+    if (prev !== id) {
+        sheet.liveAt = iso(now);
+    }
+    changed(club, slug, team, now, 'live', `${sheet.label} v${sheet.n}`);
+    rememberLive(club, team, race, prev, undo, now);
 }
 
 
-// What Undo of a change of the live plan needs (UI panel wave 2, team-view.mjs undoOffer), kept on
-// the team after the change bumped its version: team.liveBefore = {id, version, at}, the version
-// that was live before and the team's version right after the change. Any later change of the team
-// bumps its version, so Undo is offered only while nothing changed since. Nothing (and an older
-// record goes) when there was no live version before, it is gone, or `undo` is false. Additive: a
-// club stored without it loads unchanged.
-function rememberLive(club, team, prev, undo, now) {
-    if (undo && typeof prev === 'string' && prev !== team.live && Object.hasOwn(club.sheets, prev)) {
+// What Undo of a change of a race's live plan needs (UI panel wave 2, team-view.mjs undoOffer), kept
+// on the team after the change bumped its version: team.liveBefore = {id, version, at}, the version
+// that was live in that race before and the team's version right after the change (one record per
+// team: Undo reads the race of `id`). Any later change of the team bumps its version, so Undo is
+// offered only while nothing changed since. Nothing (and an older record goes) when the race had no
+// live version before, it is gone, or `undo` is false. Additive: a club stored without it loads
+// unchanged.
+function rememberLive(club, team, race, prev, undo, now) {
+    if (undo && race !== null && typeof prev === 'string' && prev !== race.live && Object.hasOwn(club.sheets, prev)) {
         team.liveBefore = {id: prev, version: team.version, at: iso(now)};
     } else {
         delete team.liveBefore;
@@ -674,94 +810,146 @@ export function deleteSheet(club, slug, id, now, {version = null} = {}) {
     const p = planVersions(club, slug, id);
     for (const [vid] of p.versions) {
         delete club.sheets[vid];
-        if (team.live === vid) {
-            team.live = null;
-        }
     }
-    pruneRaceStarts(club, slug);
+    // its race loses the live pointer, and goes with its last plan
+    tidyRaces(club, slug);
     changed(club, slug, team, now, 'delete', p.label);
 }
 
 
-// Removes the event link from every version of the plan of version `id`, so no older version brings
-// it back. Copies take the versions' places.
+// Removes the event link of the race of version `id` (setRaceEvent with null; races spec §1: the
+// link is the race's).
 export function unpin(club, slug, id, now) {
-    const team = teamOf(club, slug);
-    const p = planVersions(club, slug, id);
-    for (const [vid, v] of p.versions) {
-        club.sheets[vid] = {...v, pinnedEventId: null};
-    }
-    changed(club, slug, team, now, 'unpin', p.label);
+    const {sheet} = sheetOf(club, slug, id);
+    setRaceEvent(club, slug, sheet.date, null, now);
 }
 
 
-// Restore vN ("Back to vN" in plan versions §8): a new version of plan `plan` (any of its ids)
-// with version `n`'s JSON, text and sig, `via: 'back'`, `copyOf: n`, `at` now and vN's upload time (O4). The type stays
-// the plan's current one; the event fields come from the plan's live version, else its newest, as an
-// upload without a link takes them; the race keeps its start time. It goes live at once when the
-// plan is live, and counts against MAX_VERSIONS. `version` is the team's version
-// the page was drawn with. Checks, in this order: the version (`changed`), the plan (`not-found`),
-// a used-up plan (`plan-used`), and `n`: a stored version that is not the newest (`not-found`). Returns {id, planId, n, from, live, dropped}.
-export function backTo(club, slug, {plan, n, version}, {now, newId}) {
+// The event link of team `slug`'s race on `date` (races spec §4 "Race ⋯"): a number sets it and
+// clears the event the race learned (log 'race-link', label 'Thu 19 Nov · 5123456'); null removes it
+// (log 'unpin', label 'Thu 19 Nov'). The link the race has already changes nothing (no bump, no
+// log). Checks: the team, `version` (`changed`; null skips), the race (`not-found`), the race over
+// (race-done). A value that is no event id is a caller's bug (TypeError, as uploadSheet's). {was}:
+// the link before.
+export function setRaceEvent(club, slug, date, eventId, now, {version = null} = {}) {
     const team = teamOf(club, slug);
-    if (Number(version) !== team.version) {
-        throw new ClubError('changed');
+    checkVersion(team, version);
+    const race = raceAt(club, slug, date);
+    checkStillToRace(club, slug, date, now);
+    const id = eventIdOrNull(eventId);
+    const was = race.pinnedEventId ?? null;
+    if (id === was) {
+        return {was};
     }
+    race.pinnedEventId = id;
+    if (id !== null) {
+        race.eventId = null;
+        race.boundAt = null;
+        changed(club, slug, team, now, 'race-link', `${raceDay(club, date)} · ${id}`);
+    } else {
+        changed(club, slug, team, now, 'unpin', raceDay(club, date));
+    }
+    return {was};
+}
+
+
+// Changes the date and the start time of team `slug`'s race on `date` (races spec §4 "Race ⋯"):
+// the race moves to `to` with all its plans (every version of the team on `date` gets `date: to`),
+// keeps its live plan and its event link, and the event it learned goes when the date or the time
+// changed (spec §7). `start` as the race stores it (storedStart: a weekly team's blank or the team's
+// own time is null). Checks, in this order: the team, `version` (`changed`; null skips), the race
+// (`not-found`), the race over (race-done), `to` (bad-date), another race of the team on `to`
+// (race-taken), `start` (bad-start), the race over at its new date and time (race-over-time;
+// race-over without any time). Without a change of date or time nothing happens: no bump, no log. Else one bump and a
+// log entry 'race-move', label 'Thu 19 Nov 19:30 → Sat 21 Nov 17:00' ('–' for no time). Returns
+// {date, start, was: {date, start}, plans}: the race's date and stored start after and before, and
+// how many plans moved with it.
+export function setRace(club, slug, date, {to, start}, now, {version = null} = {}) {
+    const team = teamOf(club, slug);
+    checkVersion(team, version);
+    const race = raceAt(club, slug, date);
+    checkStillToRace(club, slug, date, now);
+    if (!isDate(to)) {
+        throw new ClubError('bad-date');
+    }
+    if (to !== date && raceOf(club, slug, to) !== null) {
+        throw new ClubError('race-taken', {team: team.name, day: raceDay(club, to)});
+    }
+    const stored = storedStart(team, start);
+    const time = raceTime(team, stored);
+    if (overAt(club, to, time, now)) {
+        throw time === null ? new ClubError('race-over', {date: to}) : new ClubError('race-over-time', {date: to, time});
+    }
+    const was = {date, start: race.start};
+    const plans = plansOf(club, slug).filter(p => p.date === date).length;
+    const oldTime = raceStart(club, slug, date);
+    if (to === date && time === oldTime) {
+        // the same date and time: no change for riders, no bump, no log (a race that stored the
+        // team's own time explicitly stores none from now on)
+        race.start = stored;
+        return {date, start: stored, was, plans};
+    }
+    delete team.races[date];
+    team.races[to] = race;
+    race.start = stored;
+    if (to !== date || time !== oldTime) {
+        race.eventId = null;
+        race.boundAt = null;
+    }
+    for (const [, sheet] of teamSheets(club, slug)) {
+        if (sheet.date === date) {
+            sheet.date = to;
+        }
+    }
+    changed(club, slug, team, now, 'race-move', `${raceDay(club, date)} ${oldTime ?? '–'} → ${raceDay(club, to)} ${time ?? '–'}`);
+    return {date: to, start: stored, was, plans};
+}
+
+
+// Rename (races spec §4 "Plan ⋯", §7): plan `plan` (any of its ids) gets type `type` (typeFor:
+// unique within its race, blank is none, and at most one plan of the race has none) on every one of
+// its versions, and the label team name + type. Checks: the team, `version` (`changed`; null
+// skips), the plan and its race (`not-found`), its race over (race-done), then the type. An unchanged type
+// changes nothing; else one bump, rememberType and a log entry 'plan-rename', label "'Rollers' →
+// 'Rollers · tempo'". {label, was}: the plan's label after and before.
+export function renamePlan(club, slug, plan, type, now, {version = null} = {}) {
+    const team = teamOf(club, slug);
+    checkVersion(team, version);
     const p = typeof plan === 'string' && SHEET_RE.test(plan) ? planOfId(club, slug, plan) : null;
     if (p === null) {
         throw new ClubError('not-found');
     }
-    if (isUsed(club, p.newest[1], now)) {
-        throw new ClubError('plan-used', {label: p.label});
+    raceAt(club, slug, p.date);
+    checkStillToRace(club, slug, p.date, now);
+    const clean = typeFor(club, slug, {as: p.id, type: type === undefined ? null : type, date: p.date}, now);
+    const label = planLabel(team.name, clean);
+    const was = p.label;
+    if (p.versions.every(([, v]) => (v.type ?? null) === clean && v.label === label)) {
+        return {label, was};
     }
-    const from = Number(n);
-    const entry = p.versions.find(([, v]) => v.n === from);
-    if (!entry || from === p.newest[1].n) {
-        throw new ClubError('not-found');
+    for (const [, v] of p.versions) {
+        v.type = clean;
+        v.label = label;
     }
-    const old = entry[1];
-    const type = p.type;
-    const label = planLabel(team.name, type);
-    const {dropped, dropIds} = versionCap(team, p, label);
-    const {pin, eventId, boundAt} = eventFields(club, p, null);
-    const id = freeVersionId(club, newId);
-    const k = p.newest[1].n + 1;
-    // read vN before the cap may drop it
-    const json = structuredClone(old.json);
-    const text = structuredClone(old.text ?? null);
-    for (const vid of dropIds) {
-        delete club.sheets[vid];
-    }
-    club.sheets[id] = {
-        team: slug, label, date: p.date, sig: old.sig, json, text,
-        uploadedAt: old.uploadedAt, via: 'back',
-        eventId, boundAt, pinnedEventId: pin,
-        plan: p.id, n: k, at: iso(now), copyOf: from, jsonName: old.jsonName ?? null, type, recSig: old.sig,
-        ...(isShare(old.zgShare) ? {zgShare: old.zgShare} : {}),
-    };
-    const prev = team.live;
-    if (p.live !== null) {
-        team.live = id;
-    }
-    rememberType(team, type);
-    changed(club, slug, team, now, 'back', `${label} v${from} → v${k}`);
-    rememberLive(club, team, prev, p.live !== null, now);
-    return {id, planId: p.id, n: k, from, live: team.live === id, dropped};
+    rememberType(team, clean);
+    changed(club, slug, team, now, 'plan-rename', `'${was}' → '${label}'`);
+    return {label, was};
 }
 
 
-// A rider's check learned the sheet's event. Only a sheet with neither a learned nor a pinned id
-// learns. No version bump, so a check never makes a captain's open page stale; no log entry.
+// A rider's check on version `id` learned its race's event (races spec §3). Only a race with neither
+// a learned nor a pinned id learns. No version bump, so a check never makes a captain's open page
+// stale; no log entry.
 export function learnEvent(club, id, eventId, now) {
     if (typeof id !== 'string' || !SHEET_RE.test(id) || !Object.hasOwn(club.sheets, id)) {
         throw new ClubError('not-found');
     }
-    const sheet = club.sheets[id];
-    if (!isEventId(eventId) || sheet.eventId != null || sheet.pinnedEventId != null) {
+    const race = raceOfSheet(club, club.sheets[id]);
+    if (race === null || !isEventId(eventId) || race.eventId != null || race.pinnedEventId != null) {
         return false;
     }
-    sheet.eventId = Number(eventId);
-    sheet.boundAt = iso(now);
+    race.eventId = Number(eventId);
+    race.boundAt = iso(now);
     return true;
 }
 
@@ -819,9 +1007,6 @@ export function removeRider(club, athleteId, now, {before = Infinity} = {}) {
         }
         if (!json.riders || !Object.keys(json.riders).length) {
             delete club.sheets[id];
-            if (Object.hasOwn(club.teams, sheet.team) && club.teams[sheet.team].live === id) {
-                club.teams[sheet.team].live = null;
-            }
             continue;
         }
         // stripSheet keeps only the text rows still matched to a rider.
@@ -852,7 +1037,8 @@ export function removeRider(club, athleteId, now, {before = Infinity} = {}) {
         const {zgShare: gone, ...rest} = entry;
         return [{...rest, json: stripped.json, text: stripped.text, warnings: [], warningsMore: 0}];
     });
-    pruneRaceStarts(club);
+    // a deleted version's live pointer, the race of a date left without plans
+    tidyRaces(club);
     for (const [slug, team] of Object.entries(club.teams)) {
         if (teams.has(slug)) {
             bump(team, now);
@@ -892,23 +1078,22 @@ export function sweptSheets(club, now) {
 export function sweepClub(club, now) {
     const ids = sweptSheets(club, now);
     for (const id of ids) {
-        const slug = club.sheets[id].team;
         delete club.sheets[id];
-        if (Object.hasOwn(club.teams, slug) && club.teams[slug].live === id) {
-            club.teams[slug].live = null;
-        }
     }
-    pruneRaceStarts(club);
+    // the swept plans' races go with them (KEEP_DAYS, races spec §2)
+    tidyRaces(club);
     return ids.length;
 }
 
 
 
 // ---- the inbox (plan versions spec §4.1, §5) ----
-// A plan that came in and waits on the assign page: {id, at, source, team, forPlan, via, json, text,
-// warnings, warningsMore}, `json` and `text` as checkPlan stripped them; `fromPlan: true` when the
-// upload came from that plan's page (its New version), so the assign page, Discard and the result go
-// back there (absent on entries from before, and on every other). Not part of any team's state: no version
+// A plan that came in and waits for its Store (the Store form in the team page): {id, at, source, team, forPlan, via, json, text,
+// warnings, warningsMore}, `json` and `text` as checkPlan stripped them (`text` null on every entry
+// made since the text upload went, races Task 7; an entry from before keeps its own; one from before
+// the team cockpit may carry `fromPlan`, read by nothing now); `forDate` the
+// race the upload was made for (the race ⋯'s "Upload a file for this race", a hole's link): the
+// Store form's default race while it is not over (absent on every other entry). Not part of any team's state: no version
 // bump, no log (but discard), and an entry nobody stores goes after keepOf (24 h, a received one 7 days).
 
 // the share value counts too (up to 16 KB)
@@ -936,12 +1121,11 @@ const SOURCES = ['upload', 'import', 'receive'];
 
 // Adds an entry and returns its id. `source` must be one of SOURCES (else an Error: a caller's bug).
 // `team` is kept only when it is a team of the club, `via` only when it is one of VIAS, `forPlan`
-// only when it names a plan of `team`; else each is null. `fromPlan` true is kept only with a kept
-// `forPlan`. An entry that alone is over ENTRY_BYTES is
+// only when it names a plan of `team`; else each is null. `forDate` only when it passes isDate. An entry that alone is over ENTRY_BYTES is
 // refused (cap-bytes; a checked plan is at most MAX_SHEET_BYTES plus its warnings, far below).
 // Then the oldest entries go until at most INBOX_MAX are left and they fit INBOX_BYTES (the new one
 // stays).
-export function addEntry(club, {source, team = null, forPlan = null, fromPlan = false, via = null, json, text, warnings = [], zgShare = null}, {now, newId}) {
+export function addEntry(club, {source, team = null, forPlan = null, forDate = null, via = null, json, text, warnings = [], zgShare = null}, {now, newId}) {
     if (!SOURCES.includes(source)) {
         throw new Error(`unknown entry source ${source}`);
     }
@@ -966,7 +1150,10 @@ export function addEntry(club, {source, team = null, forPlan = null, fromPlan = 
         throw new Error('no free entry id');
     }
     const plan = slug !== null && typeof forPlan === 'string' ? planOfId(club, slug, forPlan) : null;
-    club.inbox.push({...entry, id, forPlan: plan === null ? null : forPlan, ...(plan !== null && fromPlan === true ? {fromPlan: true} : {})});
+    club.inbox.push({
+        ...entry, id, forPlan: plan === null ? null : forPlan,
+        ...(isDate(forDate) ? {forDate} : {}),
+    });
     let bytes = club.inbox.reduce((n, e) => n + entryBytes(e), 0);
     while (club.inbox.length > 1 && (club.inbox.length > INBOX_MAX || bytes > INBOX_BYTES)) {
         bytes -= entryBytes(club.inbox.shift());

@@ -8,10 +8,14 @@ import net from 'node:net';
 import {execFileSync, spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-import {openDb, waitForDb, migrate, DbLocked, TxAborted} from '../db.mjs';
+import {openDb, waitForDb, migrate, DbLocked, TxAborted, MIGRATIONS, SCHEMA_VERSION} from '../db.mjs';
+import {writeBackup} from '../dump.mjs';
 import {createServer} from '../server.mjs';
 import {openStore} from '../store.mjs';
-import {T, club} from './helpers.mjs';
+import {T, club, sheet} from './helpers.mjs';
+import {PRE_RACES} from './pre-races.mjs';
+import {mixedTypes, typesOf, ONE_TYPE} from './cockpit-fixture.mjs';
+import {planTypesStep} from '../migrate-plan-types.mjs';
 
 const DB_URL = pathToFileURL(path.join(import.meta.dirname, '..', 'db.mjs'));
 const SERVER = path.join(import.meta.dirname, '..', 'server.mjs');
@@ -46,7 +50,7 @@ try {
 `;
 
 
-test('openDb: the pragmas, schema 2, a write before it returns, no -shm', t => {
+test('openDb: the pragmas, schema 4, a write before it returns, no -shm', t => {
     const dir = tmpDir(t);
     const db = openDb(dir, {now: () => T('2026-11-19T12:00Z')});
     const one = sql => ({...db.sql.prepare(sql).get()});
@@ -55,8 +59,9 @@ test('openDb: the pragmas, schema 2, a write before it returns, no -shm', t => {
     assert.deepEqual(one('PRAGMA synchronous'), {synchronous: 2});
     assert.deepEqual(one('PRAGMA foreign_keys'), {foreign_keys: 1});
     assert.deepEqual(one('PRAGMA secure_delete'), {secure_delete: 1});
-    // schema 2 (19 Nov 2026): recordings.mtime, for the erasure list's reconcile check
-    assert.deepEqual(one('PRAGMA user_version'), {user_version: 2});
+    // schema 2 (19 Nov 2026): recordings.mtime, for the erasure list's reconcile check; schema 3
+    // (20 Nov 2026): races; schema 4 (21 Nov 2026): one type per plan
+    assert.deepEqual(one('PRAGMA user_version'), {user_version: 4});
     assert.deepEqual(db.sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(r => r.name),
         ['archive', 'clubs', 'meta', 'recording_sigs', 'recordings', 'retired_slugs', 'seen', 'settings', 'tombstone_clubs', 'trash']);
     // the indexes the queries use (the primary keys aside)
@@ -298,6 +303,402 @@ test('migrate: the missing steps in one transaction; a failing step changes noth
         /paceline\.db has schema 3; this server knows up to 1/);
     assert.deepEqual(tables(newer), []);
     newer.close();
+});
+
+
+test('migrate: a step that changes data runs in the transaction, after its backup; a failing backup starts nothing; a new database needs none', () => {
+    const version = sql => sql.prepare('PRAGMA user_version').get().user_version;
+    const rowsOf = sql => sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'a'").get()
+        ? sql.prepare('SELECT x FROM a').all().map(r => r.x) : [];
+    let ran = [];
+    const step = {
+        backup: 'pre-x',
+        run: (sql, ctx) => {
+            ran.push({inTx: sql.isTransaction, ...ctx, log: typeof ctx.log});
+            sql.exec('INSERT INTO a VALUES (\'1\')');
+        },
+    };
+    const steps = ['CREATE TABLE a (x TEXT) STRICT', step];
+    const at1 = () => {
+        const sql = new DatabaseSync(':memory:');
+        assert.equal(migrate(sql, steps.slice(0, 1)), 1);
+        return sql;
+    };
+    const now = () => T('2026-11-21T08:00:00Z');
+
+    // a new database: no backup, the step runs on the empty tables
+    const fresh = new DatabaseSync(':memory:');
+    const calls = [];
+    assert.equal(migrate(fresh, steps, {backup: name => { calls.push(name); return {file: '/x', bytes: 1}; }, now, log: () => {}}), 2);
+    assert.deepEqual(calls, []);
+    assert.equal(version(fresh), 2);
+    assert.deepEqual(rowsOf(fresh), ['1']);
+    assert.deepEqual(ran, [{inTx: true, now: T('2026-11-21T08:00:00Z'), log: 'function'}]);
+    fresh.close();
+
+    // at version 1: the backup first, outside a transaction and before the row; then the step
+    ran = [];
+    const one = at1();
+    const seen = [];
+    const lines = [];
+    assert.equal(migrate(one, steps, {
+        backup: name => {
+            seen.push({name, inTx: one.isTransaction, rows: rowsOf(one), version: version(one)});
+            return {file: '/data/dumps/paceline-pre-x-2026-11-21.db', bytes: 12288};
+        },
+        now, log: l => lines.push(l),
+    }), 2);
+    assert.deepEqual(seen, [{name: 'pre-x', inTx: false, rows: [], version: 1}]);
+    assert.deepEqual(lines, ['paceline-server: paceline.db: backup before schema 2: dumps/paceline-pre-x-2026-11-21.db (12288 bytes)']);
+    assert.deepEqual(rowsOf(one), ['1']);
+    assert.equal(version(one), 2);
+    assert.equal(ran.length, 1);
+    assert.equal(ran[0].inTx, true);
+    // nothing missing: no backup again
+    assert.equal(migrate(one, steps, {backup: () => assert.fail('no backup'), now, log: () => {}}), 2);
+    one.close();
+
+    // a backup that throws: nothing starts
+    ran = [];
+    const failing = at1();
+    assert.throws(() => migrate(failing, steps, {backup: () => { throw new Error('disk full'); }, now, log: () => {}}), /disk full/);
+    assert.equal(version(failing), 1);
+    assert.deepEqual(rowsOf(failing), []);
+    assert.equal(failing.isTransaction, false);
+    assert.deepEqual(ran, []);
+    failing.close();
+
+    // no backup function: a pending step that changes data on a database with data stops the start
+    const without = at1();
+    assert.throws(() => migrate(without, steps), /paceline\.db: schema 2 needs a backup before it changes data/);
+    assert.throws(() => migrate(without, steps, {log: () => {}}), /needs a backup/);
+    assert.equal(version(without), 1);
+    assert.deepEqual(rowsOf(without), []);
+    without.close();
+
+    // a run that throws: rolled back, still version 1
+    const bad = at1();
+    const badSteps = ['CREATE TABLE a (x TEXT) STRICT', {backup: 'pre-x', run: sql => {
+        sql.exec('INSERT INTO a VALUES (\'1\')');
+        throw new Error('bad club');
+    }}];
+    assert.throws(() => migrate(bad, badSteps, {backup: () => ({file: 'f', bytes: 0}), now, log: () => {}}), /bad club/);
+    assert.equal(version(bad), 1);
+    assert.deepEqual(rowsOf(bad), []);
+    assert.equal(bad.isTransaction, false);
+    bad.close();
+});
+
+
+test('migrate: a step whose run returns a promise is refused and rolled back', () => {
+    const version = sql => sql.prepare('PRAGMA user_version').get().user_version;
+    const sql = new DatabaseSync(':memory:');
+    assert.equal(migrate(sql, ['CREATE TABLE a (x TEXT) STRICT']), 1);
+    const steps = ['CREATE TABLE a (x TEXT) STRICT', {backup: 'pre-x', run: async s => {
+        s.exec('INSERT INTO a VALUES (\'1\')');
+    }}];
+    assert.throws(() => migrate(sql, steps, {backup: () => ({file: 'f', bytes: 0}), now: () => 0, log: () => {}}),
+        e => e instanceof TypeError && /schema 2: run must be synchronous/.test(e.message));
+    assert.equal(version(sql), 1);
+    assert.deepEqual(sql.prepare('SELECT x FROM a').all(), []);
+    assert.equal(sql.isTransaction, false);
+    sql.close();
+});
+
+
+// ---- schema 3: races (races spec §5) ----
+
+const TRASHED = 'm4x2k7f3q9';
+const MIGRATE_AT = T('2026-11-21T08:00:00Z');
+const BACKUP = 'paceline-pre-races-2026-11-21.db';
+const dumpClub = () => PRE_RACES.find(([n]) => n === 'dump')[1]();
+
+// A paceline.db at schema 2 in a fresh data dir, holding the dump club (0.3 shape) as a clubs row
+// and, under another id, as a trash row (both after `edit`); closed. {dir, file, json, trashJson}.
+function schema2(t, edit = c => c) {
+    const dir = tmpDir(t);
+    const file = path.join(dir, 'paceline.db');
+    const sql = new DatabaseSync(file);
+    migrate(sql, MIGRATIONS.slice(0, 2));
+    const json = JSON.stringify(edit(dumpClub()));
+    const trashJson = JSON.stringify({...edit(dumpClub()), id: TRASHED});
+    sql.prepare('INSERT INTO clubs (cid, json) VALUES (?, ?)').run('k7f3q9x2m4', json);
+    sql.prepare(`INSERT INTO trash (cid, json, name, name_key, slugs, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(TRASHED, trashJson, 'Kettenfett RC', 'kettenfett rc', '["rollers"]', null, '2026-11-20T10:00:00.000Z');
+    sql.close();
+    return {dir, file, json, trashJson};
+}
+
+// user_version and the clubs and trash rows of a closed paceline.db (or a backup), read only.
+function readRaw(file) {
+    const sql = new DatabaseSync(file, {readOnly: true});
+    try {
+        return {
+            version: sql.prepare('PRAGMA user_version').get().user_version,
+            clubs: sql.prepare('SELECT cid, json FROM clubs ORDER BY cid').all().map(r => [r.cid, r.json]),
+            trash: sql.prepare('SELECT cid, json FROM trash ORDER BY cid').all().map(r => [r.cid, r.json]),
+        };
+    } finally {
+        sql.close();
+    }
+}
+
+const rowsOf = db => ({
+    clubs: db.sql.prepare('SELECT cid, json FROM clubs ORDER BY cid').all().map(r => [r.cid, r.json]),
+    trash: db.sql.prepare('SELECT cid, json FROM trash ORDER BY cid').all().map(r => [r.cid, r.json]),
+});
+
+
+test('openDb: from schema 2 the backup comes first, then every club is converted', t => {
+    const {dir, json, trashJson} = schema2(t);
+    assert.equal(SCHEMA_VERSION, 4);
+    assert.equal(MIGRATIONS[2].backup, 'pre-races');
+    const lines = [];
+    const db = openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)});
+    const backup = path.join(dir, 'dumps', BACKUP);
+    try {
+        assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+        const {clubs, trash} = rowsOf(db);
+        for (const [, text] of [...clubs, ...trash]) {
+            const c = JSON.parse(text);
+            assert.equal(typeof c.teams.rollers.races, 'object');
+            assert.equal(Object.hasOwn(c.teams.rollers, 'live'), false);
+        }
+        assert.deepEqual(clubs.map(([cid]) => cid), ['k7f3q9x2m4']);
+        assert.deepEqual(trash.map(([cid]) => cid), [TRASHED]);
+        assert.equal(lines.length, 2, lines.join('\n'));
+        assert.match(lines[0], new RegExp(`^paceline-server: paceline\\.db: backup before schema 3: dumps/${BACKUP.replaceAll('.', '\\.')} \\(\\d+ bytes\\)$`));
+        assert.equal(lines[1], 'paceline-server: paceline.db: schema 3 (races): 1 clubs and 1 trashed clubs converted');
+    } finally {
+        db.close();
+    }
+    // the backup is the database before the step, byte for byte
+    assert.deepEqual(readRaw(backup), {version: 2, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+    // opened again: no second backup, nothing converted again
+    const mtime = fs.statSync(backup).mtimeMs;
+    const converted = readRaw(path.join(dir, 'paceline.db'));
+    const again = [];
+    openDb(dir, {now: () => MIGRATE_AT + 3600000, log: l => again.push(l)}).close();
+    assert.deepEqual(again, []);
+    assert.equal(fs.statSync(backup).mtimeMs, mtime);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'dumps')), [BACKUP]);
+    assert.deepEqual(readRaw(path.join(dir, 'paceline.db')), converted);
+});
+
+
+test('openDb: when the backup cannot be written the database stays at schema 2 and the start fails', t => {
+    const {dir, file, json, trashJson} = schema2(t);
+    fs.writeFileSync(path.join(dir, 'dumps'), 'a file where the folder belongs');
+    const lines = [];
+    assert.throws(() => openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)}));
+    assert.deepEqual(lines, []);
+    assert.deepEqual(readRaw(file), {version: 2, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+});
+
+
+test('migrate: a failed step leaves schema 2 and the next start converts', t => {
+    const {dir, file, json, trashJson} = schema2(t);
+    const sql = new DatabaseSync(file);
+    const steps = [...MIGRATIONS.slice(0, 2), {backup: 'pre-races', run() {
+        throw new Error('killed');
+    }}];
+    assert.throws(() => migrate(sql, steps, {backup: name => writeBackup(sql, dir, name, MIGRATE_AT), now: () => MIGRATE_AT, log: () => {}}), /killed/);
+    assert.equal(sql.prepare('PRAGMA user_version').get().user_version, 2);
+    sql.close();
+    assert.deepEqual(readRaw(file), {version: 2, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+    const backup = path.join(dir, 'dumps', BACKUP);
+    assert.ok(fs.existsSync(backup));
+    // the next start writes the backup again (the same name: replaced) and converts
+    const lines = [];
+    const db = openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)});
+    try {
+        assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+        assert.equal(Object.hasOwn(JSON.parse(rowsOf(db).clubs[0][1]).teams.rollers, 'races'), true);
+    } finally {
+        db.close();
+    }
+    assert.match(lines[0], /backup before schema 3: dumps\/paceline-pre-races-2026-11-21\.db/);
+    assert.equal(lines[1], 'paceline-server: paceline.db: schema 3 (races): 1 clubs and 1 trashed clubs converted');
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'dumps')), [BACKUP]);
+    assert.deepEqual(readRaw(backup), {version: 2, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+});
+
+
+test('openDb: a new database is schema 4 without a backup', t => {
+    const dir = tmpDir(t);
+    const lines = [];
+    const db = openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)});
+    try {
+        assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+    } finally {
+        db.close();
+    }
+    assert.deepEqual(lines, []);
+    assert.equal(fs.existsSync(path.join(dir, 'dumps')), false);
+});
+
+
+// ---- schema 4: one type per plan (team cockpit spec §4.2) ----
+
+const PLAN_TYPES_BACKUP = 'paceline-pre-plan-types-2026-11-21.db';
+const STEP4_LINE = 'paceline-server: paceline.db: schema 4 (plan types): 1 clubs and 1 trashed clubs changed';
+
+const insertTrash = (sql, cid, json) => sql.prepare(
+    'INSERT INTO trash (cid, json, name, name_key, slugs, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(cid, json, 'Kettenfett RC', 'kettenfett rc', '["rollers"]', null, '2026-11-20T10:00:00.000Z');
+
+// A paceline.db at schema 3 in a fresh data dir, holding mixedTypes() as a clubs row and, under
+// another id, as a trash row; closed. {dir, file, json, trashJson}.
+function schema3(t) {
+    const dir = tmpDir(t);
+    const file = path.join(dir, 'paceline.db');
+    const sql = new DatabaseSync(file);
+    migrate(sql, MIGRATIONS.slice(0, 3));
+    const json = JSON.stringify(mixedTypes());
+    const trashJson = JSON.stringify({...mixedTypes(), id: TRASHED});
+    sql.prepare('INSERT INTO clubs (cid, json) VALUES (?, ?)').run('k7f3q9x2m4', json);
+    insertTrash(sql, TRASHED, trashJson);
+    sql.close();
+    return {dir, file, json, trashJson};
+}
+
+
+test('openDb: from schema 3 the pre-plan-types backup comes first, then every plan has one type', t => {
+    const {dir, file, json, trashJson} = schema3(t);
+    assert.equal(MIGRATIONS[3].backup, 'pre-plan-types');
+    assert.equal(MIGRATIONS[3].run, planTypesStep);
+    const lines = [];
+    const db = openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)});
+    const backup = path.join(dir, 'dumps', PLAN_TYPES_BACKUP);
+    try {
+        assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+        const {clubs, trash} = rowsOf(db);
+        assert.deepEqual([clubs.map(([cid]) => cid), trash.map(([cid]) => cid)], [['k7f3q9x2m4'], [TRASHED]]);
+        for (const [, text] of [...clubs, ...trash]) {
+            assert.deepEqual(typesOf(JSON.parse(text)), ONE_TYPE);
+        }
+        assert.equal(lines.length, 2, lines.join('\n'));
+        const bytes = fs.statSync(backup).size;
+        assert.equal(lines[0], `paceline-server: paceline.db: backup before schema 4: dumps/${PLAN_TYPES_BACKUP} (${bytes} bytes)`);
+        assert.equal(lines[1], STEP4_LINE);
+    } finally {
+        db.close();
+    }
+    // the backup is the database before the step, byte for byte
+    assert.deepEqual(readRaw(backup), {version: 3, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+    // opened again: no second backup, nothing changed again
+    const mtime = fs.statSync(backup).mtimeMs;
+    const changed = readRaw(file);
+    const again = [];
+    openDb(dir, {now: () => MIGRATE_AT + 3600000, log: l => again.push(l)}).close();
+    assert.deepEqual(again, []);
+    assert.equal(fs.statSync(backup).mtimeMs, mtime);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'dumps')), [PLAN_TYPES_BACKUP]);
+    assert.deepEqual(readRaw(file), changed);
+});
+
+
+test('openDb: from schema 2 one start runs steps 3 and 4 behind the pre-races backup alone', t => {
+    const {dir} = schema2(t, c => {
+        c.sheets.a00002.type = 'fast';      // v1 of a plan whose v2 and v3 have none
+        c.sheets.a00002.label = 'Rollers · fast';
+        return c;
+    });
+    const lines = [];
+    const db = openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)});
+    try {
+        assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+        const {clubs, trash} = rowsOf(db);
+        for (const [, text] of [...clubs, ...trash]) {
+            const {a00002, a00005} = JSON.parse(text).sheets;
+            assert.deepEqual([a00002.type, a00002.label], [null, 'Rollers']);
+            assert.deepEqual([a00005.type, a00005.label], ['slow', 'Rollers · slow']);
+        }
+    } finally {
+        db.close();
+    }
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'dumps')), [BACKUP]);
+    assert.equal(lines.length, 3, lines.join('\n'));
+    assert.match(lines[0], /^paceline-server: paceline\.db: backup before schema 3: dumps\/paceline-pre-races-2026-11-21\.db \(\d+ bytes\)$/);
+    assert.equal(lines[1], 'paceline-server: paceline.db: schema 3 (races): 1 clubs and 1 trashed clubs converted');
+    assert.equal(lines[2], STEP4_LINE);
+});
+
+
+test('openDb: when the pre-plan-types backup cannot be written the database stays at schema 3 and the start fails', t => {
+    const {dir, file, json, trashJson} = schema3(t);
+    fs.writeFileSync(path.join(dir, 'dumps'), 'a file where the folder belongs');
+    const lines = [];
+    assert.throws(() => openDb(dir, {now: () => MIGRATE_AT, log: l => lines.push(l)}));
+    assert.deepEqual(lines, []);
+    assert.deepEqual(readRaw(file), {version: 3, clubs: [['k7f3q9x2m4', json]], trash: [[TRASHED, trashJson]]});
+});
+
+
+test('planTypesStep: rewrites only the rows that change, in the caller\'s transaction, and skips what it cannot read', () => {
+    const sql = new DatabaseSync(':memory:');
+    migrate(sql, MIGRATIONS.slice(0, 3));
+    // Cogs: one plan of two versions, both 'fast'
+    const cogs = {name: 'Cogs', start: '19:30', live: null, version: 1, changedAt: '2026-11-10T10:00:00.000Z'};
+    const ver = (n, at) => sheet({team: 'cogs', label: 'Cogs · fast', type: 'fast', date: '2026-11-19', riders: ['1007'],
+        uploadedAt: at, plan: 'ca0001', n});
+    const plain = JSON.stringify(club({id: 's9pk2m4q7d', teams: {cogs},
+        sheets: {ca0001: ver(1, '2026-11-18T20:00:00.000Z'), ca0002: ver(2, '2026-11-19T10:00:00.000Z')}}));
+    const mixed = JSON.stringify(mixedTypes());
+    const trashed = JSON.stringify({...mixedTypes(), id: TRASHED});
+    const put = sql.prepare('INSERT INTO clubs (cid, json) VALUES (?, ?)');
+    put.run('k7f3q9x2m4', mixed);
+    put.run('s9pk2m4q7d', plain);
+    put.run('p2m8c4t1v9', 'not json');
+    insertTrash(sql, TRASHED, trashed);
+    insertTrash(sql, 'q7d2s9pk2m', '{');
+    const read = () => ({
+        clubs: Object.fromEntries(sql.prepare('SELECT cid, json FROM clubs').all().map(r => [r.cid, r.json])),
+        trash: Object.fromEntries(sql.prepare('SELECT cid, json FROM trash').all().map(r => [r.cid, r.json])),
+    });
+    const before = read();
+    const run = () => {
+        const log = [], warn = [];
+        const counts = planTypesStep(sql, {now: MIGRATE_AT, log: l => log.push(l), warn: w => warn.push(w)});
+        return {counts, log, warn};
+    };
+    const WARN = [
+        'paceline-server: paceline.db: schema 4 (plan types): clubs row p2m8c4t1v9 is not JSON; left as it is',
+        'paceline-server: paceline.db: schema 4 (plan types): trash row q7d2s9pk2m is not JSON; left as it is',
+    ];
+
+    // in the caller's transaction: its rollback leaves every row as it was
+    sql.exec('BEGIN');
+    assert.deepEqual(run().counts, {clubs: 1, trashed: 1});
+    sql.exec('ROLLBACK');
+    assert.deepEqual(read(), before);
+
+    sql.exec('BEGIN');
+    const first = run();
+    sql.exec('COMMIT');
+    assert.deepEqual(first, {counts: {clubs: 1, trashed: 1}, log: [STEP4_LINE], warn: WARN});
+    const after = read();
+    assert.deepEqual(typesOf(JSON.parse(after.clubs.k7f3q9x2m4)), ONE_TYPE);
+    assert.deepEqual(typesOf(JSON.parse(after.trash[TRASHED])), ONE_TYPE);
+    assert.deepEqual([after.clubs.s9pk2m4q7d, after.clubs.p2m8c4t1v9, after.trash.q7d2s9pk2m], [plain, 'not json', '{']);
+    // nothing but the plans' types and labels changed
+    const strip = text => {
+        const c = JSON.parse(text);
+        for (const s of Object.values(c.sheets)) {
+            delete s.type;
+            delete s.label;
+        }
+        return c;
+    };
+    assert.deepEqual(strip(after.clubs.k7f3q9x2m4), strip(mixed));
+
+    // a second call: nothing to change, no count line
+    sql.exec('BEGIN');
+    const second = run();
+    sql.exec('COMMIT');
+    assert.deepEqual(second, {counts: {clubs: 0, trashed: 0}, log: [], warn: WARN});
+    assert.deepEqual(read(), after);
+    sql.close();
 });
 
 

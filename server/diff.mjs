@@ -1,5 +1,5 @@
-// The difference between two versions of a plan (plan versions spec §7): lines for the versions
-// page, and a one-line summary for the lists. Pure: it reads the club and the versions it is given,
+// The difference between two versions of a plan (plan versions spec §7): lines for the rider table
+// and the Store preview, and a one-line summary for the lists. Pure: it reads the club and the versions it is given,
 // and the clock is passed in. Plain text: the pages escape it.
 import {t, andList} from './pages.mjs';
 import {datePicks} from './select.mjs';
@@ -7,15 +7,21 @@ import {normalizePlan, RAW_SHORT_MAX} from '../pages/src/engine/plan.mjs';
 
 
 // A positive number or numeric string as stripSheet keeps it.
-const positive = v => ((typeof v === 'number' && Number.isFinite(v))
+export const positive = v => ((typeof v === 'number' && Number.isFinite(v))
     || (typeof v === 'string' && v.length <= RAW_SHORT_MAX && Number.isFinite(Number(v)))) && Number(v) > 0;
+
+
+// The planner's own entry of `rider` (a normalizePlan rider) in the sheet's json, or null.
+export function rawRider(sheet, rider) {
+    const list = sheet?.json?.riders;
+    return list && typeof list === 'object' && Object.hasOwn(list, rider.id) ? list[rider.id] : null;
+}
 
 
 // The rider's pull target: the plan's pull_wkg ("4.2 W/kg", one decimal as the mod shows it), else
 // its pull_power, else the text export's watts; null without any. `rider` is a normalizePlan rider.
 export function pullTarget(sheet, rider) {
-    const list = sheet?.json?.riders;
-    const raw = list && typeof list === 'object' && Object.hasOwn(list, rider.id) ? list[rider.id] : null;
+    const raw = rawRider(sheet, rider);
     if (positive(raw?.pull_wkg)) {
         return t('tv-wkg', {v: Number(raw.pull_wkg).toFixed(1)});
     }
@@ -40,17 +46,18 @@ export function ordinal(n) {
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const line = (kind, text, names = []) => ({kind, text, names});
 
-// '4.2 W/kg' -> ['4.2', 'W/kg']; the unit is the part after the last space.
+// '4.2 W/kg' -> ['4.2', 'W/kg']; the unit is the part after the last space; '4.2' (a number alone,
+// as the rider table shows it in the club's unit) -> ['4.2', null].
 function splitTarget(s) {
     const i = s.lastIndexOf(' ');
-    return [s.slice(0, i), s.slice(i + 1)];
+    return i < 0 ? [s, null] : [s.slice(0, i), s.slice(i + 1)];
 }
 
 function targetItem(name, a, b) {
     if (a !== null && b !== null) {
         const [va, ua] = splitTarget(a);
         const [vb, ub] = splitTarget(b);
-        if (ua === ub) {
+        if (ua !== null && ua === ub) {
             return t('df-target-unit', {name, from: va, to: vb, unit: ua});
         }
     }
@@ -59,13 +66,16 @@ function targetItem(name, a, b) {
 
 
 // The lines that tell what `newer` changed against `older` (null for a plan's first version), in the
-// order of the spec: first, in, out, order, pulls, targets, type, the event link (a version stored
-// only for a new link is no "Same as", Ruling 4), then other or same. The planner's roster (the
+// order of the spec: first, in, out, order, pulls, targets, then other or same, "Same as 'Rollers ·
+// fast' v3" with the older version's label (the event link is the race's, races spec §1: no version
+// line; the type is the plan's, team cockpit spec §7: no line either). The planner's roster (the
 // club's rider pool) has no line: a rider from it into the ride order is plainly in, a rider who
 // leaves the ride order for it plainly out.
 // Positions are 1-based in the new ride order; a rider's name comes from the newer version, or from
-// the older one when he left. `names` holds the riders a line names.
-export function diffVersions(club, older, newer, now, {newPlan = false} = {}) {
+// the older one when he left. `names` holds the riders a line names. `targetOf(sheet, rider)` gives
+// the target the targets line compares (a string or null): pullTarget by default; the rider table
+// passes the target as it shows it (plan-table.mjs), so its caption counts what the table marks.
+export function diffVersions(club, older, newer, now, {newPlan = false, targetOf = pullTarget} = {}) {
     if (older === null) {
         return [line('first', t(newPlan ? 'df-first-new' : 'df-first'))];
     }
@@ -122,8 +132,8 @@ export function diffVersions(club, older, newer, now, {newPlan = false} = {}) {
     const targets = [];
     const targetNames = [];
     for (const r of both) {
-        const a = pullTarget(older, oldRider.get(r.id));
-        const b = pullTarget(newer, r);
+        const a = targetOf(older, oldRider.get(r.id));
+        const b = targetOf(newer, r);
         if (a !== b) {
             targets.push(targetItem(r.name, a, b));
             targetNames.push(r.name);
@@ -133,23 +143,9 @@ export function diffVersions(club, older, newer, now, {newPlan = false} = {}) {
         lines.push(line('targets', t('df-targets', {items: targets.join('; ')}), targetNames));
     }
 
-    const typeOld = older.type ?? null;
-    const typeNew = newer.type ?? null;
-    if (typeOld !== typeNew) {
-        lines.push(line('type', t('df-type', {
-            from: typeOld ?? t('df-none'), to: typeNew ?? t('df-none'),
-        })));
-    }
-
-    const linkOld = older.pinnedEventId ?? null;
-    const linkNew = newer.pinnedEventId ?? null;
-    if (linkOld !== linkNew) {
-        lines.push(line('event', t(linkOld === null ? 'df-event-added' : linkNew === null ? 'df-event-removed' : 'df-event-changed')));
-    }
-
     if (!lines.length) {
         const identical = same(older.json, newer.json) && same(older.text, newer.text);
-        lines.push(identical ? line('same', t('df-same', {n: older.n})) : line('other', t('df-other')));
+        lines.push(identical ? line('same', t('df-same', {label: older.label, n: older.n})) : line('other', t('df-other')));
     }
     return lines;
 }
@@ -175,9 +171,8 @@ export function diffPeople(lines) {
 
 
 // The one-line version of the lines: who came and went, then what else changed; with none of these,
-// the first line's text. With `n` (the version's own number) it starts with "v3: ", for a restored
-// version "v3 (restored v1): "; with only `copyOf` "Restored v1: ".
-export function diffSummary(lines, {copyOf = null, n = null} = {}) {
+// the first line's text.
+export function diffSummary(lines) {
     const get = kind => lines.find(l => l.kind === kind) ?? null;
     const parts = [];
     const people = diffPeople(lines);
@@ -195,9 +190,5 @@ export function diffSummary(lines, {copyOf = null, n = null} = {}) {
     if (targets) {
         parts.push(targets.names.length === 1 ? t('df-sum-target') : t('df-sum-targets', {n: targets.names.length}));
     }
-    const text = parts.length ? parts.join(' · ') : (lines[0]?.text ?? '');
-    if (n !== null) {
-        return copyOf === null ? t('df-sum-v', {k: n, text}) : t('df-sum-v-back', {k: n, n: copyOf, text});
-    }
-    return copyOf === null ? text : t('df-sum-back', {n: copyOf, text});
+    return parts.length ? parts.join(' · ') : (lines[0]?.text ?? '');
 }

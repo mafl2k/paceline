@@ -1,6 +1,7 @@
 // IndexedDB store for TTT recordings: raw ticks plus one meta row per session.
 // Sessions are created by the overlay via saveSessionMeta(); exportSession() gives the JSONL file.
 import {toJsonl} from './engine/recording.mjs';
+import {REC_MARK_KEY} from './store.mjs';
 
 const DB_NAME = 'paceline-rec';
 const TICKS = 'ticks';
@@ -94,7 +95,8 @@ export async function saveSessionMeta(sessionId, meta) {
 
 
 // Merges `fields` ({uploadedAt} or {uploadTriedAt, uploadError}) into a session row; a row that is
-// gone (deleted meanwhile) stays gone.
+// gone (deleted meanwhile) stays gone. Then bumps REC_MARK_KEY, so the settings window (another
+// window: the storage event) shows the new state within a second (final review, 21 Nov 2026, I-2).
 export async function markUpload(sessionId, fields) {
     const db = await openDb();
     const tx = db.transaction(SESSIONS, 'readwrite');
@@ -106,7 +108,12 @@ export async function markUpload(sessionId, fields) {
             store.put({...req.result, ...fields, sessionId});
         }
     };
-    return done_;
+    await done_;
+    try {
+        localStorage.setItem(REC_MARK_KEY, JSON.stringify({sessionId: String(sessionId), at: Date.now()}));
+    } catch(e) {
+        // No storage: the list catches up on focus.
+    }
 }
 
 

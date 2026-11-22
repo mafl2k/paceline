@@ -28,7 +28,8 @@
 //                manage-teams.mjs: the team pages' forms; manage-club.mjs: the club settings' forms
 //                and recording delete; manage-page.mjs: what they share; teams-page.mjs: the
 //                team picker, team-page.mjs: the team pages, settings-page.mjs: the club settings,
-//                upload-page.mjs: the upload form, the preview's answer and the result page
+//                upload-page.mjs: the upload form; cockpit-page.mjs: the team page (the team
+//                cockpit), store-form.mjs: its Store form and the Store flash
 //                (all pure)
 //   pages.mjs    the copy (T), the plain page frame; tokens.mjs: a club's tokens (pure)
 //   static.mjs   /static/app.css (app-css.mjs) and /static/app.js (client.mjs), cached by content;

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ordinal, diffVersions, diffSummary, diffPeople} from '../diff.mjs';
+import {ordinal, diffVersions, diffSummary, diffPeople, pullTarget} from '../diff.mjs';
 import {removeRider} from '../club.mjs';
-import {club, sheet, T} from './helpers.mjs';
+import {club, sheet, T, setLive} from './helpers.mjs';
 
 
 const NOW = T('2026-11-19T12:00Z');
@@ -34,8 +34,8 @@ test('diff: the roster is no part of it: in from the pool, out into it, out with
         uploadedAt: '2026-11-18T10:00:00.000Z',
     });
     const c = club({teams: teams(), sheets: {old001: older, new001: newer, spr001: other}});
-    c.teams.sprockets.live = 'spr001';
-    c.teams.rollers.live = 'new001';
+    setLive(c, 'sprockets', 'spr001');
+    setLive(c, 'rollers', 'new001');
     const lines = diffVersions(c, older, newer, NOW);
     assert.equal(line(lines, 'in').text, 'Eva in (2nd); Finn in (3rd)');
     assert.deepEqual(line(lines, 'in').names, ['Eva', 'Finn']);
@@ -96,40 +96,55 @@ test('diff: pull and target lines follow the ride order, a missing target reads 
     assert.deepEqual(line(lines, 'pulls').names, ['Dan', 'Cleo']);
 });
 
-test('diff: type, other details, same', () => {
+test('diff: no type line; other details; same names the plan', () => {
     const base = () => ver(['1001', '1002'], {n: 4});
-    let lines = diff(ver(['1001', '1002'], {n: 3, type: 'fast'}), ver(['1001', '1002'], {n: 4, type: 'slow'}));
-    assert.deepEqual(lines.map(l => l.text), ['Type: fast → slow']);
-    lines = diff(ver(['1001', '1002'], {n: 3}), ver(['1001', '1002'], {n: 4, type: 'slow'}));
-    assert.equal(line(lines, 'type').text, 'Type: none → slow');
-    lines = diff(ver(['1001', '1002'], {n: 3, type: 'fast'}), ver(['1001', '1002'], {n: 4}));
-    assert.equal(line(lines, 'type').text, 'Type: fast → none');
+    // a plan has one type (schema 4): two versions that differ only in type read as the same
+    const fast = {...ver(['1001', '1002'], {n: 1, type: 'fast'}), label: 'Rollers · fast'};
+    let lines = diff(fast, {...ver(['1001', '1002'], {n: 2, type: 'slow'}), label: 'Rollers · slow'});
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers · fast\' v1']]);
+    lines = diff(ver(['1001', '1002'], {n: 3}), ver(['1002', '1001'], {n: 4, type: 'slow'}));
+    assert.deepEqual(kinds(lines), ['order']);
     const colour = base();
     colour.json.riders['1001'].color = '#00ff00';
     lines = diff(base(), colour);
     assert.deepEqual(lines.map(l => [l.kind, l.text]), [['other', 'Other details only']]);
-    // "Same as" names the older version's n
+    // "Same as" names the older version's plan and n
     lines = diff(ver(['1001', '1002'], {n: 3}), base());
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as v3']]);
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
 });
 
 
-test('diff: a version that differs only in its event link is no "Same as"', () => {
+test('diff: targetOf decides what the targets line compares; pullTarget by default', () => {
+    // only Ben's weight changes: pullTarget (300 W both) sees no target, a W/kg reading sees one
+    const a = ver(['1001', '1002'], {n: 1});
+    const b = ver(['1001', '1002'], {n: 2});
+    a.json.riders['1001'].pull_power = 300;
+    b.json.riders['1001'].pull_power = 300;
+    b.json.riders['1001'].weight = 75;
+    assert.deepEqual(diff(a, b).map(l => [l.kind, l.text]), [['other', 'Other details only']]);
+    const targetOf = (sheet, rider) => (sheet.json.riders[rider.id].pull_power
+        ? (sheet.json.riders[rider.id].pull_power / rider.weight).toFixed(1) : null);
+    const lines = diff(a, b, {targetOf});
+    assert.deepEqual(lines.map(l => [l.kind, l.text, l.names]), [['targets', 'Targets: Ben 4.3 → 4.0', ['Ben']]]);
+    assert.equal(diffSummary(lines), '1 target');
+    // a number against a target with its unit: both whole
+    const c = ver(['1001', '1002'], {n: 3});
+    c.json.riders['1001'].pull_wkg = 4.2;
+    assert.equal(line(diff(a, c, {targetOf: (sh, r) => (sh === a && r.id === '1001' ? '4.3' : pullTarget(sh, r))}), 'targets').text, 'Targets: Ben 4.3 → 4.2 W/kg');
+});
+
+
+test('diff: the event link is the race\'s, no line of a version\'s diff', () => {
+    // event fields on versions (as 0.3 stored them) are never read
     const at = (n, pinnedEventId) => ver(['1001', '1002'], {n, pinnedEventId});
     let lines = diff(at(3, null), at(4, 4567890));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['event', 'Event link added']]);
-    assert.equal(diffSummary(lines), 'Event link added');
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
     lines = diff(at(3, 4567890), at(4, 4567899));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['event', 'Event link changed']]);
-    lines = diff(at(3, 4567890), at(4, null));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['event', 'Event link removed']]);
-    assert.equal(diffSummary(lines, {copyOf: 1}), 'Restored v1: Event link removed');
-    lines = diff(at(3, 4567890), at(4, 4567890));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as v3']]);
-    // with other changes, after the type line
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
+    // with other changes: no line for the event (nor for the type)
     const typed = ver(['1002', '1001'], {n: 4, type: 'slow', pinnedEventId: 4567890});
-    assert.deepEqual(diff(at(3, null), typed).map(l => l.kind), ['order', 'type', 'event']);
-    // a learned event is no link
+    assert.deepEqual(diff(at(3, null), typed).map(l => l.kind), ['order']);
+    // a learned event neither
     assert.deepEqual(diff(at(3, null), {...at(4, null), eventId: 4567890}).map(l => l.kind), ['same']);
 });
 
@@ -167,12 +182,8 @@ test('diffSummary: names, counts and limits', () => {
     p2.json.riders['1001'].pull_wkg = 4.1;
     assert.equal(diffSummary(diff(p1, p2)), '2 targets');
 
-    assert.equal(diffSummary(diff(p1, p1), {copyOf: 4}), 'Restored v4: Same as v1');
-    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {copyOf: 4}), 'Restored v4: Cleo in');
-    // with the version's own n (the team page's live row, UI panel 19 Nov 2026): "v3: …", a restore
-    // "v3 (restored v1): …"
-    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {n: 2}), 'v2: Cleo in');
-    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {n: 3, copyOf: 1}), 'v3 (restored v1): Cleo in');
+    // the old team page's "v3: …" and Restore's "Restored v4: …" went with them: no option changes the words
+    assert.equal(diffSummary(diff(ver(['1001'], {n: 1}), ver(['1001', '1002'], {n: 2})), {n: 3, copyOf: 1}), 'Cleo in');
     // who came and went alone, or null
     assert.equal(diffPeople(diff(ver(['1001', '1003'], {n: 1}), ver(['1002', '1001'], {n: 2}))), 'Cleo in, Dan out');
     assert.equal(diffPeople(diff(ver(['1001', '1002'], {n: 1}), ver(['1002', '1001'], {n: 2}))), null);

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {entryPlan, pickTeam, pickPlan, liveDefault, assignChoices} from '../preselect.mjs';
+import {entryPlan, pickTeam, pickPlan, liveDefault, assignChoices, chosenDate, drawnStart} from '../preselect.mjs';
 import {rememberType} from '../plans.mjs';
-import {club, sheet, planJson, T} from './helpers.mjs';
+import {club, sheet, planJson, T, race, setLive} from './helpers.mjs';
+import {tidyRaces} from '../races.mjs';
 
 
 const NOW = T('2026-11-19T12:00Z');
@@ -56,7 +57,7 @@ test('pickPlan: forPlan of a race plan wins, also with two plans in the race', (
         aa0002: ver({plan: 'aa0001', n: 2}),
         bb0001: ver({type: 'slow', riders: ['1009']}),
     }});
-    c.teams.rollers.live = 'aa0002';
+    setLive(c, 'rollers', 'aa0002');
     // bb0001 shares no rider and has no matching name: only forPlan can choose it
     assert.equal(pickPlan(c, 'rollers', entry({forPlan: 'bb0001'}), NOW), 'bb0001');
     // any version id names its plan (Ruling 3)
@@ -81,7 +82,7 @@ test('pickPlan: the remembered planner name within this race', () => {
         aa0001: ver(),
         bb0001: ver({type: 'slow', jsonName: 'Rollers Slow File', riders: ['1009']}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     assert.equal(pickPlan(c, 'rollers', entry({name: 'rollers  slow-file'}), NOW), 'bb0001');
     // a name held by any version of the plan
     c.sheets.bb0002 = {...ver({type: 'slow', jsonName: 'Rollers B', n: 2}), plan: 'bb0001'};
@@ -99,14 +100,14 @@ test('pickPlan: a planner name held by two plans of the race chooses nothing', (
         aa0001: ver({type: 'fast', jsonName: 'Rollers Thursday'}),
         bb0001: ver({type: 'slow', jsonName: 'Rollers Thursday'}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     assert.equal(pickPlan(c, 'rollers', entry({name: 'Rollers Thursday'}), NOW), null);
 });
 
 test('pickPlan: rider overlap never preselects (fast and slow share their riders)', () => {
     // one plan in the race sharing 8 of 8
     const c = club({teams: teams(), sheets: {aa0001: ver({jsonName: 'Rollers File'})}});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     assert.equal(pickPlan(c, 'rollers', entry({name: 'Other', riders: EIGHT}), NOW), null);
     // two plans, 8 of 8 with the live one
     c.sheets.bb0001 = {...ver({type: 'slow', jsonName: 'Rollers Slow'}), plan: 'bb0001'};
@@ -120,7 +121,7 @@ test('pickPlan: the race is the page\'s date, a plan of another date does not co
         aa0001: ver({jsonName: 'Rollers Thunder'}),
         nx0001: ver({date: '2026-11-26', jsonName: 'Rollers Thunder'}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     // a plan for next week with the same planner name is no second match for this race
     assert.equal(pickPlan(c, 'rollers', entry({name: 'Rollers Thunder'}), NOW), 'aa0001');
     // an explicit date: 26 Nov's plan; 3 Dec has none
@@ -130,8 +131,11 @@ test('pickPlan: the race is the page\'s date, a plan of another date does not co
     // 26 Nov, and only its plan counts
     const late = T('2026-11-19T21:00Z');
     assert.equal(pickPlan(c, 'rollers', entry({name: 'Rollers Thunder'}), late), 'nx0001');
-    // forPlan still names any plan not used up
-    assert.equal(pickPlan(c, 'rollers', entry({forPlan: 'aa0001', name: 'Other'}), late), 'aa0001');
+    // forPlan names no plan of a race that is over (S + 2 h, pre-flight M9: it takes no version),
+    // though riders still get it: the page's race (26 Nov) decides
+    assert.equal(pickPlan(c, 'rollers', entry({forPlan: 'aa0001', name: 'Other'}), late), null);
+    // before it is over, forPlan still names it
+    assert.equal(pickPlan(c, 'rollers', entry({forPlan: 'aa0001', name: 'Other'}), T('2026-11-19T20:30Z')), 'aa0001');
 });
 
 test('assignChoices: the race of the page\'s date scopes the preselection', () => {
@@ -139,7 +143,7 @@ test('assignChoices: the race of the page\'s date scopes the preselection', () =
         aa0001: ver({jsonName: 'Rollers Thunder'}),
         nx0001: ver({date: '2026-11-26', jsonName: 'Rollers Thunder'}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     const e = entry({name: 'Rollers Thunder'});
     // the default race (19 Nov)
     assert.equal(assignChoices(c, e, params(''), NOW).as, 'aa0001');
@@ -159,12 +163,14 @@ test('assignChoices: the race picked for the plan is the date shown (I-1)', () =
         aa0001: ver(),
         bb0001: ver({type: 'slow'}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     const ch = assignChoices(c, entry({name: 'Other'}), params('team=rollers&drawn=rollers:&date=2026-11-26'), NOW);
     assert.equal(ch.as, 'new');
     assert.equal(ch.date, '2026-11-26');
     assert.equal(ch.typeNeeded, false);
-    assert.equal(ch.liveKind, 'other-race');
+    // live is per race (races spec §1): 26 Nov has no live plan, so the box is on
+    assert.equal(ch.liveKind, 'none');
+    assert.equal(ch.live, true);
 });
 
 test('pickPlan: two plans in the race and no forPlan or name: nothing (Ruling 15)', () => {
@@ -172,7 +178,7 @@ test('pickPlan: two plans in the race and no forPlan or name: nothing (Ruling 15
         aa0001: ver(),
         bb0001: ver({type: 'slow', jsonName: 'Rollers Slow'}),
     }});
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     assert.equal(pickPlan(c, 'rollers', entry({name: 'Rollers Slow File', riders: EIGHT}), NOW), null);
 });
 
@@ -193,22 +199,26 @@ test('liveDefault: every row of the table', () => {
     assert.deepEqual(liveDefault(c, 'rollers', {as: null, date: '2026-11-19'}, NOW), {on: false, kind: 'pick', vars: {}});
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-19'}, NOW),
         {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // a used-up live version
+    // a used-up live version: last week's race (its own live plan; live is per race)
     c.sheets.old001 = {...ver({date: '2026-11-12'}), plan: 'old001'};
-    c.teams.rollers.live = 'old001';
+    setLive(c, 'rollers', 'old001');
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-12'}, NOW),
+        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'old001', date: '2026-11-19'}, NOW),
+        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
         {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // the live plan, newest n 4
-    c.teams.rollers.live = 'aa0004';
+    // the live plan, newest n 4 (19 Nov; last week's race keeps its own)
+    setLive(c, 'rollers', 'aa0004');
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-26'}, NOW),
         {on: true, kind: 'live-plan', vars: {n: 5, ln: 4}});
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0004', date: '2026-11-19'}, NOW),
         {on: true, kind: 'live-plan', vars: {n: 5, ln: 4}});
     // live is v1, v4 newer and not live
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-19'}, NOW),
         {on: true, kind: 'live-plan', vars: {n: 5, ln: 1}});
-    c.teams.rollers.live = 'aa0004';
+    setLive(c, 'rollers', 'aa0004');
     // another plan of 19 Nov, and a new plan for 19 Nov
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-19'}, NOW),
         {on: false, kind: 'other-plan', vars: {label: 'Kettenfett Rollers', ln: 4}});
@@ -218,18 +228,27 @@ test('liveDefault: every row of the table', () => {
     assert.equal(liveDefault(c, 'sprockets', {as: 'new', date: '2026-11-19'}, NOW).kind, 'none');
 });
 
-test('liveDefault: a live plan of another race that is not used up', () => {
+test('liveDefault: per race, a live plan of another race does not count', () => {
+    // races spec §1: a race without a live plan defaults on although the team's other race has one
     const c = club({teams: teams(), sheets: {
         nx0001: ver({date: '2026-11-26', type: 'fast'}),
         bb0001: ver({type: 'slow'}),
     }});
-    c.teams.rollers.live = 'nx0001';
+    setLive(c, 'rollers', 'nx0001');
     assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
-        {on: false, kind: 'other-race', vars: {label: 'Kettenfett Rollers · fast', day: 'Thu 26 Nov'}});
-    // a version: the plan's date counts, not the date sent
-    assert.equal(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-26'}, NOW).kind, 'other-race');
-    // a new plan for 26 Nov sits next to it
-    assert.equal(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-26'}, NOW).kind, 'new-plan');
+        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
+    // a version: the plan's race counts, not the date sent
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-26'}, NOW),
+        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
+    // a new plan for 26 Nov sits next to its live plan
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-26'}, NOW),
+        {on: false, kind: 'new-plan', vars: {label: 'Kettenfett Rollers · fast', ln: 1}});
+    // both races live: each plan's own race decides
+    setLive(c, 'rollers', 'bb0001');
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-26'}, NOW), {on: true, kind: 'live-plan', vars: {n: 2, ln: 1}});
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'nx0001', date: '2026-11-19'}, NOW), {on: true, kind: 'live-plan', vars: {n: 2, ln: 1}});
+    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
+        {on: false, kind: 'new-plan', vars: {label: 'Kettenfett Rollers · slow', ln: 1}});
 });
 
 
@@ -242,8 +261,8 @@ function assignClub() {
         st0001: ver({team: 'sprockets', type: 'steady', riders: ['1009']}),
         sb0001: ver({team: 'sprockets', type: 'fast', jsonName: 'Sprockets File B', riders: ['1009']}),
     }});
-    c.teams.rollers.live = 'aa0002';
-    c.teams.sprockets.live = 'st0001';
+    setLive(c, 'rollers', 'aa0002');
+    setLive(c, 'sprockets', 'st0001');
     rememberType(c.teams.rollers, 'slow');
     rememberType(c.teams.rollers, 'fast');
     return c;
@@ -411,9 +430,25 @@ test('assignChoices: a special team without a plan has no default date', () => {
     assert.equal(rollers.dateRequired, false);
     // once Cogs has a plan still to race, its date
     c.sheets.cc0001 = {...ver({team: 'cogs', date: '2026-12-06', jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs'}), plan: 'cc0001'};
+    tidyRaces(c);
     const later = assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new'), NOW);
     assert.equal(later.date, '2026-12-06');
     assert.equal(later.dateRequired, false);
+});
+
+
+test('assignChoices: a special team\'s default date is its earliest race still to race', () => {
+    const c = club({teams: {...teams(), cogs: {name: 'Kettenfett Cogs', start: '19:30', live: null, kind: 'special', weekday: null}}});
+    const e = entry({team: 'cogs', name: 'Kettenfett Cogs'});
+    for (const [id, date] of [['cc0001', '2026-12-06'], ['cc0002', '2026-11-29'], ['cc0003', '2026-11-18']]) {
+        c.sheets[id] = {...ver({team: 'cogs', date, jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs'}), plan: id};
+    }
+    tidyRaces(c);
+    // the 18th is over; of 29 Nov and 6 Dec the earlier, also when the later one is live
+    assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new'), NOW).date, '2026-11-29');
+    setLive(c, 'cogs', 'cc0001');
+    assert.equal(assignChoices(c, e, params(''), NOW).date, '2026-11-29');
+    assert.equal(pickPlan(c, 'cogs', e, NOW), 'cc0002');
 });
 
 
@@ -435,7 +470,8 @@ test('assignChoices: a special team\'s start time (user, 19 Nov 2026)', () => {
     assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=rollers:new&date=2026-12-06&start=20:45&startFor=2026-12-06'), NOW).start, '19:30');
     // the race's stored start for that date
     c.sheets.cc0001 = {...ver({team: 'cogs', date: '2026-12-06', jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs', type: 'fast'}), plan: 'cc0001'};
-    c.teams.cogs.raceStarts = {'2026-12-06': '20:15'};
+    tidyRaces(c);
+    race(c, 'cogs', '2026-12-06').start = '20:15';
     assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new&date=2026-12-06'), NOW).start, '20:15');
     // typed over it for that date: the typed one (the newest upload sets the race's start)
     const typed = assignChoices(c, e, params(`${q}&startFor=2026-12-06`), NOW);
@@ -448,9 +484,175 @@ test('assignChoices: a special team\'s start time (user, 19 Nov 2026)', () => {
     const vt = assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001&start=21:00&startFor=2026-12-06'), NOW);
     assert.equal(vt.start, '21:00');
     // a race without a start of its own (0.3.0): the team's
-    delete c.teams.cogs.raceStarts;
+    race(c, 'cogs', '2026-12-06').start = null;
     assert.equal(assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001'), NOW).start, '19:30');
-    // a weekly team never has one
+    // a weekly team has one too (races Task 7: `start` for every kind): typed for its date, else the
+    // race's own, else the team's (prefilled, user 22 Nov 2026)
     const w = assignChoices(c, entry(), params('team=rollers&as=new&drawn=rollers:new&start=20:45&startFor=2026-11-19'), NOW);
-    assert.deepEqual([w.special, w.start], [false, '']);
+    assert.deepEqual([w.special, w.start], [false, '20:45']);
+    assert.equal(assignChoices(c, entry(), params('team=rollers&as=new&drawn=rollers:new'), NOW).start, '19:30');
+});
+
+
+test('assignChoices: `startWas`, the race start the page is drawn with; a typed time stays only while the race still has it (final review I-2)', () => {
+    const c = club({teams: {...teams(), cogs: {name: 'Kettenfett Cogs', start: '19:30', live: null, kind: 'special', weekday: null}}});
+    const e = entry({team: 'cogs', name: 'Kettenfett Cogs'});
+    c.sheets.cc0001 = {...ver({team: 'cogs', date: '2026-12-06', jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs', type: 'fast'}), plan: 'cc0001'};
+    tidyRaces(c);
+    // a special team: the race's own start, else the team's
+    race(c, 'cogs', '2026-12-06').start = '20:15';
+    const q = 'team=cogs&as=new&drawn=cogs:new&date=2026-12-06&startFor=2026-12-06';
+    assert.equal(assignChoices(c, e, params(q), NOW).startWas, '20:15');
+    assert.equal(drawnStart(c, 'cogs', '2026-12-06'), '20:15');
+    // the time typed on a page drawn with the race's start as it is: kept
+    assert.equal(assignChoices(c, e, params(`${q}&start=20:45&startWas=20:15`), NOW).start, '20:45');
+    // the race's start changed since the page was drawn: the race's, as it is now
+    const stale = assignChoices(c, e, params(`${q}&start=20:15&startWas=19:00`), NOW);
+    assert.deepEqual([stale.start, stale.startWas], ['20:15', '20:15']);
+    race(c, 'cogs', '2026-12-06').start = null;
+    assert.equal(drawnStart(c, 'cogs', '2026-12-06'), '19:30');
+    assert.equal(assignChoices(c, e, params(`${q}&start=20:15&startWas=20:15`), NOW).start, '19:30');
+    // a weekly team: its race's own start, else the team's (prefilled, user 22 Nov 2026)
+    assert.equal(drawnStart(c, 'rollers', '2026-11-19'), '19:30');
+    c.sheets.rr0001 = {...ver({date: '2026-11-19'}), plan: 'rr0001'};
+    tidyRaces(c);
+    race(c, 'rollers', '2026-11-19').start = '18:30';
+    assert.equal(drawnStart(c, 'rollers', '2026-11-19'), '18:30');
+    assert.equal(assignChoices(c, entry(), params('team=rollers&as=new&drawn=rollers:new&start=20:45&startFor=2026-11-19&startWas=18:30'), NOW).start, '20:45');
+    // the team's time changed since the page was drawn with it: the field echoes the old one, not kept
+    race(c, 'rollers', '2026-11-19').start = null;
+    c.teams.rollers.start = '20:00';
+    assert.equal(assignChoices(c, entry(), params('team=rollers&as=new&drawn=rollers:new&start=19:30&startFor=2026-11-19&startWas=19:30'), NOW).start, '20:00');
+});
+
+
+// ---- the race choice (races spec §4 "Which race a new plan goes to"; races Task 7) ----
+
+// The clock after Thursday's race: Rollers (weekly, Thursdays 19:30) has one race ahead, Sun 22 Nov
+// at 18:00, with one plan; its rhythm date Thu 26 Nov has none yet.
+const FRI = T('2026-11-20T10:00:00Z');
+function sundayOnly() {
+    const c = club({teams: {rollers: {name: 'Kettenfett Rollers', start: '19:30', live: null}}, sheets: {
+        su0001: ver({date: '2026-11-22', jsonName: 'Rollers Sunday'}),
+    }});
+    race(c, 'rollers', '2026-11-22').start = '18:00';
+    return c;
+}
+// a pushed plan whose planner name matches no stored plan
+const pushed = () => ({...entry({name: 'Other'}), source: 'receive', via: 'zwiftgopher'});
+
+test('assignChoices: choosing another race drops a plan choice of the race before', () => {
+    const c = sundayOnly();
+    const q = {team: 'rollers', as: 'su0001', drawn: 'rollers:su0001', date: '2026-11-22', startFor: '2026-11-22'};
+    const ch = assignChoices(c, pushed(), params({...q, race: '2026-11-26'}), FRI);
+    assert.deepEqual([ch.date, ch.as, ch.dateFixed, ch.startFor], ['2026-11-26', 'new', false, '2026-11-26']);
+    // the race radio of the plan's own race keeps the version and its date
+    const same = assignChoices(c, pushed(), params({...q, race: '2026-11-22'}), FRI);
+    assert.deepEqual([same.date, same.as, same.dateFixed], ['2026-11-22', 'su0001', true]);
+    // a plan's New version (forPlan) never overrules the race chosen
+    const own = assignChoices(c, {...pushed(), forPlan: 'su0001'}, params({...q, race: '2026-11-26'}), FRI);
+    assert.deepEqual([own.date, own.as], ['2026-11-26', 'new']);
+});
+
+test('chosenDate: a typed date wins over the radio, the radio over the drawn date', () => {
+    const of = o => chosenDate(new URLSearchParams(o));
+    assert.equal(of({date: '2026-11-22', startFor: '2026-11-22', race: '2026-11-26'}), '2026-11-26');
+    assert.equal(of({date: '2026-11-29', startFor: '2026-11-22', race: '2026-11-26'}), '2026-11-29');
+    assert.equal(of({date: '2026-11-22'}), '2026-11-22');
+    assert.equal(of({}), null);
+    // a version's page has no date field: its race radio, else nothing
+    assert.equal(of({startFor: '2026-11-22', race: '2026-11-26'}), '2026-11-26');
+    assert.equal(of({startFor: '2026-11-22'}), null);
+});
+
+test('assignChoices: a weekly team with one extra race ahead still gets the choice: that race and its rhythm date', () => {
+    // Rollers, Thursdays 19:30, one race: Sun 22 Nov 18:00; `entry`: a pushed plan whose planner name matches no stored plan
+    const sunday = sundayOnly();
+    const ch = assignChoices(sunday, pushed(), new URLSearchParams(), FRI);
+    assert.deepEqual(ch.races.map(r => [r.date, r.time, r.plans]), [['2026-11-22', '18:00', 1], ['2026-11-26', '19:30', 0]]);
+    assert.deepEqual(ch.races.map(r => r.day), ['Sun 22 Nov', 'Thu 26 Nov']);
+    assert.deepEqual([ch.raceChoice, ch.date, ch.startFor], [true, '2026-11-22', '2026-11-22']);
+    // a pushed plan is never live before the captain says so (plan versions spec §5.5)
+    assert.equal(ch.live, false);
+    // one race ahead (the rhythm date only): no choice
+    const lone = club({teams: {rollers: {name: 'Kettenfett Rollers', start: '19:30', live: null}}});
+    const one = assignChoices(lone, pushed(), params(''), FRI);
+    assert.deepEqual([one.races.map(r => [r.date, r.time, r.plans]), one.raceChoice], [[['2026-11-26', '19:30', 0]], false]);
+    // a special team: its races only, no rhythm date
+    const sp = club({teams: {cogs: {name: 'Kettenfett Cogs', start: null, live: null, kind: 'special', weekday: null}}, sheets: {
+        cc0001: ver({team: 'cogs', date: '2026-11-29', jsonName: 'Kettenfett Cogs', label: 'Kettenfett Cogs'}),
+    }});
+    const cogs = assignChoices(sp, {...pushed(), team: 'cogs'}, params(''), FRI);
+    assert.deepEqual([cogs.races.map(r => [r.date, r.time, r.plans]), cogs.raceChoice], [[['2026-11-29', null, 1]], false]);
+});
+
+test('assignChoices: the race the upload was made for (forDate) is the default while it is not over', () => {
+    const c = sundayOnly();
+    const forDate = date => ({...entry({name: 'Other'}), forDate: date});
+    assert.deepEqual([assignChoices(c, forDate('2026-11-26'), params(''), FRI).date, assignChoices(c, forDate('2026-11-26'), params(''), FRI).as],
+        ['2026-11-26', 'new']);
+    // a date with no race yet, later than the next race: that date
+    assert.equal(assignChoices(c, forDate('2026-12-03'), params(''), FRI).date, '2026-12-03');
+    // a race that is over by now (the entry waited): the next race
+    assert.equal(assignChoices(c, forDate('2026-11-19'), params(''), FRI).date, '2026-11-22');
+    // another team chosen: its own default
+    const two = club({teams: teams(), sheets: {su0001: ver({date: '2026-11-22'})}});
+    assert.equal(assignChoices(two, forDate('2026-11-22'), params('team=sprockets&drawn=rollers:'), FRI).date, '2026-11-26');
+    // a choice drawn for the page wins over it
+    assert.equal(assignChoices(c, forDate('2026-11-26'), params('team=rollers&as=new&drawn=rollers:new&date=2026-11-22&startFor=2026-11-22'), FRI).date,
+        '2026-11-22');
+});
+
+test('assignChoices: a weekly team\'s start time is the race\'s own, a typed one for its date only', () => {
+    const c = sundayOnly();
+    const e = entry({name: 'Other'});
+    const q = 'team=rollers&as=new&drawn=rollers:new';
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-22&startFor=2026-11-22`), FRI).start, '18:00');
+    // the rhythm date has no time of its own: the team's, prefilled (user 22 Nov 2026)
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-26&startFor=2026-11-26`), FRI).start, '19:30');
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-22&startFor=2026-11-22&start=17:00`), FRI).start, '17:00');
+    // typed for another date: that race's, here the team's
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-22&startFor=2026-11-22&race=2026-11-26&start=17:00`), FRI).start, '19:30');
+    // the date changed, the prefill follows it: the new date's race's own, else the team's
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-26&startFor=2026-11-22&start=18:00`), FRI).start, '19:30');
+    assert.equal(assignChoices(c, e, params(`${q}&date=2026-11-22&startFor=2026-11-26&start=19:30`), FRI).start, '18:00');
+});
+
+test('assignChoices: a plan of a race that is over is no choice (S + 2 h, before it is used up)', () => {
+    // Thursday 19 Nov 19:30 Berlin (18:30Z); at 21:00Z it is over, though riders still get it
+    const c = club({teams: teams(), sheets: {aa0001: ver(), nx0001: ver({date: '2026-11-26', type: 'next'})}});
+    setLive(c, 'rollers', 'aa0001');
+    const late = T('2026-11-19T21:00Z');
+    const ch = assignChoices(c, entry({forPlan: 'aa0001', name: 'Other'}), params(''), late);
+    assert.deepEqual(ch.plans.map(p => p.id), ['nx0001']);
+    assert.notEqual(ch.as, 'aa0001');
+    assert.equal(ch.date, '2026-11-26');
+    // sent as the choice: not kept either
+    assert.notEqual(assignChoices(c, entry({name: 'Other'}), params('team=rollers&as=aa0001&drawn=rollers:aa0001'), late).as, 'aa0001');
+});
+
+
+test('assignChoices: a redraw that names no race keeps the version, also with a forDate without a race (review I1)', () => {
+    // Sprockets has one race, Thu 26 Nov; the upload was made for Thu 3 Dec, which has no race
+    for (const kind of [{}, {kind: 'special', weekday: null}]) {
+        const c = club({teams: {sprockets: {name: 'Kettenfett Sprockets', start: '19:40', live: null, ...kind}}, sheets: {
+            sp0026: ver({team: 'sprockets', date: '2026-11-26', jsonName: 'Kettenfett Sprockets', label: 'Kettenfett Sprockets'}),
+        }});
+        const e = {...entry({team: 'sprockets', name: 'Other'}), forDate: '2026-12-03'};
+        assert.equal(assignChoices(c, e, params(''), FRI).date, '2026-12-03', JSON.stringify(kind));
+        // the captain picks the 26 Nov plan, then ticks Make live: a version's page sends no date and,
+        // with one race ahead, no race radio
+        const picked = assignChoices(c, e, params('team=sprockets&as=sp0026&drawn=sprockets:new&date=2026-12-03&startFor=2026-12-03'), FRI);
+        assert.deepEqual([picked.as, picked.date, picked.startFor], ['sp0026', '2026-11-26', '2026-11-26']);
+        const live = assignChoices(c, e, params('team=sprockets&as=sp0026&drawn=sprockets:sp0026&startFor=2026-11-26&live=on&start=19:40'), FRI);
+        assert.deepEqual([live.as, live.date, live.live], ['sp0026', '2026-11-26', true], JSON.stringify(kind));
+    }
+});
+
+test('chosenDate: an emptied date field names no race; the checked radio wins (review M3)', () => {
+    const of = o => chosenDate(new URLSearchParams(o));
+    assert.equal(of({date: '', startFor: '2026-11-22', race: '2026-11-26'}), '2026-11-26');
+    assert.equal(of({date: '', startFor: '2026-11-22', race: '2026-11-22'}), '2026-11-22');
+    // no radio: the empty field as it is (the page then asks for a date)
+    assert.equal(of({date: '', startFor: '2026-11-22'}), '');
 });

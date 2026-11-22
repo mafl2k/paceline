@@ -10,11 +10,11 @@ import {settingsCheckResult, setJoined, joinedIds, sameJoined, sameCodes, normal
 import {readClubs, writeClubs, onClubsChange, initClubs as initSharedClubs} from './clubs.mjs';
 import {VERSION} from './version.mjs';
 import {emptyPending, mergePending, markImported} from './engine/pending.mjs';
-import {recordingFileName} from './engine/recording.mjs';
+import {recordingFileName, recListKey} from './engine/recording.mjs';
 import {serverConfigChange, logUploadChange, logUploadSinceFix, demoChange, demoOn} from './engine/prefs.mjs';
 import {sessionTarget, autoUploadState} from './engine/logupload.mjs';
 import {readLibrary, writeLibrary, activePlan, initFlush, onLibraryChange, readPrefs, writePrefs,
-        onPrefsChange, liveSessionId, REC_STATE_KEY, LEASE_KEY} from './store.mjs';
+        onPrefsChange, liveSessionId, REC_STATE_KEY, LEASE_KEY, REC_MARK_KEY} from './store.mjs';
 import {listSessions, exportSession, deleteSession} from './recdb.mjs';
 import {uploadSession} from './logupload.mjs';
 import {loadCommon, selfAthleteId, selfWeight} from './sauce.mjs';
@@ -54,6 +54,7 @@ let checkError = null;            // {kind, at} of the last settings check that 
 let nextPlan = null;              // {label, startAt}: what the joined clubs have waiting
 let several = false;              // several clubs list the rider and none was joined
 let shownServerOn = null;         // the server on/off the file box was last set for
+let planServerOn = null;          // the server on/off the shown plan was last read for
 let shownClubs = null;            // identity of the Clubs rows on screen
 let adding = false;               // an "Add club by code" under way
 
@@ -294,6 +295,12 @@ function renderPrefs(prefs) {
     $('#pl-ttt-only').checked = prefs.tttOnly;
     $('#pl-rec-no-plan').checked = prefs.recordWithoutPlan;
     $('#pl-rec-no-plan').disabled = !prefs.tttOnly;
+    if (prefs.serverOn !== planServerOn) {
+        // An ended file plan counts only with the plan server off (store.mjs activePlan).
+        planServerOn = prefs.serverOn;
+        shown = activePlan({serverOn: prefs.serverOn});
+        renderPlan();
+    }
     renderServer(prefs);
     renderClubs();
     openingCheck();
@@ -835,6 +842,22 @@ function updateRow(li, s) {
 }
 
 
+// The recordings list's key (recListKey) of the state the list was last rendered for (W7).
+let renderedRecKey = null;
+
+
+// The key of the recording state now: the state, and the live session (its lease).
+function recKeyNow() {
+    let state = null;
+    try {
+        state = JSON.parse(localStorage.getItem(REC_STATE_KEY));
+    } catch(e) {
+        // No readable state: as no recording.
+    }
+    return recListKey(state, liveSessionId());
+}
+
+
 async function renderRecordings() {
     const token = ++recToken;
     let sessions;
@@ -851,6 +874,7 @@ async function renderRecordings() {
         return;    // a newer render is under way
     }
     recError('');
+    renderedRecKey = recKeyNow();
     const live = liveSessionId();
     const upload = readPrefs().logUpload;
     const ul = $('#pl-rec-list');
@@ -1013,6 +1037,8 @@ export async function settingsMain() {
     initFlush(Common);
     if (Common) {
         Common.initInteractionListeners();
+        // The Action window's options have their defaults in the HTML (midSmall checked, the slots
+        // off / now / off): the form keeps them while a key is unset, nothing is written here.
         await Common.initSettingsForm('#pl-appearance-form')();
     }
     $('#pl-done').addEventListener('click', () => window.close());
@@ -1032,7 +1058,12 @@ export async function settingsMain() {
 
     renderRecordings();
     addEventListener('storage', ev => {
-        if (ev.key === REC_STATE_KEY || ev.key === LEASE_KEY) {
+        // Each heartbeat rewrites these keys (lastSeenAt): re-read the recordings only when what the
+        // list shows changed (audit fixes, 20 Nov 2026, W7: probe s4-settings). Focus always re-reads.
+        // An upload's result (another window's markUpload, REC_MARK_KEY) always: it is in IndexedDB
+        // only (final review, 21 Nov 2026, I-2: the row stayed "waiting for upload" until focus).
+        if (ev.key === REC_MARK_KEY ||
+            ((ev.key === REC_STATE_KEY || ev.key === LEASE_KEY) && recKeyNow() !== renderedRecKey)) {
             renderRecordings();
         }
     });

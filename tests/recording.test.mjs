@@ -110,6 +110,16 @@ test('detPlanOnly: the det ids name only riders of the current plan (starters an
 });
 
 
+test('detPlanOnly: det.order.out keeps only riders of the current plan or me', () => {
+    const ids = new Set(['1', '2', '3']);
+    const det = {puller: '1', order: {chaos: true, out: ['2', '99', '5', 7]}};
+    assert.deepEqual(R.detPlanOnly(det, ids, '5').order, {chaos: true, out: ['2', '5']});
+    assert.deepEqual(R.detPlanOnly({order: {chaos: false, out: []}}, ids, '5').order, {chaos: false, out: []});
+    assert.deepEqual(R.detPlanOnly({order: {chaos: false, out: ['1']}}, new Set(), null).order, {chaos: false, out: []});
+    assert.deepEqual(det.order.out, ['2', '99', '5', 7], 'the input is not changed');
+});
+
+
 test('selfSubgroupId: top-level id first, else the raw one, null outside events', () => {
     assert.equal(R.selfSubgroupId([e(1)]), null);
     assert.equal(R.selfSubgroupId([e(1, {self: true})]), null);    // raw 0, no top level
@@ -492,4 +502,30 @@ test('gateStep: a hold does not eat the grace; once gone the grace runs on throu
     // A hold reaching EVENT_LOST_MS closes it in gateStep too (without gateEv's null).
     g = R.gateStep(g, {now: 100000 + R.EVENT_LOST_MS, ev: undefined});
     assert.deepEqual(g, {open: false, seenAt: 100000});
+});
+
+
+test('W4: leaseHeld, and a released lease is taken by the next step', () => {
+    // Probe s6-close: a closed recorder left its lease, a 7 s hole until LEASE_STALE_MS ran out.
+    assert.equal(R.leaseHeld({id: 'A', at: 5}, 'A'), true);
+    assert.equal(R.leaseHeld({id: 'A', at: 5}, 'B'), false);
+    assert.equal(R.leaseHeld(null, 'A'), false);
+    assert.equal(R.leaseHeld({at: 5}, 'A'), false);
+    // Released on pagehide: the next window takes it at once and records from its next step.
+    assert.deepEqual(R.leaseStep(null, 'B', 10000), {act: false, write: {id: 'B', at: 10000}});
+    assert.equal(R.leaseStep({id: 'B', at: 10000}, 'B', 11000).act, true);
+    // Left in place: nobody else may take it until it is stale.
+    assert.equal(R.takeLease({id: 'A', at: 10000}, 'B', 10000 + R.LEASE_STALE_MS - 1).own, false);
+});
+
+
+test('W7: recListKey changes only with recording, session or live session', () => {
+    // 20 Nov 2026 audit (W7, s4-settings): every heartbeat (lastSeenAt) re-read the recordings in an open settings window.
+    const k = R.recListKey({recording: true, sessionId: '5', lastSeenAt: 1}, '5');
+    assert.equal(typeof k, 'string');
+    assert.equal(R.recListKey({recording: true, sessionId: '5', lastSeenAt: 2}, '5'), k);
+    assert.notEqual(R.recListKey({recording: false, sessionId: '5', lastSeenAt: 1}, '5'), k);
+    assert.notEqual(R.recListKey({recording: true, sessionId: '6', lastSeenAt: 1}, '5'), k);
+    assert.notEqual(R.recListKey({recording: true, sessionId: '5', lastSeenAt: 1}, null), k);
+    assert.equal(typeof R.recListKey(null, null), 'string');
 });

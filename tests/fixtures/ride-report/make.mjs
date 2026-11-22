@@ -17,6 +17,18 @@
 // - With swap: Cleo and Dora swap the front during their turn at +180 s (Cleo 20 s, Dora 10 s,
 //   Cleo 12 s, Dora 18 s): stints of 19, 9, 11 and 17 s, one turn of 30 s for Cleo and 26 s for Dora.
 // - With emilLeavesS: Emil's rows stop from that race second on (he left, 400 m back).
+// - With chaos: plan P1 all race (no switch, no Emil) and the front leaves the plan's order:
+//   Dora and Alma swap the front back and forth from +150 s (Dora 40 s, Alma 40 s, Dora 40 s),
+//   then the plan's order again from +270 s (Alma, Bert = me, Cleo, ...): two changes back to the
+//   rider before (bad), then three in order. My clock (shown.act) keeps counting by the regular
+//   schedule, as a version without the chaos counter would. With chaos 'live' the recording also
+//   holds the live chaos state (det.order, det.reason 'chaos', act 'chaos' while resting) from
+//   CHAOS_FROM_S to CHAOS_TO_S.
+// - With cdOld (seconds): the recording holds the fixed rule's countdown as a shadow (det.cdOld,
+//   since 0.3.4-beta.5), that many seconds above my shown clock while it counts, else null.
+// - With easeOffS (seconds): the front rider eases off to 100 W for the last that many seconds of
+//   each 30 s pull while still in front (the plain rotation; not combined with swap or chaos), so
+//   the rider before me eases off (T0) before his stint ends. The pulls stay the same.
 export const IDS = {alma: '9000001', bert: '9000002', cleo: '9000003', dora: '9000004', emil: '9000005', bench: '9000009'};
 export const SPEED = 45;              // km/h
 const V = SPEED / 3.6;                // m/s
@@ -43,9 +55,18 @@ export const PLAN2 = {...PLAN1, sig: 'P2TEST',
 const ORDER = [IDS.alma, IDS.bert, IDS.cleo, IDS.dora];
 
 export const SWAP_AT_S = 180;
+// The front with chaos: [race second it starts, rider].
+export const CHAOS_FRONTS = [[0, IDS.alma], [30, IDS.bert], [60, IDS.cleo], [90, IDS.dora], [120, IDS.alma], [150, IDS.dora],
+                             [190, IDS.alma], [230, IDS.dora], [270, IDS.alma], [300, IDS.bert], [330, IDS.cleo],
+                             [360, IDS.dora], [390, IDS.alma], [420, IDS.bert], [450, IDS.cleo]];
+export const CHAOS_FROM_S = 265;
+export const CHAOS_TO_S = 335;
 
 // The true front rider s seconds after the roll-off (s >= 0).
-export function frontAt(s, {swap = false} = {}) {
+export function frontAt(s, {swap = false, chaos = false} = {}) {
+    if (chaos) {
+        return CHAOS_FRONTS.filter(([at]) => at <= s).at(-1)[1];
+    }
     if (swap && s >= SWAP_AT_S && s < SWAP_AT_S + 60) {
         const d = s - SWAP_AT_S;
         return d < 20 ? IDS.cleo : d < 30 ? IDS.dora : d < 42 ? IDS.cleo : IDS.dora;
@@ -54,15 +75,17 @@ export function frontAt(s, {swap = false} = {}) {
 }
 
 
-function row(id, {self = false, dist, gap, draft, speed, ts}) {
-    return {id, self, watching: false, age: 100, gap: 0, gapDistance: gap, power: draft ? 250 : 320, draft, speed,
+function row(id, {self = false, dist, gap, draft, speed, ts, power = draft ? 250 : 320}) {
+    return {id, self, watching: false, age: 100, gap: 0, gapDistance: gap, power, draft, speed,
             distance: dist, eventDistance: dist, worldTime: ts, grade: 0, altitude: 10, x: 0, y: 0, roadId: 1,
             reverse: false, courseId: 6};
 }
 
 
-export function makeRecording({stripE = false, afterLine = false, draftIntoDrop = false, swap = false, emilLeavesS = null} = {}) {
-    const front = s => frontAt(s, {swap});
+export function makeRecording({stripE = false, afterLine = false, draftIntoDrop = false, swap = false, emilLeavesS = null,
+                               chaos = false, cdOld = null, easeOffS = 0} = {}) {
+    const front = s => frontAt(s, {swap, chaos});
+    const switchS = chaos ? Infinity : SWITCH_S;
     const head = {kind: 'paceline-recording', v: 1, sessionId: String(T0), startedAt: T0, planSig: PLAN1.sig,
                   team: PLAN1.team, selfId: IDS.bert, selfName: 'Bert B', version: '0.3.0-test', plan: PLAN1};
     const lines = [JSON.stringify(head)];
@@ -97,12 +120,13 @@ export function makeRecording({stripE = false, afterLine = false, draftIntoDrop 
         const riders = ORDER.map(id => row(id, {
             self: id === IDS.bert, dist: Math.max(0, pos[id]), gap: -(pos[id] - me), speed, ts,
             draft: !moving ? 0 : id === line[0] ? 0 : id === IDS.dora && doraDraft !== null ? doraDraft : 120,
+            ...(moving && id === line[0] && s % PULL_S >= PULL_S - easeOffS ? {power: 100} : {}),
         }));
         riders.push(row(IDS.bench, {dist: Math.max(0, base - 30), gap: -(base - 30 - me), draft: 80, speed, ts}));
-        if (s >= SWITCH_S && !stripE && !(emilLeavesS !== null && s >= emilLeavesS)) {
+        if (s >= switchS && !stripE && !(emilLeavesS !== null && s >= emilLeavesS)) {
             riders.push(row(IDS.emil, {dist: base - 400, gap: -(base - 400 - me), draft: 0, speed, ts}));
         }
-        const sig = s >= SWITCH_S ? PLAN2.sig : PLAN1.sig;
+        const sig = s >= switchS ? PLAN2.sig : PLAN1.sig;
         let truth = moving ? front(Math.max(0, s - 2)) : null;
         const past = moving && me >= endM;
         const finish = moving && endM - me <= 500 && !(afterLine && past);
@@ -127,12 +151,25 @@ export function makeRecording({stripE = false, afterLine = false, draftIntoDrop 
             const t = Math.max(0, next - s - low);
             act = {k: t <= 10 ? 'next' : 'rest', t, place: 2};
         }
+        const liveChaos = chaos === 'live' && moving && s >= CHAOS_FROM_S && s < CHAOS_TO_S;
+        if (liveChaos && !finish && act.k !== 'pull') {
+            act = {k: 'chaos'};
+        }
         const tick = {ts, wt: ts, selfId: IDS.bert, watchingId: null, riders,
                       det: {planSig: sig, puller: truth, since: null, frontId: line[0], self: null, finish,
                             view: act.k === 'pull' ? 'pull' : act.k === 'none' ? 'dash' : act.k, reason: null, wheel: null,
                             wheelObs: null, place: null, placeObs: null, chainSize: 4, alone: false, gate: true, climb: false,
                             descent: false, hill: null, routePos: null, gap: gapShown},
                       shown: {act, meanW: 280, wheel: null, next: null}};
+        if (cdOld !== null) {
+            tick.det.cdOld = act.k === 'rest' || act.k === 'next' ? {t: act.t + cdOld, standing: false} : null;
+        }
+        if (chaos === 'live') {
+            tick.det.order = {chaos: liveChaos, out: []};
+            if (liveChaos && !finish) {
+                tick.det.reason = 'chaos';
+            }
+        }
         if (k === 0) {
             tick.event = {sgId: 1, found: true, eventId: 2, name: 'Test TTT', eventType: 'TEAM_TIME_TRIAL', endDistance: endM, laps: 1};
         }

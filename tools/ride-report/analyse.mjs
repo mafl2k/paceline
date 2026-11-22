@@ -51,11 +51,11 @@ export function analyse(text, {plans = [], planAll = null, names = false, file =
         overview: ov,
         pulls: gt,
         puller: pullerCheck(ride, gt, frames, {from, to, rollOff: from}),
-        countdown: countdownCheck(ride, gt, {from, to}),
+        countdown: countdownCheck(ride, gt, {from, to, frames}),
         gaps: gapsCheck(ride, frames, {from, to}),
         finish: finishCheck(ride),
         upload: uploadCheck(ride, text),
-        views: viewsCheck(ride, gt, {from, to}),
+        views: viewsCheck(ride, gt, {from, to, frames}),
     };
     return {result, ride};
 }

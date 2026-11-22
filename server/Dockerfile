@@ -12,6 +12,7 @@ WORKDIR /app/server
 ARG PACELINE_VERSION=dev
 ENV PACELINE_VERSION=$PACELINE_VERSION
 COPY server/*.mjs ./
+COPY server/assets/ ./assets/
 COPY pages/src/engine/plan.mjs pages/src/engine/colors.mjs /app/pages/src/engine/
 
 # /data is the volume for paceline.db (all state) and the recordings; the node user (uid 1000) owns it.

@@ -57,6 +57,54 @@
                             <input type="range" name="backgroundAlpha" min="0" max="100" step="5" value="100" data-depends-on="solidBackground"/>
                             <input type="number" name="backgroundAlpha" min="0" max="100" value="100" data-depends-on="solidBackground"/> %</label>
                         <div class="pl-note" data-s="solidBackgroundHelp"></div>
+                        <!-- The Action window's own options, per window (the Action window reads them). The
+                             defaults are the HTML's: Sauce's form keeps it while a key is unset. -->
+                        <div class="pl-action-only">
+                            <label class="pl-check"><input type="checkbox" name="midSmall" checked/> <span data-s="midSmallLabel"></span></label>
+                            <div class="pl-note" data-s="midSmallHelp"></div>
+                            <label class="pl-check"><input type="checkbox" name="recFields"/> <span data-s="recFieldsLabel"></span></label>
+                            <div class="pl-note" data-s="recFieldsHelp"></div>
+                            <div class="pl-rec-slots">
+                                <label class="pl-rec-slot"><span data-s="recLeftLabel"></span>
+                                    <select name="recLeft" data-depends-on="recFields">
+                                        <option value="off" selected data-s="recOff"></option>
+                                        <option value="now" data-s="recNow"></option>
+                                        <option value="powerW" data-s="recPowerW"></option>
+                                        <option value="powerWkg" data-s="recPowerWkg"></option>
+                                        <option value="draft" data-s="recDraft"></option>
+                                        <option value="speed" data-s="recSpeed"></option>
+                                        <option value="cadence" data-s="recCadence"></option>
+                                        <option value="heartrate" data-s="recHeartrate"></option>
+                                        <option value="grade" data-s="recGrade"></option>
+                                    </select></label>
+                                <label class="pl-rec-slot"><span data-s="recMidLabel"></span>
+                                    <select name="recMid" data-depends-on="recFields">
+                                        <option value="off" data-s="recOff"></option>
+                                        <option value="now" selected data-s="recNow"></option>
+                                        <option value="powerW" data-s="recPowerW"></option>
+                                        <option value="powerWkg" data-s="recPowerWkg"></option>
+                                        <option value="draft" data-s="recDraft"></option>
+                                        <option value="speed" data-s="recSpeed"></option>
+                                        <option value="cadence" data-s="recCadence"></option>
+                                        <option value="heartrate" data-s="recHeartrate"></option>
+                                        <option value="grade" data-s="recGrade"></option>
+                                    </select></label>
+                                <label class="pl-rec-slot"><span data-s="recRightLabel"></span>
+                                    <select name="recRight" data-depends-on="recFields">
+                                        <option value="off" selected data-s="recOff"></option>
+                                        <option value="now" data-s="recNow"></option>
+                                        <option value="powerW" data-s="recPowerW"></option>
+                                        <option value="powerWkg" data-s="recPowerWkg"></option>
+                                        <option value="draft" data-s="recDraft"></option>
+                                        <option value="speed" data-s="recSpeed"></option>
+                                        <option value="cadence" data-s="recCadence"></option>
+                                        <option value="heartrate" data-s="recHeartrate"></option>
+                                        <option value="grade" data-s="recGrade"></option>
+                                    </select></label>
+                            </div>
+                            <label class="pl-check pl-sub"><input type="checkbox" name="recSmooth5" data-depends-on="recFields"/> <span data-s="recSmooth5Label"></span></label>
+                            <div class="pl-note" data-s="recSmooth5Help"></div>
+                        </div>
                     </form>
                 </div>
             </section>

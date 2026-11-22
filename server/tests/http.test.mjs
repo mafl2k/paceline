@@ -16,7 +16,7 @@ import {startServer} from './helpers.mjs';
 import {buildMessage} from '../mail.mjs';
 
 const MB = 1024 * 1024;
-const CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+const CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 const fixtureJson = fs.readFileSync(new URL('../../tests/fixtures/rollers.json', import.meta.url), 'utf8');
 
 

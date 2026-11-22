@@ -8,7 +8,7 @@
 // signed-out page, and publicPage(), the public pages' frame. Copy comes from pages.mjs T; every
 // value goes through esc().
 import {esc, t, T} from './pages.mjs';
-import {cssHref, jsHref} from './static.mjs';
+import {cssHref, jsHref, iconLinks} from './static.mjs';
 import {ic} from './icons.mjs';
 import {teamView, teamRow, teamOrder} from './team-view.mjs';
 
@@ -19,7 +19,8 @@ export {andList, quote} from './team-view.mjs';
 // default); `noscript` false leaves out the <noscript> meta refresh, which would reload without the
 // script's guard (the upload page: a chosen file would be lost). `updated` is the page's 'HH:MM'.
 // `needsScript` false leaves out the note that the page needs the script: pages that work without it
-// (the Make live, Restore and other confirm pages, the rider code, the gone and signed-out pages).
+// (the Make live and other confirm pages, the rider code, the gone and signed-out pages); a string is
+// the t() key of a note of the page's own (the team page's says what works without it).
 // `script` false leaves out the script itself: the public pages (publicPage) carry none.
 // `cid` (a captain page: the club it shows) names the club in every form that posts to /manage
 // (withClub).
@@ -36,11 +37,12 @@ export function appPage({body, cls = '', refresh = null, refreshS = 30, noscript
 <meta name="theme-color" content="#f3f4f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
 <title>Paceline</title>
+${iconLinks}
 <link rel="stylesheet" href="${cssHref}">
 ${script ? `<script type="module" src="${jsHref}"></script>\n` : ''}${refresh && noscript ? `<noscript><meta http-equiv="refresh" content="${refreshS};url=${esc(refresh)}"></noscript>\n` : ''}</head>
 <body class="${esc(cls)}"${refresh ? ` data-refresh="${refreshS}"` : ''}${updated ? ` data-updated="${esc(updated)}"` : ''}>
 <a class="skip" href="#main">Skip to content</a>
-${needsScript ? `<noscript><div class="nojs"><p class="banner warn" role="note">${ic('alert')}<span>${esc(t('ui-needs-js'))}</span></p></div></noscript>\n` : ''}${body}
+${needsScript ? `<noscript><div class="nojs"><p class="banner warn" role="note">${ic('alert')}<span>${esc(t(needsScript === true ? 'ui-needs-js' : needsScript))}</span></p></div></noscript>\n` : ''}${body}
 </body>
 </html>
 `;
@@ -131,16 +133,16 @@ export function th(key, vars = {}) {
 
 // The flash {kind: 'ok' | 'err', text} at the top of a page; '' for none.
 export function flashBlock(flash, undo = null) {
-    // the Undo of a change of the live plan (UI panel wave 2): inside the flash of that change, else
-    // a line of its own in the same place (after a reload, or on the page of another captain), not
-    // announced: it is no news there
-    const line = (text, form = '', status = true) => `<div class="flash ok${form ? ' undo' : ''}"${status ? ' role="status"' : ''}>${ic('checkCircle')}<p>${esc(text)}</p>${form}</div>`;
-    if (undo !== null && flash?.kind === 'ok' && flash.undo === true) {
-        return line(flash.text, undo.form);
+    // the Undo of a change of the live plan (UI panel wave 2): inside the flash of that change (later,
+    // on the team page, in the live card's action bar: cockpit-panel.mjs)
+    const line = (text, form = '') => `<div class="flash ok${form ? ' undo' : ''}" role="status">${ic('checkCircle')}<p>${esc(text)}</p>${form}</div>`;
+    if (!flash) {
+        return '';
     }
-    const head = !flash ? '' : flash.kind === 'ok' ? line(flash.text)
-        : `<div class="flash err" role="status">${ic('alert')}<p>${esc(flash.text)}</p></div>`;
-    return head + (undo === null ? '' : line(undo.text, undo.form, false));
+    if (flash.kind !== 'ok') {
+        return `<div class="flash err" role="status">${ic('alert')}<p>${esc(flash.text)}</p></div>`;
+    }
+    return line(flash.text, undo !== null && flash.undo === true ? undo.form : '');
 }
 
 
@@ -181,7 +183,23 @@ export function armForm(action, fields, {key, button, cls = 'btn secondary small
 }
 
 
-// The page that asks before a destructive action posted without confirm=1 (the no-script path of an
+// A ⋯ menu (races spec §4: the race's and the plan's): a <details> whose summary is a quiet ⋯ button
+// named `label` for screen readers and voice control, its panel the `items` (markup; empty ones are
+// left out) under it; '' without items. `key` makes its id unique on the page (menu-<key>). It
+// holds forms, so an open one holds the page's reload (no data-keep-refresh, client.mjs holdsReload);
+// with the script Esc and a click outside close it, and opening one closes the others (client.mjs
+// menus). Without the script it opens and closes as any <details>.
+export function menu(label, items, {key}) {
+    const list = items.filter(Boolean);
+    if (!list.length) {
+        return '';
+    }
+    return `<details class="menu" data-menu id="menu-${esc(key)}"><summary class="btn quiet small" aria-label="${esc(label)}">${ic('dots')}</summary>`
+        + `<div class="menu-panel">${list.join('')}</div></details>`;
+}
+
+
+// The page that asks before an action posted without confirm=1 (the no-script path of an
 // armForm, UI panel wave 2): `heading`, `words` (what it does), a form that posts `fields` to
 // `action` again with confirm=1, its button `button` (`danger`: the danger style, else primary) and
 // the way back (`back` {href, label}). `kicker` names the club (and team) on phones; from 1024 px the

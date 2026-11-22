@@ -244,7 +244,7 @@ test('riderPull: one number in the unit set; watts without a weight', async () =
 });
 
 
-test('penModel: plan #1 is armed in the start pen, before the first start only', () => {
+test('penModel: plan #1 is armed in the start pen while no start runs (startAt null)', () => {
     const plan = {riders: [{id: 'a'}, {id: 'b'}]};
     const armed = {kind: 'rest', timeS: 0, warn: true, next: true, place: 1};
     assert.deepEqual(D.penModel({plan, selfId: 'a', reason: 'still', started: false}), armed);
@@ -501,4 +501,349 @@ test('clockStep: the standing clock is followed exactly; no countdown resets', (
     assert.equal(s.shownS, null);
     s = C.clockStep(s, {now: 2000, trueS: 300});
     assert.deepEqual([s.shownS, s.label], [300, null]);
+});
+
+
+// ---------- chaos: the order does not hold (spec 2026-11-20-paceline-chaos-counter, section 4) ----------
+
+test('shownModel: the chaos dash is recorded', () => {
+    assert.equal(D.shownModel({m: {kind: 'none'}, dash: 'chaos'}).act.k, 'chaos');
+    assert.deepEqual(D.shownModel({m: {kind: 'none'}, dash: 'chaos'}).act, {k: 'chaos'});
+    // The captain's Next line in chaos ("Order ≠ plan", captainNext {chaos: true}), no rider id.
+    assert.deepEqual(D.shownModel({m: {kind: 'none'}, dash: 'chaos', next: {chaos: true}}).next, {chaos: true});
+});
+
+
+test('actionModel in chaos: no countdown and no READY while resting, my pull as always', () => {
+    const rest = {mine: false, toMyPullS: 42, place: 3, me: {watts: 254}};
+    assert.deepEqual(D.actionModel(rest, 250, null, {chaos: true}), {kind: 'none'});
+    assert.deepEqual(D.actionModel({...rest, toMyPullS: 5, place: 2}, 250, null, {chaos: true}), {kind: 'none'});
+    assert.deepEqual(D.actionModel({...rest, toMyPullS: 0, place: 2, standing: true, overS: 4}, 250, null, {chaos: true}),
+                     {kind: 'none'});
+    const mine = {mine: true, remainingS: 30, me: {watts: 254}};
+    assert.deepEqual(D.actionModel(mine, 250, 'green', {chaos: true}), D.actionModel(mine, 250, 'green'));
+    assert.equal(D.actionModel(mine, 250, 'green', {chaos: true}).kind, 'pull');
+    // Outside chaos READY still shows.
+    assert.equal(D.actionModel({...rest, toMyPullS: 5}, 250, null).next, true);
+});
+
+
+test('restGapBand: in chaos the gap the rest line calls out goes into the band, with the pull\'s colours', () => {
+    const gap = (o) => ({kind: 'one', id: 'b', m: 16, s: 1.3, n: 1, mine: false, behind: false, level: 'full',
+                         critical: false, closing: false, ...o});
+    assert.equal(D.restGapBand(null), null);
+    // Someone else's early stage: not shown (the rest line shows no one else's early stage).
+    assert.equal(D.restGapBand(gap({level: 'early', critical: true})), null);
+    // The rest line's urgency rule (review ruling, 20 Nov 2026): a spare, non-critical gap of someone
+    // else stays dim there, so no band; closing or not.
+    assert.equal(D.restGapBand(gap({})), null);
+    assert.equal(D.restGapBand(gap({kind: 'split', n: 2, closing: true})), null);
+    // A critical gap of someone else: the pull's band texts by kind, its colours.
+    assert.deepEqual(D.restGapBand(gap({critical: true})), {text: 'gapOne', critical: true, closing: false});
+    assert.deepEqual(D.restGapBand(gap({kind: 'group', id: 'c', m: 30, s: 2, n: 3, critical: true, closing: true})),
+                     {text: 'gapGroup', critical: true, closing: true});
+    assert.equal(D.restGapBand(gap({kind: 'split', n: 2, critical: true})).text, 'gapSplit');
+    // I am behind someone else's gap (cut off by it): "Gap ahead", as on the rest line, not "▼ GROUP".
+    assert.deepEqual(D.restGapBand(gap({kind: 'group', id: 'c', m: 20, s: 1.6, n: 3, behind: true, critical: true})),
+                     {text: 'gapInfoAhead', critical: true, closing: false});
+    // My own gap (I lost the wheel), early stage and closing too: "▲ GAP", as on the rest line.
+    assert.deepEqual(D.restGapBand(gap({id: 'me', m: 9, s: 1, mine: true, behind: true, level: 'early'})),
+                     {text: 'gapMe', critical: false, closing: false});
+    assert.deepEqual(D.restGapBand(gap({id: 'me', mine: true, behind: true, closing: true})),
+                     {text: 'gapMe', critical: false, closing: true});
+});
+
+
+// ---------- recovery fields in the Action window (spec 2026-11-20-paceline-big-numbers, section 3) ----------
+
+test('fieldValue: formats as in the spec table, units from strings.mjs', async () => {
+    const {S} = await import('../pages/src/strings.mjs');
+    assert.deepEqual(D.fieldValue('powerWkg', {power: 361}, {weight: 78.5}), {num: '4.6', unit: S.wkgUnit});
+    assert.deepEqual(D.fieldValue('speed', {speed: 43.4}), {num: '43', unit: 'km/h'});
+    assert.deepEqual(D.fieldValue('draft', {draft: 107.4}), {num: '107', unit: 'draft'});
+    assert.deepEqual(D.fieldValue('cadence', {cadence: 91.6, power: 180}), {num: '92', unit: 'rpm'});
+    assert.deepEqual(D.fieldValue('heartrate', {heartrate: 151.2}), {num: '151', unit: 'bpm'});
+    assert.deepEqual(D.fieldValue('powerW', {power: 247.6}), {num: '248', unit: S.wattUnit});
+    assert.equal(D.fieldValue('grade', {grade: 0.0312}).unit, '%');
+    // the recovery field says what it is; the pull's middle field keeps its "now" (user, 22 Nov 2026)
+    assert.equal(D.fieldValue('now', {}, {unit: 'W', nowW: 300}).unit, 'power');
+    assert.equal(S.nowLabel, 'now');
+});
+
+
+test('fieldValue: grade one decimal from Sauce\'s fraction, "-0.0" shown as "0.0" (Review Focus 4)', () => {
+    assert.equal(D.fieldValue('grade', {grade: -0.0004}).num, '0.0');
+    assert.equal(D.fieldValue('grade', {grade: -0.031}).num, '-3.1');
+    assert.equal(D.fieldValue('grade', {grade: 0}).num, '0.0');
+    assert.equal(D.fieldValue('grade', {grade: 0.0449}).num, '4.5');
+});
+
+
+test('fieldValue: power now as the pull\'s now, in Paceline\'s unit (Review Focus 1)', () => {
+    assert.equal(D.fieldValue('now', {}, {unit: 'Wkg', weight: 80, nowW: 320}).num, '4.0');
+    assert.equal(D.fieldValue('now', {}, {unit: 'W', weight: 80, nowW: 320}).num, '320');
+    // The same number the pull shows (nowValue of the marker's power), whatever state.power says.
+    assert.equal(D.fieldValue('now', {power: 999}, {unit: 'Wkg', weight: 80, nowW: 320}).num, D.nowValue(320, 80, 'Wkg'));
+    // No weight: watts, as the pull does then.
+    assert.equal(D.fieldValue('now', {}, {unit: 'Wkg', weight: null, nowW: 320}).num, '320');
+    assert.equal(D.fieldValue('now', {power: 300}, {unit: 'W', nowW: null}).num, null);
+});
+
+
+test('fieldValue: the 5 s smoothed power for W and W/kg when given', () => {
+    assert.equal(D.fieldValue('powerW', {power: 400}, {smooth5W: 251.4}).num, '251');
+    assert.equal(D.fieldValue('powerWkg', {power: 400}, {weight: 80, smooth5W: 256}).num, '3.2');
+    assert.equal(D.fieldValue('powerW', {power: 400}, {smooth5W: null}).num, '400');
+    assert.equal(D.fieldValue('powerW', {power: 0}).num, '0');    // coasting is a real 0
+});
+
+
+test('fieldValue: a missing value is null, never NaN or a made-up 0 (Review Focus 2)', () => {
+    assert.equal(D.fieldValue('powerWkg', {power: 361}, {weight: null}).num, null);
+    assert.equal(D.fieldValue('powerWkg', {power: 361}, {weight: 0}).num, null);
+    assert.equal(D.fieldValue('heartrate', {}, {}).num, null);
+    // Zwift sends 0 without a heart rate strap: no real heart rate.
+    assert.equal(D.fieldValue('heartrate', {heartrate: 0}).num, null);
+    // A cadence of 0 while pedalling (power) is a trainer without cadence; with no power I coast.
+    assert.equal(D.fieldValue('cadence', {cadence: 0, power: 210}).num, null);
+    assert.equal(D.fieldValue('cadence', {cadence: 0, power: 0}).num, '0');
+    for (const k of ['powerW', 'powerWkg', 'draft', 'speed', 'cadence', 'heartrate', 'grade']) {
+        assert.equal(D.fieldValue(k, {}, {weight: 80}).num, null, k);
+        assert.equal(D.fieldValue(k, null, {weight: 80}).num, null, k);
+        assert.equal(D.fieldValue(k, {power: NaN, draft: NaN, speed: NaN, cadence: NaN, heartrate: NaN, grade: NaN},
+                                  {weight: 80}).num, null, k);
+    }
+    assert.equal(D.fieldValue('now', {}, {unit: 'W', nowW: NaN}).num, null);
+});
+
+
+test('recoveryFields: three slots, Off keeps its place as null', () => {
+    const data = {power: 250, draft: 96, speed: 42.6, cadence: 88, heartrate: 142, grade: 0.012};
+    const opts = {unit: 'Wkg', weight: 80, nowW: 248, smooth5W: null};
+    const f = D.recoveryFields({left: 'off', mid: 'now', right: 'off'}, data, opts);
+    assert.equal(f.length, 3);
+    assert.equal(f[0], null);
+    assert.deepEqual(f[1], D.fieldValue('now', data, opts));
+    assert.equal(f[1].num, '3.1');
+    assert.equal(f[2], null);
+    assert.deepEqual(D.recoveryFields({left: 'powerWkg', mid: 'now', right: 'draft'}, data, opts).map(x => x && x.num),
+                     ['3.1', '3.1', '96']);
+    // An unknown choice (an older or broken setting) is an empty slot, not an error.
+    assert.deepEqual(D.recoveryFields({left: 'gear', mid: undefined, right: 'heartrate'}, data, opts).map(x => x && x.num),
+                     [null, null, '142']);
+});
+
+
+test('fieldSlots: the slots set while the option is on, the defaults (off, now, off) otherwise', () => {
+    assert.deepEqual(D.fieldSlots({}), {left: 'off', mid: 'now', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: false, recLeft: 'powerWkg', recMid: 'speed', recRight: 'draft'}),
+                     {left: 'off', mid: 'now', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'powerWkg', recMid: 'speed', recRight: 'draft'}),
+                     {left: 'powerWkg', mid: 'speed', right: 'draft'});
+    // Unset or unknown values fall back to each slot's default.
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'draft'}), {left: 'draft', mid: 'now', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'gear', recMid: '', recRight: null}),
+                     {left: 'off', mid: 'now', right: 'off'});
+});
+
+
+test('fieldsShown: only while I rest with a Rest window open and the option on; in chaos always (Review Focus 3)', () => {
+    const rest = {kind: 'rest', timeS: 42, warn: false, next: false, place: 3};
+    const on = {recFields: true, restOpen: true, reason: 'ok'};
+    assert.equal(D.fieldsShown({...on, model: rest}), true);
+    // The Rest window closed while resting: the countdown again at once.
+    assert.equal(D.fieldsShown({...on, restOpen: false, model: rest}), false);
+    assert.equal(D.fieldsShown({...on, recFields: false, model: rest}), false);
+    // The standing clock is resting too.
+    assert.equal(D.fieldsShown({...on, model: {...rest, timeS: 30, standing: true, overS: 4}}), true);
+    // READY (also the start rider in the pen) and my pull: the pull layout, whatever is set.
+    assert.equal(D.fieldsShown({...on, model: {...rest, timeS: 8, warn: true, next: true}}), false);
+    assert.equal(D.fieldsShown({...on, model: {kind: 'rest', timeS: 0, warn: true, next: true, place: 1}, reason: 'still'}), false);
+    assert.equal(D.fieldsShown({...on, model: {kind: 'pull', watts: 273, timeS: 40}}), false);
+    // A dash (climb, descent, …): the fields keep showing live values.
+    assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'climb'}), true);
+    assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'descent'}), true);
+    assert.equal(D.fieldsShown({...on, restOpen: false, model: {kind: 'none'}, reason: 'climb'}), false);
+    // Outside a TTT event (the windows are quiet): nothing.
+    assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'noevent'}), false);
+});
+
+
+test('W2: a Rest window takes the countdown only while it shows one', () => {
+    // Probe s9-restopen: opened mid-rest, the Rest window was blank 1.5 s (then late) while the
+    // Action window had already handed it the countdown because it was open.
+    const rest = {kind: 'rest', timeS: 42};
+    assert.equal(D.restTakes({restOpen: true, restShown: false, model: rest}), false);
+    assert.equal(D.restTakes({restOpen: true, restShown: true, model: rest}), true);
+    assert.equal(D.restTakes({restOpen: false, restShown: true, model: rest}), false);
+    // READY (next: the last seconds before my pull) is a countdown too: the same rule.
+    const ready = {kind: 'rest', next: true, timeS: 5};
+    assert.equal(D.restTakes({restOpen: true, restShown: false, model: ready}), false);
+    assert.equal(D.restTakes({restOpen: true, restShown: true, model: ready}), true);
+    // A dash (Review Focus 3: climb, descent, chaos): an open Rest window is enough, as before.
+    assert.equal(D.restTakes({restOpen: true, restShown: false, model: {kind: 'none'}}), true);
+    // What the Rest window says about itself: its countdown or READY, never while it vanishes.
+    assert.equal(D.restClockOf({vanish: false, model: {kind: 'rest', timeS: 9}}), true);
+    assert.equal(D.restClockOf({vanish: true, model: {kind: 'rest', timeS: 9}}), false);
+    assert.equal(D.restClockOf({vanish: false, model: {kind: 'none'}}), false);
+});
+
+
+test('I-1: the countdown goes back to a Rest window that showed what the Action window showed', () => {
+    // Final review, 21 Nov 2026 (I-1, probe t1/t2): at every end of my pull, and at the first
+    // countdown, the Action window showed the countdown for 129-181 ms (with "Fields while resting"
+    // on: countdown, then the fields), because the Rest window's sign of life still said "no clock"
+    // (vanished for my pull, or the dash) when the Action window rendered first.
+    // What the Rest window shows, for its sign of life:
+    assert.equal(D.restShowsOf({vanish: true, model: {kind: 'pull', timeS: 30}}), 'pull');
+    assert.equal(D.restShowsOf({vanish: true, model: {kind: 'rest', next: true, timeS: 5}}), 'ready');
+    assert.equal(D.restShowsOf({vanish: false, model: {kind: 'rest', timeS: 42}}), 'clock');
+    assert.equal(D.restShowsOf({vanish: false, model: {kind: 'rest', next: true, timeS: 5}}), 'clock');
+    assert.equal(D.restShowsOf({vanish: false, model: {kind: 'none'}}), 'dash');
+    assert.equal(D.restShowsOf({vanish: false, model: {kind: 'blank'}}), null);
+    assert.equal(D.restShowsOf({vanish: false, model: null}), null);
+    // What the Action window shows (its own model):
+    assert.equal(D.actionPhase({kind: 'pull', timeS: 30}), 'pull');
+    assert.equal(D.actionPhase({kind: 'rest', timeS: 42}), 'clock');
+    assert.equal(D.actionPhase({kind: 'rest', next: true, timeS: 5}), 'ready');
+    assert.equal(D.actionPhase({kind: 'rest', timeS: 0}), 'ready');
+    assert.equal(D.actionPhase({kind: 'none'}), 'dash');
+    assert.equal(D.actionPhase({kind: 'armed'}), null);
+    // The phase and when it changed (prev: the one before).
+    let ph = D.phaseStep(null, {phase: 'pull', now: 1000});
+    assert.deepEqual(ph, {phase: 'pull', prev: null, at: 1000});
+    assert.equal(D.phaseStep(ph, {phase: 'pull', now: 2000}), ph);
+    ph = D.phaseStep(ph, {phase: 'clock', now: 30000});
+    assert.deepEqual(ph, {phase: 'clock', prev: 'pull', at: 30000});
+    // The hand-back: a Rest window that shows what I showed until just now takes the countdown, for
+    // REST_HANDBACK_MS after my change; after that only one that shows the countdown.
+    assert.equal(D.REST_HANDBACK_MS, 1000);
+    const back = (shows, now) => D.restHandBack({shows: new Set(shows), phase: ph, now});
+    assert.equal(back(['pull'], 30000), true, 'pull end');
+    assert.equal(back(['pull'], 30000 + D.REST_HANDBACK_MS - 1), true);
+    assert.equal(back(['pull'], 30000 + D.REST_HANDBACK_MS), false, 'it never showed the countdown');
+    assert.equal(back(['dash'], 30000), false, 'it showed a dash during my pull: not in step');
+    assert.equal(back([], 30000), false);
+    const dashEnd = {phase: 'clock', prev: 'dash', at: 30000};
+    assert.equal(D.restHandBack({shows: new Set(['dash']), phase: dashEnd, now: 30100}), true, 'dash end, first countdown');
+    assert.equal(D.restHandBack({shows: new Set(['pull']), phase: dashEnd, now: 30100}), false);
+    const readyOff = {phase: 'clock', prev: 'ready', at: 30000};
+    assert.equal(D.restHandBack({shows: new Set(['ready']), phase: readyOff, now: 30100}), true, 'READY off');
+    assert.equal(D.restHandBack({shows: new Set(['pull']), phase: null, now: 30100}), false);
+    // restTakes with it.
+    const rest = {kind: 'rest', timeS: 42};
+    assert.equal(D.restTakes({restOpen: true, restShown: false, handBack: true, model: rest}), true);
+    assert.equal(D.restTakes({restOpen: true, restShown: false, handBack: false, model: rest}), false);
+    assert.equal(D.restTakes({restOpen: false, restShown: false, handBack: true, model: rest}), false);
+    // s9-restopen stays fixed: a Rest window opened mid-rest (nothing shown yet, or a dash of its own
+    // while I show the countdown for long) does not take it.
+    const steady = {phase: 'clock', prev: 'dash', at: 1000};
+    assert.equal(D.restHandBack({shows: new Set(['dash']), phase: steady, now: 60000}), false);
+    assert.equal(D.restHandBack({shows: new Set([null]), phase: steady, now: 1100}), false);
+});
+
+
+test('fieldsShown in chaos: resting shows the fields with or without a Rest window, my pull as always', () => {
+    // Replaces the chaos counter's power-only model (chaosModel): actionModel gives 'none' while I
+    // rest in chaos; the Action window then shows the fields, the defaults when the option is off.
+    const view = {mine: false, toMyPullS: 42, place: 3, me: {watts: 254}};
+    const m = D.actionModel(view, 250, null, {chaos: true});
+    for (const restOpen of [false, true]) {
+        for (const recFields of [false, true]) {
+            assert.equal(D.fieldsShown({recFields, restOpen, model: m, reason: 'chaos'}), true, `${restOpen} ${recFields}`);
+        }
+    }
+    // Near my pull in chaos there is no READY either: still the fields.
+    assert.equal(D.fieldsShown({recFields: false, restOpen: false, reason: 'chaos',
+                                model: D.actionModel({...view, toMyPullS: 5}, 250, null, {chaos: true})}), true);
+    // My pull in chaos: the pull.
+    const pull = D.actionModel({mine: true, remainingS: 30, me: {watts: 254}}, 250, 'green', {chaos: true});
+    assert.equal(D.fieldsShown({recFields: true, restOpen: true, model: pull, reason: 'chaos'}), false);
+    // recFields off in chaos: the default slots, my power now in the middle in Paceline's unit.
+    const f = D.recoveryFields(D.fieldSlots({recFields: false, recLeft: 'draft'}), {power: 400},
+                               {unit: 'W', weight: 80, nowW: 300});
+    assert.deepEqual(f.map(x => x && x.num), [null, '300', null]);
+    assert.equal('chaosModel' in D, false);
+});
+
+
+test('smooth5: Sauce\'s 5 s power when it has one, else the 5 s mean of my own samples; null when off', () => {
+    const now = 100000;
+    const hist = [90, 95, 96, 97, 98, 99, 100].map((s, i) => ({t: s * 1000, w: [500, 500, 200, 210, 220, 230, 240][i]}));
+    assert.equal(D.smooth5({on: false, sauce: 260, hist, now}), null);
+    assert.equal(D.smooth5({on: true, sauce: 260, hist, now}), 260);
+    // The samples of the last 5 s (96 to 100 s): 200..240, mean 220; the 500s are older.
+    assert.equal(D.smooth5({on: true, sauce: undefined, hist, now}), 220);
+    assert.equal(D.smooth5({on: true, sauce: NaN, hist, now}), 220);
+    // No sample in the last 5 s: nothing.
+    assert.equal(D.smooth5({on: true, sauce: null, hist, now: 120000}), null);
+    assert.equal(D.smooth5({on: true, sauce: null, hist: [], now}), null);
+});
+
+
+test('labelParts: the label may be cut, the minus before the gap stays with it (real strings)', async () => {
+    const {S, fmt} = await import('../pages/src/strings.mjs');
+    // A split behind someone else: "12 riders −14 m"; the minus is the strings' own.
+    assert.deepEqual(D.labelParts('gapInfoSplit', {n: 12, gap: '14 m'}), {pre: '', cut: '12 riders ', post: '−14 m'});
+    const p = D.labelParts('gapInfoSplit', {n: 12, gap: '14 m'});
+    assert.equal(p.pre + p.cut + p.post, fmt('gapInfoSplit', {n: 12, gap: '14 m'}));
+    // If strings.mjs changes the sign before {gap}, this must fail (the sign has to stay with the gap).
+    assert.ok(S.gapInfoSplit.includes('−{gap}'), 'gapInfoSplit: the minus before {gap} changed; adapt labelParts');
+    // No sign: all of the label may be cut.
+    assert.deepEqual(D.labelParts('gapInfoAhead', {gap: '16 m'}), {pre: '', cut: 'Gap ahead ', post: '16 m'});
+    assert.deepEqual(D.labelParts('gapMe', {gap: '9 m'}), {pre: '', cut: '▲ GAP ', post: '9 m'});
+});
+
+
+test('planParts: the label may be cut, " · plan CODE" never; the club after it may be cut (real strings)', async () => {
+    const {fmt} = await import('../pages/src/strings.mjs');
+    const one = {label: 'Thursday Night Roadtrains B · 7abcd', sig: 'HM4ZNJ'};
+    assert.deepEqual(D.planParts('planLine', one), {cut: 'Thursday Night Roadtrains B · 7abcd', keep: ' · plan HM4ZNJ', tail: ''});
+    const p = D.planParts('planLine', one);
+    assert.equal(p.cut + p.keep + p.tail, fmt('planLine', one));
+    // Two or more clubs ticked: the club follows the code, its separator goes with it.
+    const two = {...one, club: 'Rollers fast'};
+    assert.deepEqual(D.planParts('planLineClub', two), {cut: 'Thursday Night Roadtrains B · 7abcd', keep: ' · plan HM4ZNJ', tail: ' · Rollers fast'});
+    const q = D.planParts('planLineClub', two);
+    assert.equal(q.cut + q.keep + q.tail, fmt('planLineClub', two));
+});
+
+
+test('fieldsGapBand: the gap band under the recovery fields only in chaos (the Rest window shows it otherwise)', () => {
+    const g = {kind: 'one', id: 'b', m: 16, s: 1.3, n: 1, mine: false, behind: false, level: 'full', critical: true, closing: false};
+    assert.deepEqual(D.fieldsGapBand(g, 'chaos'), D.restGapBand(g));
+    assert.deepEqual(D.fieldsGapBand(g, 'chaos'), {text: 'gapOne', critical: true, closing: false});
+    // Outside chaos the fields only show with a Rest window open, whose status line has the gap.
+    for (const reason of ['ok', 'climb', 'descent', 'still', 'alone']) {
+        assert.equal(D.fieldsGapBand(g, reason), null, reason);
+    }
+    assert.equal(D.fieldsGapBand({...g, mine: true, behind: true}, 'ok'), null);
+    assert.equal(D.fieldsGapBand(null, 'chaos'), null);
+});
+
+
+test('W12: the DEMO badge hides while the Rest window has vanished', () => {
+    // 20 Nov 2026 audit (W12, s7-demo): the badge stayed on over the empty Action window.
+    assert.equal(D.demoBadge({demo: true, vanish: true}), false);
+    assert.equal(D.demoBadge({demo: true, vanish: false}), true);
+    assert.equal(D.demoBadge({demo: false, vanish: false}), false);
+    assert.equal(D.demoBadge({demo: false, vanish: true}), false);
+});
+
+
+test('vanishes: quiet outside a TTT hides every window; otherwise only the Rest window\'s pull/READY rule', () => {
+    for (const mode of ['info', 'action', 'rest']) {
+        assert.equal(D.vanishes({mode, quiet: true}), true, mode);
+        assert.equal(D.vanishes({mode, quiet: true, model: {kind: 'rest', timeS: 40}}), true, mode);
+        assert.equal(D.vanishes({mode, quiet: false}), false, mode);
+    }
+    // the Rest window's own rule, unchanged (user, 13 Nov 2026)
+    assert.equal(D.vanishes({mode: 'rest', quiet: false, model: {kind: 'pull'}}), true);
+    assert.equal(D.vanishes({mode: 'rest', quiet: false, model: {kind: 'rest', next: true}, actionOpen: true}), true);
+    assert.equal(D.vanishes({mode: 'rest', quiet: false, model: {kind: 'rest', timeS: 0}, actionOpen: true}), true);
+    assert.equal(D.vanishes({mode: 'rest', quiet: false, model: {kind: 'rest', next: true}, actionOpen: false}), false);
+    assert.equal(D.vanishes({mode: 'rest', quiet: false, model: {kind: 'rest', timeS: 40}, actionOpen: true}), false);
+    // the Action and Info windows never vanish outside the quiet state
+    assert.equal(D.vanishes({mode: 'action', quiet: false, model: {kind: 'pull'}}), false);
+    assert.equal(D.vanishes({mode: 'info', quiet: false, model: {kind: 'pull'}}), false);
 });

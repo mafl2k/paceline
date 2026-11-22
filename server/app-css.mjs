@@ -109,7 +109,6 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 .callout.info{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-soft-fg)}
 .callout.info>h2 .i{color:var(--info-icon)}
 .note.info{border-left-color:var(--info-icon)}.note.info .note-title .i{color:var(--info-icon)}
-.note-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .newplans{display:inline-block;font-size:.8125rem;font-weight:700;line-height:1.3;padding:.05rem .45rem;border-radius:999px;background:var(--accent-soft);color:var(--accent-soft-fg);border:1px solid var(--accent);white-space:nowrap;vertical-align:.1em}
 .callout ol{margin-top:.75rem;display:grid;gap:.75rem}
 .note{display:grid;gap:.625rem;padding:.875rem;border-radius:var(--r2);background:var(--surface);color:var(--text);border:1px solid var(--border);border-left:4px solid}
@@ -119,34 +118,12 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 .note .btn{justify-self:start}
 .evcount{display:grid;gap:.125rem;font-size:.9375rem;padding:.5rem .75rem;border-radius:var(--r1);background:var(--surface-2)}
 
-/* plan rows (team page): one per plan, the live one marked by tag and accent bar */
+/* the live tag of a plan without a start time */
 .tag.off{background:var(--err-bg);color:var(--err-fg);border-color:var(--err-bd)}
-.rider.plan{min-height:2.75rem}
-.planinfo{min-width:0}
-.planrow{display:grid;gap:.375rem}
-.planrow.live{padding-left:.75rem;margin-left:-.25rem;box-shadow:inset 3px 0 0 var(--ok-icon)}
-.planrow .l1{font-size:1.0625rem;font-weight:600;line-height:1.35}
-.planlink{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 .375rem;min-height:var(--tap);padding-block:.375rem;color:var(--text);text-decoration:none}
-.planlink .label{font-weight:750;font-size:1.125rem}
-.planlink .muted{font-weight:400;font-size:.9375rem}
-.planlink .chev{margin-left:auto;align-self:center;color:var(--muted)}
-.planlink .tag{align-self:center}
-.planrow .l2{display:flex;flex-wrap:wrap;gap:.125rem 1rem;font-size:.9375rem;color:var(--muted)}
-.planrow .l3{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin-top:.375rem;padding-top:.625rem;border-top:1px solid var(--border)}
-.planrow .l4{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem}
-.planrow .vsum{flex:1 1 10rem;font-weight:600}
-
-.newer{margin-top:.25rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.625rem .875rem;border-radius:var(--r2);background:var(--surface-2);border:1px solid var(--border);font-size:.9375rem}
-.newer>p{display:flex;gap:.5rem;align-items:center;flex:1 1 12rem;font-weight:600}
-.newer>p .i{color:var(--muted);width:1.125rem;height:1.125rem;flex:none}
-.plancode{color:var(--text);font-weight:600}
-.plancode code{background:var(--accent-soft);color:var(--accent-soft-fg);border-color:transparent;margin-left:.15rem}
 
 /* folds open inline, never as a popover or a fixed bar */
 details>summary{list-style:none;cursor:pointer}
 details>summary::-webkit-details-marker{display:none}
-.menu-info{display:grid;font-size:.9375rem}
-.menu-info span{color:var(--muted)}
 /* arm in place (UI panel wave 2): the action's press turns its form, in the same place, into a strip
    with the words, the confirm button and Cancel; it takes the row's whole width */
 form[data-arm].armed{flex-basis:100%;width:100%}
@@ -154,57 +131,36 @@ form[data-arm].armed>[data-arm-open]{display:none}
 .arm-strip{display:grid;gap:.625rem;flex-basis:100%;width:100%;padding:.75rem .875rem;border-radius:var(--r2);background:var(--surface-2);border:1px solid var(--control);font-size:.9375rem;color:var(--text);font-weight:400;text-align:left}
 .arm-btns{display:flex;flex-wrap:wrap;gap:.5rem}
 @media (max-width:1023px){.arm-btns>.btn{flex:1 1 100%}}
-.note-acts>.discard{margin-left:auto}
-/* at least 24 px between Review and store and Discard, also on a phone (P2, review M4) */
-.note-acts:has(>.discard){gap:1.5rem}
-.note-acts>.discard.armed{margin-left:0}
-.as-discard{margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)}
 .flash.undo{align-items:center;flex-wrap:wrap}
-/* a row a change of the live plan lands on (#plan-<id>): below the sticky top bar on phones */
+/* a plan block a Rename lands on (#plan-<id>): below the sticky top bar on phones */
 [id^="plan-"]{scroll-margin-top:5rem}
-.planrow>.flash{margin-block:.25rem}
 .flash.undo>p{flex:1 1 12rem}
 
-/* riders */
-.riders{display:grid}
-.rider{display:grid;grid-template-columns:1.5rem minmax(0,1fr) auto;align-items:center;column-gap:.625rem;min-height:3.25rem;padding:.5rem 0;border-top:1px solid var(--border)}
-.riders>li:first-child{border-top:0}
-.rider .i{width:1.375rem;height:1.375rem}
-.rider .who{display:grid;min-width:0}
-.rider .nm{font-weight:600;line-height:1.3}
-.rider .what{font-size:.9375rem;line-height:1.35}
-.rider>time{font-size:.9375rem;color:var(--muted);white-space:nowrap}
-.rider.ok .i{color:var(--ok-icon)}.rider.ok .what{color:var(--muted)}
-.rider.warn .i{color:var(--warn-icon)}.rider.warn .what{color:var(--warn-fg);font-weight:600}
-.rider.err .i{color:var(--err-icon)}.rider.err .what{color:var(--err-fg);font-weight:600}
-.rider.neutral .i{color:var(--neutral-icon)}.rider.neutral .what{color:var(--muted)}
-.rider.plan .pos{font-weight:700;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
-.rider.plan .what{color:var(--muted)}
 .help>summary{display:inline-flex;align-items:center;gap:.375rem;min-height:var(--tap);color:var(--accent);font-weight:600;font-size:.9375rem}
 .help .i{width:1.125rem;height:1.125rem}
 
-/* plans */
-.plans>li{position:relative;padding:.75rem 0;border-top:1px solid var(--border)}
-.plans>li:first-child{border-top:0;padding-top:.25rem}
-.plans>li.live{padding-block:.75rem}
-.plans>li.live:first-child{padding-top:.25rem}
-.plans .nm{font-weight:650}
-.plans .meta{font-size:.9375rem;color:var(--muted)}
-.plans .planinfo{display:grid;gap:.375rem;justify-items:start}
+/* the outdated marks of a Make live question */
 .outdated{display:flex;gap:.375rem;align-items:flex-start;font-size:.9375rem;color:var(--warn-fg);font-weight:600}
 .outdated .i{color:var(--warn-icon);width:1.125rem;height:1.125rem;margin-top:.1rem}
-.undocard .btn{justify-self:start}
-.undocard form{margin-top:.75rem}
-.undocard p+form,.undocard form+p{margin-top:.75rem}
 
-.rowlink{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:var(--text);padding-block:.75rem}
-.rowlink>span{display:grid;flex:1}
-.rowlink .chev{color:var(--muted)}
 .uplink{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--tap);font-weight:600;color:var(--accent);justify-self:start}
-.pp-state{font-weight:650}
-.pp-state.live{color:var(--ok-fg)}
-.plan-actions .rowlink{padding-block:.25rem;min-height:2.75rem}
-.plan-actions .btn{justify-self:start}
+/* the ⋯ menus (races spec §4): a quiet ⋯ button in the corner of a race's line and of a plan block's
+   first line; its panel opens in the page flow under that line, the whole
+   width of it, and pushes what follows down: it never lies over the next row's buttons (at every
+   width). The button keeps its corner, open or closed; every control in the panel is 44 px high at
+   least */
+.racehead,.rowtop{position:relative;min-height:var(--tap);padding-right:calc(var(--tap) + .5rem)}
+/* a race line without a ⋯ (a rhythm date without plans) keeps no room for one */
+.racehead.nomenu{min-height:0;padding-right:0}
+.menu{display:block}
+.menu>summary{position:absolute;top:0;right:0;min-width:var(--tap);padding-inline:.5rem;color:var(--muted)}
+.menu[open]>summary{background:var(--surface-2);color:var(--text)}
+.menu-panel{margin:.5rem calc(-1 * (var(--tap) + .5rem)) 0 0;display:grid;gap:.75rem;padding:.875rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);box-shadow:var(--shadow);font-size:1rem;font-weight:400;line-height:1.45;text-align:left}
+.menu-panel>*+*{padding-top:.75rem;border-top:1px solid var(--border)}
+.menu-panel form,.menu-sec{display:grid;gap:.5rem}
+.menu-panel .btn{justify-self:start}
+.menu-head{font-weight:700}
+.menu-link{display:flex;align-items:center;gap:.625rem;min-height:var(--tap);color:var(--text);text-decoration:none;font-weight:600}
 
 .empty{display:grid;gap:.75rem;justify-items:start;text-align:left}
 .empty h2,.empty h1{font-size:1.25rem}
@@ -241,11 +197,12 @@ input[type=date]{max-width:13rem}
 .inline-form{display:flex;flex-wrap:wrap;align-items:end;gap:.5rem}
 .inline-form>label{flex:1 1 12rem}
 .inline-form>.btn{flex:none}
-.as-when{display:flex;flex-wrap:wrap;gap:.75rem}
-.as-when>label,.as-when>.as-fixed{flex:1 1 12rem}
-.as-fixed{display:grid;gap:.375rem;align-content:start;margin:0}
-.as-fixed span{min-height:var(--btn);display:flex;align-items:center}
-#weekday-hint a{display:inline-block;padding:.8125rem 0;margin:-.8125rem 0}
+/* the Store form's race date and start time side by side, their boxes on one line (each hint under
+   its box) */
+.as-when{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.75rem}
+.as-when>label{flex:1 1 12rem}
+/* a new version's date: its plan's, read only, in the same box */
+input[type=date][readonly]{background:var(--surface-2);color:var(--muted)}
 input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15rem 0 0;flex:none;accent-color:var(--accent)}
 .choice{display:flex;gap:.75rem;align-items:flex-start;padding:.75rem .875rem;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);cursor:pointer;min-height:var(--btn)}
 .choice:has(:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
@@ -260,15 +217,19 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .fold[open]>summary{margin-bottom:.75rem}
 .card.fold{padding-block:.5rem}
 .card.fold[open]{padding-bottom:1.125rem}
+/* the Store form's race fold, its last block (user, 22 Nov 2026): the summary names the race, its
+   "Change" in the link colour; open, the date and time and the event link spaced as the form's fields */
+.as-race>summary{font-weight:600}
+.as-race .as-change{color:var(--accent)}
+.as-race-body{display:grid;gap:1rem;min-width:0}
 .filepick{display:grid;gap:.5rem;justify-items:start}
 .fname{display:flex;align-items:center;gap:.5rem;font-weight:600;flex-wrap:wrap}
 .fname .i{color:var(--muted)}
 
-/* the assign page's "What happens", the result page's lines */
+/* the Store form's "What happens", the Store flash's lines */
 .pv-list{display:grid;gap:.5rem}
 .pv-list li{display:flex;flex-wrap:wrap;gap:.25rem .625rem;align-items:flex-start;line-height:1.4}
 .pv-list li>span{flex:1 1 0;min-width:0}
-.pv-list li>.fold{flex:0 0 100%;min-width:0;padding-left:1.875rem}
 .pv-list .i{margin-top:.1rem}
 .pv-list .ok .i{color:var(--ok-icon)}.pv-list .info .i{color:var(--info-icon)}
 .pv-list .warn .i{color:var(--warn-icon)}.pv-list .warn{color:var(--warn-fg)}
@@ -280,6 +241,46 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .ptable thead th{border-top:0;color:var(--muted);font-weight:600;font-size:.875rem}
 .ptable .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ptable .nmcol{font-weight:600}
+
+/* the rider table (team cockpit spec §7): #, Rider, Pull @ unit; its own rules, .ptable stays shared.
+   Old lines are dimmed and smaller, a dropped one crossed out; the one change colour is the blue info
+   token (green is live, red alarm); a long name ends in an ellipsis; fits 390 px */
+.pt-cap{margin:0 0 .5rem;font-size:.9375rem;color:var(--muted)}
+.ptable-plan{table-layout:fixed}
+.ptable-plan .pt-pos{width:2.5rem}
+.ptable-plan .pt-pull{width:8.75rem}
+.ptable-plan .pt-who{display:flex;align-items:baseline;gap:.375rem;min-width:0}
+.ptable-plan .pt-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptable-plan .pt-mark{flex:none;font-size:.75rem;font-weight:700;letter-spacing:.04em;color:var(--info-icon)}
+.ptable-plan .pt-rides{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+.ptable-plan .pt-chg{color:var(--info-icon);font-weight:700}
+.ptable-plan .pt-old td{font-size:.8125rem;color:var(--muted)}
+.ptable-plan .pt-old .nmcol{font-weight:400}
+.ptable-plan .pt-old:not(.pt-dropped) td{border-top:0;padding-top:0}
+/* the riders card after the gate (amended 22 Nov 2026): the rider table's Plan column, each rider's
+   state after its sign (✓ ⚠ –: never colour alone) in the colours of the old state list, scoped to
+   the riders card and the cockpit's card (a rider's state is no change mark: the change colour stays the blue one). In a
+   card narrower than 32rem (a phone, and the right column from 1180 px, at most ~30rem: four columns
+   would cut the names) the state is a line under the rider's row, so pull @ target keeps its column
+   and long words wrap; an old or a dropped line has no state there */
+:is(.riders-card,.cp-body){container-type:inline-size}
+.ptable-plan.rstates .pt-pull{width:6.75rem}
+:is(.riders-card,.cp-body) th.rstate{width:44%}
+:is(.riders-card,.cp-body) .rstates td{vertical-align:top}
+:is(.riders-card,.cp-body) td.rstate{font-size:.875rem;line-height:1.35;color:var(--muted);overflow-wrap:anywhere;padding-left:calc(.375rem + 1.25em);text-indent:-1.25em}
+:is(.riders-card,.cp-body) .rstate-sign{display:inline-block;min-width:1.25em;text-indent:0;font-weight:700}
+:is(.riders-card,.cp-body) td.rstate time{white-space:nowrap;color:var(--muted);font-weight:400}
+:is(.riders-card,.cp-body) td.rstate.ok .rstate-sign{color:var(--ok-icon)}
+:is(.riders-card,.cp-body) td.rstate.warn{color:var(--warn-fg);font-weight:600}:is(.riders-card,.cp-body) td.rstate.warn .rstate-sign{color:var(--warn-icon)}
+:is(.riders-card,.cp-body) td.rstate.err{color:var(--err-fg);font-weight:600}:is(.riders-card,.cp-body) td.rstate.err .rstate-sign{color:var(--err-icon)}
+:is(.riders-card,.cp-body) td.rstate.neutral .rstate-sign{color:var(--neutral-icon)}
+@container (max-width:31.99rem){
+  :is(.riders-card,.cp-body) .rstates,:is(.riders-card,.cp-body) .rstates thead,:is(.riders-card,.cp-body) .rstates tbody{display:block}
+  :is(.riders-card,.cp-body) .rstates tr{display:grid;grid-template-columns:2.5rem minmax(0,1fr) 8.75rem}
+  .ptable-plan.rstates .pt-pull{width:auto}
+  :is(.riders-card,.cp-body) th.rstate,:is(.riders-card,.cp-body) td.rstate:empty{display:none}
+  :is(.riders-card,.cp-body) td.rstate{grid-column:2 / -1;border-top:0;padding-top:0}
+}
 
 /* top bar (phones): back + team title switcher */
 .topbar{position:sticky;top:0;z-index:10;background:var(--bar-bg);-webkit-backdrop-filter:blur(14px) saturate(1.5);backdrop-filter:blur(14px) saturate(1.5);border-bottom:1px solid var(--border);padding-top:env(safe-area-inset-top)}
@@ -321,24 +322,104 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 
 /* page */
 .page{display:grid;gap:1rem;align-content:start;padding:1rem max(1rem,env(safe-area-inset-right)) 2rem max(1rem,env(safe-area-inset-left));max-width:44rem;margin:0 auto}
+.home-logo{display:block;width:min(15rem,60vw);height:auto;margin:.5rem auto 0;border-radius:var(--r3);box-shadow:var(--shadow)}
 .page.narrow{max-width:28rem;padding-top:3rem}
 .pagehead{display:grid;gap:.375rem}
 .pagehead h1{font-size:1.875rem;line-height:1.15;font-weight:750;letter-spacing:-.01em}
 .pagehead .kicker{margin-bottom:-.125rem}
-.race{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem;font-size:1.125rem;font-weight:650}
-.race .in{font-weight:500;color:var(--muted)}
-.cols,.col-a,.col-b{display:grid;gap:1rem;align-content:start;min-width:0}
-.col-a:empty,.col-b:empty{display:none}
+p.race{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem;font-size:1.125rem;font-weight:650}
+p.race .in{font-weight:500;color:var(--muted)}
+/* the team page's races (races spec §4b): the team's rhythm in the head, then each race ahead (its
+   line, its plans), a later race's live plan and riders in a fold, the races that are over at the end */
+.rhythm{color:var(--muted);font-weight:600}
+div.race{display:grid;gap:.75rem;align-content:start;min-width:0;scroll-margin-top:5rem}
+div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
+.race-more .cols{margin-top:.25rem}
+.cols{display:grid;gap:1rem;align-content:start;min-width:0}
+/* the team cockpit (team cockpit spec §5, §5.3b): its slots #panel (the flash and the card's top),
+   .cp-list and #panel-body (the card's body) in one grid, stacked below 1180 px; an empty slot takes
+   no room. The card is one framed box in every state (.cp-top over .cp-body): its head, the rider
+   table, the "what happens" slot and the action bar at its bottom */
+.cp{display:grid;gap:1rem;align-content:start;min-width:0}
+.cp>*{min-width:0}
+#panel:empty,#panel-body:empty,.cp-what:empty,.cp-bar:empty{display:none}
+#panel,#panel-body,.cp-plan{scroll-margin-top:5rem}
+.cp-top,.cp-body{background:var(--surface);border:1px solid var(--border);min-width:0}
+.cp-top{border-bottom:0;border-radius:var(--r3) var(--r3) 0 0;padding:1rem 1.25rem .25rem}
+/* (no shadow: a shadow on either half would draw a seam where they meet) */
+.cp-body{border-top:0;border-radius:0 0 var(--r3) var(--r3);padding:.5rem 1.25rem 1rem}
+.cp-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.25rem 1rem;min-height:1.875rem}
+.cp-title{min-width:0;font-size:1.125rem;font-weight:750;line-height:1.3;overflow-wrap:anywhere}
+.cp-close{display:inline-flex;align-items:center;justify-content:center;gap:.25rem;min-height:var(--tap);min-width:var(--tap);padding-inline:.5rem;margin-right:-.5rem;border-radius:var(--r2);color:var(--accent);font-weight:600;text-decoration:none}
+.cp-close:hover{background:var(--surface-2)}
+/* the card's line under its title: the plan code, then the table's caption or the riders' count, in
+   a block of two lines whatever they hold (a third is cut, its words kept for screen readers and in
+   the caption's title), so the table starts at the same height in every state (spec §5.3b) */
+.cp-meta{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;height:2.8em;line-height:1.4;margin-top:.25rem;font-size:.9375rem;color:var(--muted)}
+.cp-meta .plancode{margin:0 .75rem 0 0}
+.cp-meta .plancode code{line-height:1.2}
+.cp-meta .count{font-size:inherit}
+/* the Store form's "Make live" box, a bare label in the form: its whole line is the 44 px target */
+/* the Store form in its row (spec §5.4): the row's whole width, its fields spaced */
+.cp-pick{flex-basis:100%;min-width:0}
+.cp-pick form{display:grid;gap:1rem;padding:.5rem .5rem 1rem}
+.cp-pick form>label:not(.field){display:flex;align-items:center;gap:.625rem;min-height:var(--tap)}
+.cp-pick form>label:not(.field)>input{margin:0}
+#panel>:is(.flash,.result){margin-bottom:.75rem}
+.cp-what{margin-top:.75rem}
+.cp-words{margin:0}
+.cp-what>.as-what>h3{font-size:1rem;font-weight:700;margin-bottom:.5rem}
+/* the action bar: the same place and height in every state; Discard at its other end, 24 px or more
+   from Store; an action asking first opens its strip over the bar's whole width */
+.cp-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 1.5rem;min-height:var(--btn);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)}
+.cp-bar>.as-discard{display:contents}
+.cp-bar form.discard,.cp-bar>.cp-undo{margin-left:auto}
+.cp-status{display:flex;align-items:center;gap:.5rem;min-height:var(--btn);margin:0;font-weight:650}
+.cp-status.ok{color:var(--ok-fg)}.cp-status.ok .i{color:var(--ok-icon)}
+.cp-status.neutral{color:var(--muted)}.cp-status.neutral .i{color:var(--neutral-icon)}
+.cp-over{display:flex;align-items:flex-start;gap:.375rem;color:var(--muted);font-weight:600}
+.cp-over .i{flex:none;width:1.125rem;height:1.125rem;margin-top:.1rem}
+.cp-gone{color:var(--muted);font-weight:600}
+/* a version's plan code (a later race's riders card, the cockpit card's line) */
+.plancode{margin-top:.25rem;color:var(--text);font-weight:600}
+.plancode code{background:var(--accent-soft);color:var(--accent-soft-fg);border-color:transparent;margin-left:.15rem}
+/* the page holds its reload (an open Store form, a Store result to keep): said under the card */
+.cp-hold{margin-top:.75rem;color:var(--muted);font-size:.9375rem}
+.cp-refresh{display:inline-flex;align-items:center;min-height:var(--tap);font-weight:600}
+.cp-list{display:grid;gap:1.25rem;align-content:start}
+.cp-sub{font-size:.75rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cp-pending,.cp-plan{display:grid;gap:.125rem;min-width:0}
+.cp-plan-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 .375rem;min-height:var(--tap);padding-block:.375rem;font-size:1.0625rem}
+.cp-plan-head .label{font-weight:750}
+.cp-plan-head .tag{align-self:center}
+.cp-rows{display:grid}
+.cp-row{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
+.cp-link{flex:1 1 14rem;display:flex;align-items:center;gap:.5rem;min-width:0;min-height:var(--tap);padding:.375rem .5rem;border-radius:var(--r2);color:var(--text);text-decoration:none}
+.cp-link:hover{background:var(--surface-2)}
+.cp-what{min-width:0;font-size:.9375rem;overflow-wrap:anywhere}
+.cp-link .chev{flex:none;margin-left:auto;color:var(--muted)}
+.cp-row.live>.cp-link{box-shadow:inset 3px 0 0 var(--ok-icon)}
+.cp-row.live .cp-what{font-weight:650}
+.cp-row.picked>.cp-link{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.cp-row>form,.cp-row>.cp-row-undo{flex:none;padding-left:.5rem}
+.cp-older>summary{min-height:var(--tap);padding-left:.5rem;font-size:.9375rem;font-weight:600;color:var(--muted)}
+.cp-older[open]>summary{margin-bottom:0}
+#over .cp-race{padding-top:.75rem}
+#over .cp-race+.cp-race{border-top:1px solid var(--border)}
 /* the team page's kicker row with Team settings at its right, as on the teams page (.clubhead); the
    negative margins keep the 44 px link from making the row taller than the kicker (phones; from
    1024 px the page head below) */
 .teamhead{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:-.125rem}
 .teamhead .kicker{margin:0;min-width:0}
 .teamhead .btn{flex:none;margin-block:-.75rem}
-/* the team page's two ways to a plan under the race line (UI panel wave 3): side by side at full
-   width on phones, as wide as their words from 1024 px */
+/* the team page's way to a plan under the race line (UI panel wave 3): "Upload a plan" at full
+   width on phones, as wide as its words from 1024 px; with a planner link (races spec §4) "Plan on
+   ZwiftGopher" so, and the file upload a quiet link under it */
 .headacts{display:flex;gap:.5rem}
 .headacts>.btn{flex:1 1 0;min-width:0}
+.headacts.planner{flex-direction:column;align-items:stretch;gap:.25rem}
+.headacts.planner>.btn{flex:none}
+.headacts.planner>.btn.quiet{align-self:flex-start}
 /* the breadcrumb (ui.mjs placeNav): from 1024 px only, where it replaces the back bar and the kicker */
 .crumbs ol{display:flex;flex-wrap:wrap;align-items:center;gap:0 .375rem;font-size:.9375rem;font-weight:600;color:var(--muted)}
 .crumbs li{display:inline-flex;align-items:center;gap:.375rem;min-width:0}
@@ -346,7 +427,6 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .crumbs a:hover{text-decoration:underline}
 .crumbs [aria-current]{color:var(--text)}
 .crumbs .sep{color:var(--muted);font-weight:400}
-[id="plans-h"]{scroll-margin-top:5rem}
 
 .foot{display:flex;flex-wrap:wrap;justify-content:center;gap:0 .25rem;padding-top:.5rem;font-size:.9375rem}
 .foot a,.foot button{display:inline-flex;align-items:center;gap:.375rem;min-height:var(--tap);padding:0 .625rem;color:var(--muted);background:none;border:0;font:inherit;font-size:.9375rem;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:.25em;cursor:pointer}
@@ -425,8 +505,7 @@ a.tile:hover{border-color:var(--control)}
 .danger-zone h2{display:flex;align-items:center;gap:.5rem;font-size:1.125rem;color:var(--danger-text)}
 .danger-zone>form.armed{justify-self:stretch}
 
-/* what shows from 1024 px only: the team page's title in the page, the breadcrumb (.mob, its
-   opposite, is in the desktop block below) */
+/* what shows from 1024 px only: the team page's title in the page, the breadcrumb */
 @media (max-width:1023.98px){.desk{display:none!important}}
 
 /* desktop: every captain page in one frame (ui.mjs captainPage): the sidebar with the club, the
@@ -450,13 +529,12 @@ a.tile:hover{border-color:var(--control)}
   .side .foot-clubs button{justify-content:flex-start}
   .side .foot-label{flex:none;text-align:left;padding:0 .5rem}
   .app>.topbar,.app>.page>.foot{display:none}
-  /* what shows on phones only: the short words of a button */
-  .mob{display:none!important}
   .app>.page{grid-column:2;grid-row:2;width:100%;max-width:51rem;margin:0;padding:2rem 2.5rem 3rem}
   /* the breadcrumb where the kicker was, the same height, so the title stays where it is */
   .app .crumbs{min-height:1.25rem;margin:-.375rem 0 -.625rem}
   .app .crumbs~.pagehead .kicker{display:none}
   .headacts>.btn{flex:none}
+  .headacts.planner{align-items:flex-start}
   /* a question's Cancel beside its confirm button */
   .confirm-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
   /* the hub: the team tiles give way to the sidebar */
@@ -471,6 +549,8 @@ a.tile:hover{border-color:var(--control)}
   .app .kicker{min-height:1.25rem;margin:0}
   /* the action as tall as the title, so the title sits where it does on a page without one */
   .app :is(.pagehead,.clubhead) .btn{flex:none;margin-block:calc((2.3rem - var(--tap)) / 2)}
+  /* the planner pair is no action beside the title: its two lines keep their whole 44 px */
+  .app .pagehead .headacts.planner>.btn{margin-block:0}
   .page.wide{max-width:62rem;padding:2rem 2.5rem 3rem}
 }
 @media (min-width:1180px){
@@ -481,9 +561,58 @@ a.tile:hover{border-color:var(--control)}
   .todo>li>.i{margin-top:.75rem}
   .todo-what{grid-column:3;margin-top:.55rem}
   .todo-acts{grid-column:4}
-  .teampage .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:1.25rem}
-  /* without the riders (no live plan) one column, no empty one beside it */
-  .teampage .cols:has(>.col-b:empty){grid-template-columns:minmax(0,46rem)}
+  /* the cockpit: the list at the left over all rows, the card at the right (the flash and the card's
+     top, then its body, no gap between them); the last row takes what the list is taller, so the
+     right column's rows keep their own heights. No close link: the live version is a click on its
+     row (spec §5.3b). The race line on one line (A7: "Thu 19 Nov · 19:30 · started · open since
+     19:00" beside its ⋯) */
+  .cp{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto 1fr;gap:0 1.5rem}
+  .cp>.cp-list{grid-column:1;grid-row:1 / span 3}
+  .cp>:not(.cp-list){grid-column:2}
+  .cp-close{display:none}
+  .cp-list p.race{font-size:1rem}
+  /* a later race's fold in the list's column: one column */
+  .cockpit .cols{grid-template-columns:minmax(0,1fr)}
+}
+/* the cockpit on phones and narrow windows (team cockpit spec §5.5): the list is the page; with a
+   selection the panel is a sheet, a page mode of the body's classes (no overlay, no :has()), so it
+   works without the script and the script's swap flips it (and keeps the list's scroll place). Only the picked row's path stays in the
+   list: .sel-race, .sel-rows and .picked name it (the script moves them), and of a received plan's
+   row only its Store form. A version's sheet is the panel alone (the list gives all of it way) */
+@media (max-width:1179.98px){
+  body.cockpit.has-sel .topbar,body.cockpit.has-sel main>:not(.cp,.pagehead,.banner),body.cockpit.has-sel .pagehead>:not(.stale-banner),
+  body.cockpit.has-sel:not(.sel-e) .cp-list{display:none}
+  /* the head's stale line and the DST banner stay (the Store sheet has time fields); a title of two
+     lines keeps the close link at its right, never under it */
+  .cp-head{flex-wrap:nowrap;align-items:flex-start}
+  .cp-title{flex:1}
+  .cp-close{margin-left:auto}
+  body.cockpit.has-sel .cp{display:flex;flex-direction:column}
+  body.cockpit.has-sel #panel{position:sticky;top:0;z-index:5;max-height:45vh;overflow-y:auto;padding-block:.25rem;background:var(--bg);border-bottom:1px solid var(--border)}
+  /* the sheet is the page: its card has no frame */
+  body.cockpit.has-sel :is(.cp-top,.cp-body){background:none;border:0;border-radius:0;box-shadow:none;padding-inline:0}
+  /* a head that holds a Store result (many lines, the ways to the teams still to do) flows with the
+     page instead of scrolling inside its 45vh (M3) */
+  body.cockpit.has-sel #panel[data-result]{position:static;max-height:none;overflow:visible}
+  body.cockpit.has-sel .cp-list>:not(.sel-race),
+  body.cockpit.sel-e .sel-race>:not(.cp-pending),
+  body.cockpit.sel-e .sel-race>.cp-pending>:not(.sel-rows),
+  body.cockpit.sel-e .sel-rows>:not(.picked),
+  body.cockpit.sel-e .sel-rows>.picked>:not(.cp-pick){display:none}
+  /* nothing picked: the list's blocks and the panel's parts are the grid's own items (the list's box
+     goes, its region name stays), so the flash stays on top and the card (the nearest race's live
+     version, its riders) follows the nearest race, before the later races, Over and the help (M1);
+     its row is marked as live, not as picked: no sheet is open. From 1180 px the list is one item in
+     the left column */
+  body.cockpit:not(.has-sel) .cp{gap:1.25rem}
+  body.cockpit:not(.has-sel) :is(.cp-list,#panel){display:contents}
+  body.cockpit:not(.has-sel) .cp-list>*{order:3;min-width:0}
+  body.cockpit:not(.has-sel) .cp-list>.cp-race:first-child{order:1}
+  body.cockpit:not(.has-sel) :is(#panel>.cp-top,#panel-body){order:2}
+  body.cockpit:not(.has-sel) #panel-body{margin-top:-1.25rem}
+  body.cockpit:not(.has-sel) #panel>:is(.flash,.result){margin:0}
+  body.cockpit:not(.has-sel) .cp-row.picked>.cp-link{background:none;box-shadow:inset 3px 0 0 var(--ok-icon)}
+  body.cockpit:not(.has-sel) .cp-row.picked>.cp-link:hover{background:var(--surface-2)}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 

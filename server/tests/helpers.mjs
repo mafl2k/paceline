@@ -1,10 +1,14 @@
 // Test-only builders for clubs, sheets and planner exports, and a running server. Later tasks add
 // to this file.
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {stripSheet, normalizePlan} from '../../pages/src/engine/plan.mjs';
 import {nameKey} from '../ids.mjs';
+import {isDate} from '../time.mjs';
+import {convertClub} from '../club.mjs';
+import {raceOf, racesOf, tidyRaces} from '../races.mjs';
 import {cookieClubs} from '../web.mjs';
 import {openDb} from '../db.mjs';
 import {openStore} from '../store.mjs';
@@ -46,7 +50,7 @@ export function planJson(name, riderIds, benchIds = []) {
 // (club() then makes every version its own plan); `at` defaults to `uploadedAt`, `recSig` to `sig`.
 export function sheet({
     team, label, date, riders, bench = [], uploadedAt, eventId = null, pinnedEventId = null,
-    plan, n = 1, at = uploadedAt, copyOf = null, recSig, type = null,
+    plan, n = 1, at = uploadedAt, recSig, type = null,
 }) {
     const {json, text} = stripSheet(planJson(label, riders, bench), null);
     const {plan: normal} = normalizePlan(json, text);
@@ -54,12 +58,14 @@ export function sheet({
         team, label, date, sig: normal.sig, json, text, uploadedAt, via: 'file',
         eventId, boundAt: null, pinnedEventId,
         ...(plan === undefined ? {} : {plan}),
-        n, at, copyOf, jsonName: nameKey(label), type, recSig: recSig ?? normal.sig,
+        n, at, jsonName: nameKey(label), type, recSig: recSig ?? normal.sig,
     };
 }
 
 
-// An active club in the shape of spec §4. A sheet without `plan` is its own plan.
+// An active club in the shape of spec §4. A sheet without `plan` is its own plan. The teams and
+// sheets may be given in the 0.3 shape (team.live, team.raceStarts, the event fields on the sheets):
+// the club is converted to races (club.mjs convertClub, at its createdAt) before it is returned.
 export function club({
     id = 'k7f3q9x2m4', name = 'Kettenfett RC', tz = 'Europe/Berlin', teams = {}, sheets = {},
     createdAt = '2026-11-01T10:00:00.000Z',
@@ -68,10 +74,81 @@ export function club({
     for (const [sid, s] of Object.entries(sheets)) {
         stored[sid] = s.plan === undefined ? {...s, plan: sid} : s;
     }
-    return {
+    const c = {
         id, name, status: 'active', email: 'captain@example.org', tz, createdAt, confirmedAt: createdAt,
         tokens: [], teams, sheets: stored, log: [], inbox: [],
     };
+    convertClub(c, Date.parse(c.createdAt));
+    return c;
+}
+
+
+// The live id of team `slug`'s race on `date`; without a date, the one live id of the team: null
+// for none, an error for two.
+export function liveId(c, slug, date = null) {
+    if (date !== null) {
+        return raceOf(c, slug, date)?.live ?? null;
+    }
+    const ids = racesOf(c, slug).map(([, r]) => r.live).filter(id => id !== null);
+    if (ids.length > 1) {
+        throw new Error(`team ${slug} has ${ids.length} live plans: ${ids.join(', ')}`);
+    }
+    return ids[0] ?? null;
+}
+
+
+// The race of team `slug` on `date` (races.mjs raceOf), or null.
+export const race = (c, slug, date) => raceOf(c, slug, date);
+
+
+// Makes version `id` the live plan of its race (team `slug`'s race of the version's date), as Make
+// live does: the team's other races keep theirs (races spec §1). Null clears the live plan of every
+// race of the team. A fixture that added versions by hand gets their races first (tidyRaces: the
+// store always holds invariant 1); a version of another team, or one without a date, is an error.
+export function setLive(c, slug, id) {
+    if (id === null) {
+        for (const [, r] of racesOf(c, slug)) {
+            r.live = null;
+        }
+        return;
+    }
+    const date = c.sheets[id]?.team === slug ? c.sheets[id].date : null;
+    if (raceOf(c, slug, date) === null) {
+        tidyRaces(c, slug);
+    }
+    const r = raceOf(c, slug, date);
+    if (r === null) {
+        throw new Error(`setLive: no race for ${id} of team ${slug}`);
+    }
+    r.live = id;
+}
+
+
+const EVENT_FIELDS = ['pinnedEventId', 'eventId', 'boundAt'];
+
+// The club is in the races shape: no team.live or team.raceStarts, no event field on a version, a
+// race exactly for every date that has a version of its team, and every race's live null or a
+// version of that team and date.
+export function assertRaceShape(c) {
+    for (const [slug, team] of Object.entries(c.teams)) {
+        assert.equal(Object.hasOwn(team, 'live'), false, `team ${slug} has live`);
+        assert.equal(Object.hasOwn(team, 'raceStarts'), false, `team ${slug} has raceStarts`);
+        assert.ok(team.races !== null && typeof team.races === 'object' && !Array.isArray(team.races), `team ${slug} has no races`);
+        const dates = [...new Set(Object.values(c.sheets).filter(s => s.team === slug && isDate(s.date)).map(s => s.date))].sort();
+        assert.deepEqual(Object.keys(team.races).sort(), dates, `the races of team ${slug}`);
+        for (const [date, r] of Object.entries(team.races)) {
+            assert.deepEqual(Object.keys(r).sort(), ['boundAt', 'eventId', 'live', 'pinnedEventId', 'start'], `race ${slug} ${date}`);
+            if (r.live !== null) {
+                const v = c.sheets[r.live];
+                assert.ok(v !== undefined && v.team === slug && v.date === date, `race ${slug} ${date}: live ${r.live}`);
+            }
+        }
+    }
+    for (const [id, s] of Object.entries(c.sheets)) {
+        for (const k of EVENT_FIELDS) {
+            assert.equal(Object.hasOwn(s, k), false, `sheet ${id} has ${k}`);
+        }
+    }
 }
 
 

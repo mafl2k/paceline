@@ -10,6 +10,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 
 const SCRIPT = new URL('../scripts/export-public.sh', import.meta.url).pathname;
+const CHANGES = new URL('../scripts/changes.mjs', import.meta.url).pathname;
 const skip = !existsSync(SCRIPT) && 'scripts/export-public.sh is not in this copy';
 const DENY = 'Zorro|Quixote';
 
@@ -147,6 +148,7 @@ function exportRepo(subject, files) {
     };
     mkdirSync(path.join(dir, 'scripts'));
     copyFileSync(SCRIPT, path.join(dir, 'scripts', 'export-public.sh'));
+    copyFileSync(CHANGES, path.join(dir, 'scripts', 'changes.mjs'));
     writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({version: '1.0.0-beta.1'}));
     writeFileSync(path.join(dir, '.public-exclude'), '.public-exclude\nscripts/export-public.sh\ninternal/\n');
     for (const [name, data] of Object.entries(files)) {
@@ -188,5 +190,39 @@ test('export: stops without a deny regex; excluded files are not checked', {skip
         const r = runExport(dir);
         assert.equal(r.status, 1, r.stderr);
         assert.deepEqual(r.stderr.split('\n').filter(l => l.startsWith('  ')), ['  pages/x.mjs (text)']);
+    } finally { rmSync(dir, {recursive: true}); }
+});
+
+// The release notes are the version's lines from CHANGES.md when it has a section for the version
+// (the throwaway repository's manifest says 1.0.0-beta.1), else the commit subject.
+const SECTION = v => `# Changes\n\n## Unreleased\n\n### Mod\n\n### Server\n\n## ${v} (2026-01-01)\n\n### Mod\n- NOTE_LINE\n`;
+
+test('export: the notes come from CHANGES.md, and the leak check covers them', {skip}, () => {
+    // The subject is clean, the version's notes name a denied word: only the notes leak.
+    const bad = exportRepo('Clean subject', {'README.md': 'clean\n', 'CHANGES.md': SECTION('1.0.0-beta.1').replace('NOTE_LINE', 'Ride with zorro')});
+    try {
+        const r = runExport(bad);
+        assert.equal(r.status, 1, r.stderr);
+        const listed = r.stderr.split('\n').filter(l => l.startsWith('  '));
+        assert.ok(listed.includes('  release notes'), r.stderr);
+        assert.ok(!listed.includes('  commit message'), r.stderr);
+        assert.doesNotMatch(r.stderr, /zorro/i);
+    } finally { rmSync(bad, {recursive: true}); }
+    // A denied subject stops being "the release notes" once the version has its own notes.
+    const own = exportRepo('Add the zorro fixture', {'README.md': 'clean\n', 'CHANGES.md': SECTION('1.0.0-beta.1').replace('NOTE_LINE', 'Fine line')});
+    try {
+        const r = runExport(own);
+        assert.equal(r.status, 1, r.stderr);
+        const listed = r.stderr.split('\n').filter(l => l.startsWith('  '));
+        assert.deepEqual(listed, ['  commit message']);
+    } finally { rmSync(own, {recursive: true}); }
+});
+
+test('export: a CHANGES.md without a section for the version leaves the subject as the notes', {skip}, () => {
+    const dir = exportRepo('Add the zorro fixture', {'README.md': 'clean\n', 'CHANGES.md': SECTION('0.9.0').replace('NOTE_LINE', 'Fine line')});
+    try {
+        const r = runExport(dir);
+        assert.equal(r.status, 1, r.stderr);
+        assert.deepEqual(r.stderr.split('\n').filter(l => l.startsWith('  ')), ['  commit message', '  release notes']);
     } finally { rmSync(dir, {recursive: true}); }
 });

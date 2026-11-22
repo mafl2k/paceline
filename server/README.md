@@ -1,4 +1,4 @@
-# Paceline plan server (0.3, circles)
+# Paceline plan server (0.5, the team page)
 
 A small web server for the Paceline mod. A **club** (circle) keeps its teams' TTT plans: a team
 captain's planner export is stored as a **plan** in one of the club's teams, and each rider's
@@ -9,20 +9,33 @@ Node 22, `node:http` only, no npm dependencies. It validates and strips plans wi
 `pages/src/engine/plan.mjs`, so plan codes are the same as in the mod.
 
 Captains work in a browser: they register a club at `/register`, open their teams with a link that
-arrives by mail, and upload the planner's export there. A team may have a few plans for one race
-("Rollers", "Rollers · slow"); every upload of a plan is a new **version** (v1, v2, …) with what
-changed against the one before, and a captain can go back to an older version. The operator has a
-page of their own (`/admin`). Every page is server-rendered HTML with forms; the captain pages need
-one first-party script, and only Make live works without it (see Pages). `/privacy` is the binding
-text on what the server keeps; this README only describes it.
+arrives by mail, and plan on ZwiftGopher or upload the planner's JSON export there. A team races in
+**races**: a race is one date of the team with its start time, its event link and one **live
+version** (what riders get), and a team may have several races ahead (its weekly race and an extra
+one on a Sunday, say). A race may have a few plans ("Rollers", "Rollers · slow"); every Store of a
+plan is a new **version** (v1, v2, …), the versions are kept (up to 20 per plan), and any version of
+any plan of the race can be made live. Everything about a team's races is on one page, the **team
+page**: the races with their plans and versions on the left, the rider table of what is picked on the
+right, marked against the race's live version. The operator has a page of their own (`/admin`).
+Every page is server-rendered HTML with forms; the captain pages need one first-party script, and
+Make live and the team page's rows work without it (see Pages). `/privacy` is the binding text on
+what the server keeps; this README only describes it.
 
 ## What it does
 
+- Keeps each team's **races**. A race has its date, its start time (a weekly team's race without
+  one starts at the team's time), an event link if the captain set one, and **one live version**:
+  two races of a team each have their own, and riders get each race's live version for that race. A
+  race is **over** 2 hours after its start; riders still get its plan for 2 more hours, and its
+  plans are kept for 7 days after its date, then deleted.
+- Keeps the **versions** of each plan (up to 20; at 20 the oldest one that is not live goes) and
+  makes any of them live, with Undo for 10 minutes; there is nothing to restore. The team page shows
+  every version's riders marked against the race's live version.
 - Answers the **plan check** `GET /api/v3/rider/<zwiftId>`: which clubs list this rider, which plan
   he rides, and, from 30 minutes before the start, the plan itself.
 - Keeps **private clubs** hidden from everyone who does not hold the club's rider code.
-- Takes plans **pushed from ZwiftGopher** (`POST /api/v3/push`, proof of concept): the team's upload
-  page links to the planner with a short-lived token, the planner posts the plan back, and it waits
+- Takes plans **pushed from ZwiftGopher** (`POST /api/v3/push`, proof of concept): the team page
+  links to the planner with a short-lived token, the planner posts the plan back, and it waits
   in the team's inbox until the captain stores it (see "ZwiftGopher push").
 - Tells old 0.2.x mods to update (**notice**): there is no compat mode (hard cut, 17 Nov 2026).
 - Accepts **recordings** per club, refuses heart rate and cadence, drops riders outside the team's
@@ -56,11 +69,13 @@ code. Weight is in the plans for W/kg.
 ## Pages
 
 All pages are server-rendered HTML with plain forms and one functional cookie (plus the short-lived
-flash cookie, below). The captain pages need one first-party script, `/static/app.js`: it redraws
-the assign page when a choice changes, opens the confirm strips in place and does the guarded
-reload. Make live (also "Make vN live" and Restore of the live plan) and every action that asks
-first work without it, as a plain POST answered by the server's confirm page; the other captain
-pages say that they need the script. The public pages and `/admin` have no script. The public pages (start page,
+flash cookie, below). The captain pages need one first-party script, `/static/app.js`: it swaps the
+team page's panel in place, redraws the Store form when a choice changes, opens the confirm strips
+in place and does the guarded reload. Every row of the team page is a plain link to the page with
+that row picked, which the server draws in full; Make live (also "Make vN live" and Undo) and every
+action that asks first work without it, as a plain POST answered by the server's confirm page; the
+captain pages say in a note that they need the script (the team page's note says what works without
+it: whole pages per row, and a changed Store form's first Store showing what happens). The public pages and `/admin` have no script. The public pages (start page,
 register, lost link, the `/m/` and `/t/` pages, privacy) look like the captain pages: cards, buttons
 and fields from the same stylesheet, light and dark; `/admin` keeps its plain look. Every state change is a POST from the same site; no GET changes anything,
 so link previews and mail scanners do no harm. Pages carry `noindex`, `Referrer-Policy:
@@ -76,14 +91,18 @@ no-referrer` and a neutral title.
 | `/lost` | the address gets a new link for each club it registered; the answer is always the same neutral text. The old link keeps working until the new one is opened |
 | `/t/<token>` | confirmations: an address change or a deletion (both first by the current address; a new address confirms too) |
 | `/manage` | the club hub: what to fix, plans waiting, the races (Captain pages, below) |
-| `/manage/team/<slug>` | one team: status, live plan with its version and what changed, Restore and Undo, riders, other plans of this race; "Upload a plan" and, with `PUBLIC_URL`, "Plan on ZwiftGopher" (buttons under the race line, or the empty card's two big buttons) |
-| `/manage/team/<slug>/plan/<id>` | the plan page: head, Make live, rider order, versions with what changed and Restore vN, New version, "Edit on ZwiftGopher" (when the plan has a ZwiftGopher link), race date, Remove event link, Delete |
-| `/manage/team/<slug>/settings` | rename, start time, race rhythm, event links, delete the team; never reloads |
+| `/manage/team/<slug>` | the team page (Team page, below; `?r=<race date>`: that race's live version, whichever it is): the list (every race still to race, nearest first, each with its race line and its ⋯; the plans not stored yet under "Not stored yet"; the race's plans, each with its ⋯ and its versions; the races that are over in the "Over" fold; "How races work") and the panel, one card (with nothing picked the nearest race's live version, its riders). `?v=<version id>` picks a version: the card shows its rider table against the race's live version and Make live; `?e=<entry id>` picks a plan not stored yet: its Store form and its table. Every row links to the page with its selection and the fragment `#panel`; a version or entry that is gone draws "This version no longer exists." or "This plan is stored or no longer here." in the panel. With `panel=1&tv=<team version>` the server answers the panel alone (the script's swap; 409 when the team changed since `tv`). With `PUBLIC_URL` "Plan on ZwiftGopher" with the quiet "Upload a file instead" under it, else "Upload a plan" |
+| `/manage/team/<slug>/plan/<id>` | redirects to (303) the team page with the plan's live version, else its newest, picked (`?v=<id>#panel`; any version id of the plan works); a plan that is gone to the team page; a team that is gone answers 404. The plan page went with 0.5 |
+| `/manage/team/<slug>/settings` | rename, race day and time (rhythm and start time, one Save), New ZwiftGopher link, delete the team; never reloads |
 | `/manage/new-team` | add a team |
-| `/manage/upload?team=<slug>[&plan=<id>[&from=plan]]` | the upload page: the JSON file (or pasted, folded) and the optional text export; Continue goes on to the assign page; never reloads. From a plan page's New version (`from=plan`) the assign page, Discard and the result go back to that plan |
-| `/manage/inbox/<id>` | the assign page: team, plan, type, Make live, date, event link and the preview; Store or Discard |
-| `/manage/settings` | club settings: name and zone, race day of weekly teams, address, private club, remove a rider, recordings, activity, delete the club |
+| `/manage/upload?team=<slug>[&plan=<id>][&date=<date>]` | the upload page: the planner's JSON file (or pasted, folded), no text export; Continue goes on to the team page with the plan picked (`?e=<id>#panel`), its Store form open; never reloads. `plan` (a plan ⋯'s New version) preselects that plan, `date` (a race ⋯'s "Upload a file for this race", "Upload for Sprockets") that race |
+| `/manage/inbox/<id>` | redirects to (303) the team page of the entry's team with the entry picked (`?e=<id>#panel`); an entry that is gone, or one of no team, answers 404. `POST /manage/inbox/<id>` is Store (Upload and Store, below): it answers 303 |
+| `POST /manage/live`, `POST /manage/live/undo` | Make live of a version (also from the panel and "Make vN live" beside a row) and its Undo; both land on the team page at the race's live pointer, `?r=<race date>#panel` (the version now live, and whichever is live at a later reload; a refusal of Make live keeps its version picked, `?v=`; Make live, below) |
+| `POST /manage/race` | the race ⋯: `action=when` moves the race to another date or start time with all its plans (asks first), `event` sets its event link, `unlink` removes it; a race that is over takes none |
+| `POST /manage/plan/rename` | the plan ⋯'s Rename: a new type for every version of the plan (the label stays the team's name plus the type) |
+| `/manage/settings` | club settings: name and zone, address, private club, remove a rider, recordings, activity, delete the club |
 | `/static/app.css`, `/static/app.js` | the captain pages' stylesheet and script; each has an ETag of its content, and a link with the matching `?v=` is cached for a year |
+| `/static/logo.png`, `/static/favicon.svg`, `/static/apple-touch-icon.png` | the Paceline logo (start page only) and the icons every page links; from `server/assets/`, cached the same way |
 | `/admin` | the operator page (below) |
 | `/admin/recordings?cid=<cid>`, `/admin/recordings/file`, `/admin/recordings/race` | an active club's recordings for the operator to download (below, Recordings for analysis) |
 | `/privacy` | what is kept, who sees it, for how long and where it is processed; with a club cookie a back bar to `/manage` |
@@ -117,40 +136,49 @@ captain page has the same frame: a sidebar with the club name (the way to the hu
 teams and, at its bottom, the browser's other clubs, Privacy and Log out, the current place marked
 (the club on the hub, the team on its page and every page below it). Club settings is no
 entry of the sidebar or the phone's team switcher: the button beside the hub's title leads
-there (and the hint in the team settings). Beside the sidebar is the
+there. Beside the sidebar is the
 page, left-aligned, its head the same everywhere (the title and the page's action, such as Team
 settings, right beside it). **Breadcrumb:** from 1024 px every page below the hub starts with one
 breadcrumb line where a phone has its back bar and the kicker: "Kettenfett RC › Rollers", "Kettenfett
-RC › Rollers › Rollers · fast", "Kettenfett RC › Rollers › Upload", "Kettenfett RC › Club settings";
+RC › Rollers › Upload", "Kettenfett RC › Club settings";
 every crumb but the last is a link (`<nav aria-label="Breadcrumb">`, the last crumb
 `aria-current="page"`). The phone's back bar and the breadcrumb are drawn from the same crumbs, so
 the bar always goes where the crumb before the page goes, under one label for the way to the hub:
 "All teams" (the club's name is its crumb). A question without the script ends in "Confirm" after
 the page its way back leads to; its Cancel sits beside the confirm button from 1024 px, under it on
 a phone. The sidebar marks the hub or the team page as the current page, and on a page below it the
-place as the current location (`aria-current="location"`). Forms are one column, the team page two.
+place as the current location (`aria-current="location"`). Forms are one column; the team page has
+two from 1180 px (the list and the panel).
 
 <p>
-<img src="../docs/images/captain-teams-390-light.png" width="260" alt="The club hub of Kettenfett RC at phone width: next race Thu 19 Nov with Club settings beside the name; To do before the race: Rollers 19:30, Ben now rides Sprockets, Upload without Ben; Cogs, no start time and no plan, Set the start time; then Racing Thu 19 Nov, a table of Rollers ('Rollers · fast' v3, 4 of 6) and Sprockets ('Sprockets' v2, 0 of 3) at 19:30, each with an amber status icon, and Cogs without a start time">
-<img src="../docs/images/captain-team-390-light.png" width="260" alt="The Rollers team page at phone width: Team settings at the top right beside the club name; the race line Thu 19 Nov 19:30, in 18 min, open since 19:00; under it the buttons Upload a plan and ZwiftGopher side by side; 1 to fix (Ben now rides Sprockets, Upload without Ben); Plans for Thu 19 Nov with the live row 'Rollers · fast' v3, plan code HAZ4B4, 6 riders, in the row the line 'v3 of Rollers · fast is live' with Undo, and its change line 'v3 (restored v1): Ben and Gus in, Hanna out' with Restore v2">
+<img src="../docs/images/captain-teams-390-light.png" width="260" alt="The club hub of Kettenfett RC at phone width: Next race · Thu 19 Nov with Club settings beside the name, Updated 19:12, the green line Nothing to do · next race Thu 19 Nov 19:30; then Racing Thu 19 Nov, a table of Rollers ('Rollers · fast' v2, 0 of 5) and Sprockets ('Sprockets' v2, 0 of 3) at 19:30, each with an amber status icon; then the team tiles Rollers and Sprockets, 19:30 · in 18 min, with their live plan and how many riders have it, and Cogs with No start time set">
+<img src="../docs/images/captain-team-390-light.png" width="260" alt="The Rollers team page at phone width: Team settings at the top right beside the club name, the rhythm line Weekly · Thursday 19:30, the full-width primary button Plan on ZwiftGopher with the quiet link Upload a file instead under it, Updated 19:12; the race line Thu 19 Nov · 19:30 · in 18 min · open since 19:00 with its ⋯; the plan LIVE Rollers · fast with its ⋯ and its versions v2 19:12 · live since 19:12 · 0/5 have it (marked live) and v1 Wed 18 Nov 21:00 · was live Wed 18 Nov 21:00 · Ben and Gus in, Hanna out; the plan Rollers · slow with its v1; then the card of the live version, Riders on 'Rollers · fast' v2, its Plan code and 0 of 5 have the plan, its rider table starting below with Cleo, in the event, the plan coming at the next check">
 <img src="../docs/images/captain-team-390-dark.png" width="260" alt="The same team page in the dark theme">
-<img src="../docs/images/captain-assign-390-light.png" width="260" alt="The assign page at phone width: 5 riders (Cleo, Dan ...), team Rollers, race Thu 19 Nov 19:30, New version of 'Rollers' preselected beside 'Rollers · slow' and New plan, an empty type, Make live on (riders get v2 at once instead of v1: the gate is open), and what happens: v2 of 'Rollers' live, riders in the event get it within a minute, Hanna in, Ben and Gus out, Hanna moves from Sprockets to Rollers, still to do: Sprockets; then Store and make live, and below it, set apart, Discard…">
-<img src="../docs/images/captain-plan-390-light.png" width="260" alt="The plan page of 'Rollers · fast' for Thu 19 Nov 19:30 at phone width: LIVE · open since 19:00 with the line 'v3 of Rollers · fast is live' and Undo under it, the riders of v3 in order (Ben, Cleo, Dan, Eva, Finn, Gus), the versions v3 (live, restored v1), v2 and v1 with their plan codes and change lines, Restore only on v2 (v1 has the plan code riders have), then New version, the race date and Delete plan">
+<img src="../docs/images/captain-team-races-390-light.png" width="260" alt="The Rollers team page with two races, the whole page at phone width: the race of Thu 19 Nov 19:30 with the plans 'Rollers · fast' (v2 · was live 19:12 · Other details only, v1 · was live Wed 18 Nov 21:00), 'Rollers · spare' and the live 'Rollers · easy' (v1 19:12 · live since 19:12 · 0/5 have it), each with its ⋯ and its version rows; then the card of the live version, Riders on 'Rollers · easy' v1, Plan code with its code and 0 of 5 have the plan, the rider table with each rider's state on a line under the row: Cleo, Dan and Eva in the event with the plan coming at the next check, Finn with an older plan (code ABC123), Hanna riding Sprockets now; What do these mean? and at the card's bottom LIVE · riders get this; then the race Sun 22 Nov · 18:00 · in 3 days · opens Sun 22 Nov 17:30 · Event 5123456 with its ⋯, the plans 'Rollers · sunday B' and the live 'Rollers · sunday', and the closed fold Live plan and riders; at the end the help fold How races work">
+<img src="../docs/images/captain-race-menu-390-light.png" width="260" alt="The ⋯ of the race on Sun 22 Nov open at phone width, in the page flow under the race line: Date and time with the race date 22.11.2026, the start time 18:00 with the hint Empty: the team's start time, 19:30, and Save date and time…; then Event link: Event link 5123456 (yours): the plans go only to riders in that event, an empty link field, Save event link and Remove event link">
+<img src="../docs/images/captain-plan-menu-390-light.png" width="260" alt="The ⋯ of the plan 'Rollers · sunday B' open at phone width, under its label in the Sunday race: Type with the hint The plan reads as the team's name plus this type, in every version, the field holding sunday B and Rename; New version; Delete plan… in red (no Make live); below it the plan's version row v1 19:12 · Other details only, the live plan 'Rollers · sunday' with v1 19:12 · live since 19:12, the closed fold Live plan and riders and the help fold How races work">
+<img src="../docs/images/captain-cockpit-version-390-light.png" width="260" alt="A version picked on a phone, the sheet: the title 'Rollers · easy' v2 · stored 19:12 with the close link ✕ at its right, the version's Plan code and the caption Against live v1 · Ben in, Hanna out under it; the rider table #, Rider, Pull @ W/kg with Ben marked NEW, Cleo, Dan, Eva and Finn at 60 s, and Hanna 5 crossed out as dropped; the words Riders in the event get 'Rollers · easy' v2 instead of 'Rollers · easy' v1 within a minute. Ben moves from Sprockets to Rollers. Still to do: Sprockets. Make it live anyway?, and under a line the secondary button Make v2 live…">
+<img src="../docs/images/captain-cockpit-store-390-light.png" width="260" alt="A plan not stored yet picked on a phone, the Store sheet: the title Sent 19:12 · 'Rollers' · 3 riders with ✕ and the caption Against live 'Rollers · easy' v1 · Ben in, 3 riders out; the fold Other team; Store as with New version of 'Rollers · easy' (live · v1 · 2 of 3 riders the same), of 'Rollers · fast' and of 'Rollers · spare', and New plan, none chosen yet; the unticked box Make live (pick a plan first); last in the form the closed race fold Race: Thu 19 Nov · 19:30 · Change; the rider table with Ben marked NEW, Cleo and Dan, and Eva, Finn and Hanna crossed out; What happens in red: Pick a plan.; then Store and, at the other end of the same line, Discard…; last the line Not updating while the Store form is open · Refresh">
+</p>
+<p>
+<img src="../docs/images/captain-cockpit-version-1280-light.png" width="780" alt="The Rollers team page at 1280 px with a version picked: the sidebar with Rollers (1 new plan, 0 of 5 riders have the plan), Sprockets and Cogs; the breadcrumb Kettenfett RC › Rollers, the head with Team settings, Plan on ZwiftGopher and Upload a file instead; in the left column the race line Thu 19 Nov · 19:30 · in 18 min · open since 19:00 on one line, Not stored yet (Sent 19:12 · 'Rollers' · 3 riders), the plans Rollers · fast (v2 and v1, each was live), Rollers · spare, and LIVE Rollers · easy with the picked row v2 stored 19:12, not live · Ben in, Hanna out and Make v2 live… beside it, and v1 19:12 · live since 19:12 · 0/5 have it, then How races work; in the right column one framed card: 'Rollers · easy' v2 · stored 19:12, its Plan code and Against live v1 · Ben in, Hanna out, the rider table with Ben NEW and Hanna crossed out, what Make live does, and at the card's bottom Make v2 live…">
 </p>
 
 - **Club hub** (`/manage`): the club, its next race ("Next race · Thu 19 Nov") with Club settings
   beside the name, "Updated 19:12", then each block only when it has something. **To do before the
   race**: every fix item across teams on one line each, the team, its start time, the problem in
-  the team page's words (riders in another event, "Ben now rides Sprockets", no start time, no live
-  plan near the race) and the team page's own button for it (Remove event link, Upload without Ben,
-  Set the start time, Upload a plan, "Make one of its plans live" to the team page's plans), by
-  start time, then the worst first. **New plans from ZwiftGopher**: every plan waiting, with its
-  team, "Sent 19:12", the planner's team name, the riders, Review and store and Discard (back to the
-  hub). The hub's buttons name their team for screen readers and voice control ("Review and store
+  the team page's words (riders in another event, "Ben now rides Sprockets", no start time, plans
+  stored but none live, at any distance from the race) and the team page's own button for it
+  (Remove event link, Upload without Ben, Set the start time, "Make a plan live": the team page with
+  the newest version picked when the race has one plan, else the race's block), by start time, then
+  the worst first. A team's regular race day without a plan
+  is no race: it has no item here and no row in the race tables. **New plans from ZwiftGopher**: every plan waiting, with its
+  team, "Sent 19:12", the planner's team name, the riders, Review and store (the team page with that
+  plan picked, its Store form open) and Discard (back to the hub). The hub's buttons name their team for screen readers and voice control ("Review and store
   (Rollers)"), and its Remove event link comes back to the hub. From 1180 px each of these is one
   line, its words at least 12rem wide; narrower, the buttons go under the words. Then one table per
   race day, the next first, up to 7 days ahead (a next race further away: that one alone): each team racing that day
-  (a link), its start, the live plan and version, "4 of 6 have it" once the plan is open or "opens
+  (a race with plans; a link), its start, the live plan and version, "4 of 6 have it" once the plan is open or "opens
   19:00" before, and the worst state as an icon. With nothing to do and nothing waiting one line
   says so: "Nothing to do · next race Thu 19 Nov 19:30" (or "no race planned"). From 1024 px that
   is all (the sidebar lists the teams); on a phone the team tiles follow under "Teams", one per team
@@ -158,57 +186,181 @@ place as the current location (`aria-current="location"`). Forms are one column,
   without a race after the weekly teams). A special team with nothing in the next 14 days folds into
   "Other teams (n)" below the rest; weekly teams never fold. "Add a team" at the end. A club without
   teams gets three steps and the add-team form instead; that page never reloads.
-- **Team kinds.** A team is **weekly** (it races every week on the club's race day, Thursday unless
-  the club settings say otherwise, or on a day of its own, always at the team's start time) or
-  **special** (a ZRL team, a yearly event: no fixed times at all, so the date and the start time
-  come with each upload). "Add a team" asks for the name and the race rhythm: "Every week on" a day
-  (the club's by default) with the start time, or "Special: date and start time come with each
-  plan"; a special team gets no start time of its own (a posted one is ignored). The team settings
-  change it under "Race rhythm"; a special team's settings have no start time card, only the line
-  "A special team gets its date and start time with each plan." A special team's start time
-  belongs to the race (team and date): every plan of that date starts at it, and the newest upload
-  for the date sets it (see the assign page). Switching keeps the stored start time, and the flash
-  says what it means for the plans: a team made weekly again races at the team's start time ("Its
-  plans now start at 19:30, the team's start time."); a team made special keeps its plans' times.
-  A special team's race stored before 0.3.1 has no start time of its own and races at the team's,
-  as it did. "No start time" (red) is for weekly teams without one, and for a special team's race
-  that has plans but no time at all (stored before 0.3.1, the team without one), live or not; its
-  callout leads to the upload of that race's plan, whose Store sets the time. A special team with
-  no plan stored has "No race planned" (neutral, no time line); with a plan stored but none live,
-  "No live plan", as a weekly team. A line never shows a missing time: without one, the day alone. A new plan's default race date is the live plan's date while that race is still
-  to come or running (until 2 h after its start); otherwise the kind sets it: a weekly team's next
-  race day, a special team's newest plan still to race (or none, and the date is then asked for).
-- **Team page** (`/manage/team/<slug>`), the race-day view: one race line with the opening time
-  ("Thu 19 Nov · 19:30 · in 2 h 40 min · opens 19:00"), what needs fixing, then "Plans for Thu 19
-  Nov": one row per plan of this race in a fixed order (only the LIVE mark moves), each linking to
-  its plan page. The live row shows its version and time ("v2 · 16:05"), the plan code, the riders
-  count, what changed against the previous version with its version ("v2: Cleo in, Ben out"; a
-  restored one "v3 (restored v1): …"), "Restore v1" and, when a newer version is not live, "v3 ·
-  16:40 is newer, not live" with "Make v3 live". The other rows show what is outdated
-  ("Ben now rides Sprockets"), a short rider list and Make live. Under the plans: the live plan's
-  riders (never the planner's roster, the club's rider pool). Under the race line the two ways to a
-  plan are buttons: "Upload a plan" and "Plan on ZwiftGopher" (a new tab; only when the server
-  has `PUBLIC_URL`), side by side at full width on a phone, where the second reads "ZwiftGopher"; a
-  team without plans has them as its empty card's two big buttons instead. Team settings is a quiet link at the
-  top right on a phone and beside the title from 1024 px, as Club settings is on the hub; a weekly team without a start time also gets "Set the
-  start time" in its red callout (a special team's race without one: "Upload it with its start time"). Make live ("Make v3 live" and Restore of the live plan too)
-  asks first only when it matters: while the gate of the race it affects is open (from 30 minutes
-  before the start until the race is used up, for the plan replaced or the one becoming live) or
-  when its words warn (outdated marks, a rider it moves, a team it leaves with a hole, a plan of
-  another race, no start time). Then the button turns, in its place, into a strip with what riders
-  get and when ("Riders in the event get … within a minute"; before the gate "From 19:00, riders get
-  …"; Restore names the riders that change, "With v1: Hanna in, Ben out."), "Make live" and Cancel.
-  Otherwise it acts at once: the page comes back on the row of the plan live now (`#plan-<id>`), and
-  that row, where the action was, says so and offers Undo ("v3 of 'Rollers · fast' is live · Undo"),
-  for 10 minutes and only while nothing else changed; Undo makes the version that was live before
-  live again, under the same rule (an Undo that has to ask is confirmed as an Undo). Store and make
-  live on the assign page asks nothing (its "What happens" is the question) but offers the same
-  Undo. The server decides it again on the POST, so a page drawn before
-  the gate opened still asks. A team has one live plan, so Make live of a plan for another race
-  says that it ends the live plan for its race ("riders get nothing for that race") and asks "Make it
-  live anyway?". Make live, "Make vN live", Restore, Undo and Delete plan carry the team's version: a
-  page drawn before someone else changed the team is refused ("Rollers changed since you opened the
-  page. Nothing was changed.") and drawn anew. Raced plans are not listed.
+- **Team kinds.** A team is **weekly** (it races every week on its own day, at the team's start
+  time) or **special** (a ZRL team, a yearly event: no fixed times at all, so every race has its own
+  date and start time). There is no club race day: "Add a team" asks for the name and the race
+  rhythm, "Every week on" a day (Thursday is prefilled) with the start time, or "Special: date and
+  start time come with each race"; a special team gets no start time of its own (a posted one is
+  ignored). The team settings change both in one card, "Race day and time", built like Add a team:
+  weekly with the race day and the start time under it (its hint: the club's zone, riders get the
+  plan 30 min before the start, a race with a time of its own keeps it), or special, and one Save
+  (user, 22 Nov 2026). A special team's card has special checked; the script hides the weekly
+  fields then (without the script they show), and its Save ignores the start time: the team's
+  stored start stays for when it is made weekly again. The flash names what changed, the team once
+  ("Sprockets: Every week on Tuesday at 20:05." when both did), then what a switch of the kind does
+  to the team's plans. An extra
+  race on another day needs no second team: a plan stored for another date (its date in the Store
+  form) makes a race there. **A race's start time** is its own once it is set (the Store
+  form's start time, or "Save date and time…" in the race's ⋯); a weekly team's race
+  without one starts at the team's start time, and a special team's race stored before 0.3.1 without
+  one at the team's old start time, as it did. Switching the kind keeps every race's own time.
+  "No start time" (red) is for a race that has plans but no time at all, live or not: a weekly
+  team's race without its own time while the team has none, a special team's race stored without
+  one. A weekly team without a start time and without a plan only shows the neutral "No start time
+  set" (no rider is affected yet, no "To do"). The red callout leads to the team settings (weekly)
+  or to the upload of that race's plan, whose Store sets the time (special). A special team with no plan stored has "No race planned" (neutral, no time
+  line); with a plan stored but none live, "No live plan", as a weekly team. A line never shows a
+  missing time: without one, the day alone. A new plan's default race is the team's nearest race
+  still to race: an existing one or, for a weekly team, its next race day (a special team: its
+  earliest race ahead, or none, and the date is then asked for). A race is still to race until 2 h
+  after its start; from then on it is **over**.
+- **Team page** (`/manage/team/<slug>`): one page for everything about a team's races (team cockpit
+  spec). Its head has the title with Team settings beside it (a quiet link at the top right on a
+  phone, as Club settings is on the hub), the team's rhythm line ("Weekly · Thursday 19:30"), the ways
+  to a plan (with `PUBLIC_URL` "Plan on ZwiftGopher" (a new tab), the primary button, at full width on
+  a phone, with the quiet link "Upload a file instead" under it; without it "Upload a plan") and
+  "Updated 19:12". From 1180 px the page has two columns, **the list** on the left and **the panel**
+  on the right; narrower, the list is the page and the panel opens as a sheet (Phone, below).
+  **The list:** every race of the team still to race, nearest first (a weekly team without a race
+  ahead: the neutral line "Next regular race Thu 26 Nov 19:30" and its empty card with the ways to a
+  plan instead). Each race starts with its line and the race's ⋯ in its corner ("Sun 22 Nov · 18:00 ·
+  in 2 days · opens Sun 22 Nov 17:30 · Event 5123456"; the nearest "Thu 19 Nov · 19:30 · in 18 min ·
+  open since 19:00"); the nearest race then has what needs fixing and its callouts. Under **"Not
+  stored yet"** come the plans received from ZwiftGopher and the uploads not stored yet, newest
+  first, one row each ("Sent 19:12 · 'Rollers slow' · 4 riders", "Uploaded 19:05 · 6 riders"): a
+  pushed plan sits with the nearest race, an upload with the race it was made for. Then the race's
+  plans in a fixed order (only the LIVE mark moves), each with its label and its ⋯, and under it its
+  versions, newest first: the two newest, the live one and the picked one shown, the rest in the fold
+  "N older" (links only, so it keeps the reload). A version's row says when it was stored ("v3
+  19:12"), "live since 19:14" (the live version; "live" for one that went live before 0.5) or "was
+  live 18:57", and in one line what it changes against the race's live version ("Hanna in, Ben out ·
+  2 targets"). The live version's row is marked LIVE and the picked row as picked (`aria-current`).
+  The live plan's newest version, when it is newer than the live one, was stored after the live one
+  went live and was never live itself, reads "v4 stored 19:20, not live" with "Make v4 live" beside
+  its row; another plan of the race gets no such notice (a variant kept as a backup must not ask to
+  be made live), and a version the captain stepped back from reads quietly "was live 18:57". A later
+  race keeps its live plan's notes and riders in the closed fold "Live plan and riders" (a later race
+  without a live plan shows its status instead). The races that are over sit in the fold "Over (1)"
+  at the end: each race's day with its plans and versions, without a race ⋯; their versions open read
+  only ("This race is over: nothing can be changed."), and their plans' ⋯ has Delete only. Last comes
+  the help fold "How races work".
+  **The panel** is one card in every state (from 1180 px the right column): its head (the title,
+  then one line with the plan code and the table's caption or the riders' count), the rider table, a
+  "what happens" slot and an **action bar** at its bottom, in the same place, frame, paddings and
+  column widths whatever is picked, so the page does not jump between them. **Nothing picked** opens
+  the nearest race's live version, its row marked as picked (`aria-current`): "Riders on 'Rollers ·
+  fast' v3", the plan code and "6 riders" (before the gate, with the hint "In ride order. Who has the
+  plan shows from 19:00, when riders get it.") or "4 of 6 have the plan" (after it, with "What do these
+  mean?"), the plan as riders get it in the rider table, never the planner's roster (the club's rider
+  pool). After the gate the table has a fourth column, **Plan**: each rider's state with a sign, so it
+  is never colour alone (✓ "Has the plan", "Has the plan · in the event"; ⚠ "Has an older plan (code
+  …)", "Has v2, not the live v3", "Has 'Rollers · slow' v1, not the live one", "Rides Sprockets now",
+  "In event … · gets nothing"; – "Not seen yet", "Checked 19:05 · not in the event yet", "In the event
+  · plan comes at the next check"), with the time of the rider's last check; the rows stay in ride
+  order. In the right column from 1180 px (too narrow for four columns) and on a phone the state is a
+  line under the rider's row, so pull @ target keeps its column. The action bar says "LIVE · riders
+  get this". A race with plans and nothing live shows "Nothing live for Thu 19 Nov yet" and "Pick a
+  version to see it and make it live."; a race without plans has no card (its empty card in the list
+  says it). **A version picked** (`?v=`) takes the card's place, also after the gate (the live
+  version's row then says "4/6 have it", the same count, so it stays in sight): "'Rollers · fast' v2
+  · stored 18:55", its plan code (once: after Store and make live the flash names it) and "Against
+  live v3 · Hanna in, Ben out", the rider table against the race's live version, what Make live would
+  do (when riders get it, the riders it moves from other teams, the teams it leaves with a hole,
+  outdated marks) and in the bar "Make v2 live", a secondary button while the race has a live
+  version, primary only when it has none. The live version's row links to its race's live pointer,
+  `?r=<race date>`, not to the version: the same card as nothing picked, and a reload after another
+  captain's switch draws the new live version (a race with nothing live: "Nothing live for … yet"; a
+  date that is no race any more, moved or deleted: the nearest race's, as the bare page; a special
+  team with no race ahead has none to fall back to: "This version no longer exists.", so a phone's
+  sheet always holds a card with its ✕);
+  back to live on a desktop is a click on that row (there is no "‹ Riders"; a phone's sheet has its ✕).
+  The card's line under the title is a block of two lines (the plan code, then the caption or the
+  count; a third is cut, its words in the caption's tooltip), so the table starts at the same height
+  in every state.
+  The live version is always the plan as riders get it, no old lines, also in the 10 minutes after a
+  switch: Undo is in the "v3 of 'Rollers · fast' is live" flash of the switch, and after a reload in
+  the live card's action bar beside "LIVE · riders get this" (no line above the card that would move
+  it). While the card shows another version (a switch in a later race, the bare page showing the
+  nearest race), the Undo is on the switched race's live row in the list, a plain form as the card's;
+  the row draws it also while the card offers it, hidden, and the script shows and hides it on every
+  swap, so it is offered once on a page, also after a swap away from the card that had it. A version of a race that is over: "This race is over: nothing can be changed." and "Read only"
+  in the bar. **A plan not stored yet picked** (`?e=`): its row's line as the title, the caption of
+  its table, the Store form inside its row in the list, the rider table against the live version of
+  the race the form has chosen, What happens, then in the bar Store and, at its other end, Discard…
+  (Upload and Store, below). A weekly team without a start time whose race has a plan also gets "Set
+  the start time" in its red callout (without a plan only the neutral "No start time set"; a special
+  team's race without one: "Upload it with its start time").
+- **The rider table** (the card's, and a later race's riders card's; one component): the columns #,
+  Rider and "Pull @ W/kg" (or "Pull @ W", the club's "Targets in"), pull and target in one cell ("60 s
+  @ 4.2"), and on the live version after the gate Plan, each rider's state.
+  It is marked against the race's live version, always, also when that belongs to another plan of
+  the race, and never against another race; its caption names that base and sums up ("Against live
+  v3 · Hanna in, Ben out", "Against live 'Rollers' v3 · …"; the live version has none: it is the plan
+  as riders get it). A rider whose order among the riders of both, shown seconds or
+  shown target changed is followed by a dimmed copy of his row in the base (old number, name, old
+  pull @ target; screen readers hear "before:"), the changed value in the change colour; a dropped
+  rider appears only as his old line, crossed out, at the end of the table (all dropped riders together,
+  in their old order, each with his old number), with "→ Sprockets" when he rides
+  for another team now ("dropped:"); a new one has "NEW". The numbered rows without old lines are the
+  order riders ride. Captions without marks: "LIVE · riders get this", "Same riders, order, pulls and
+  targets as live v3", "Nothing live for Sun 23 Nov yet: nothing to compare", "Live v3 can't be read:
+  nothing to compare". Targets in W/kg are `pull_wkg`, else the pull watts over the weight; in watts
+  `pull_power`, else W/kg × weight; a rider whose target cannot be converted (no weight) shows what
+  the plan has, with its unit. The marks compare the shown values, so a W/kg export followed by one in
+  watts is no change.
+- **Phone: the sheet** (below 1180 px): the list is the page, the card of the live version (its
+  riders) follows the nearest race (before the later races, "Over" and "How races work"), its row
+  marked live, not picked, and a flash on top of the page. A picked row
+  opens the panel as a sheet over the page: the close link ✕ at the right of its title, then for a
+  version the table and Make live, for a plan not stored yet the Store form, the table, What happens,
+  Store and Discard. With the script ✕ and Back bring the list back at its scroll place, without a
+  page load; without it the row is the same URL drawn by the server with the sheet open, and ✕ a link
+  to the page without a selection. The stale line shows in the sheet too; the sheet's head stays at the
+  top while it scrolls, except a head holding a Store result, which scrolls with it. Tell
+  captains: after Make live on a phone the page stays on the version's sheet (its flash and Undo
+  there); ✕ shows the list with the live card.
+- **The race's ⋯** (every race still to race that has plans): "Date and time" with the date and the
+  start time (a weekly team's: "Empty: the team's start time, 19:30") and "Save date and time…".
+  With the script it always asks first in its place ("Moves the race and its plans to Sun 29 Nov
+  18:30."); the server asks (without the script) only when the date or the time changes, and an
+  unchanged one answers "Saved." Confirmed, it moves the race with all its plans, its live plan and its event link to the new date or
+  time (refused when the team already races on that date or the new time is over; an event learned
+  from riders' checks is forgotten); the page then lands on the race (`#race-<date>`). Then the
+  event link: its line ("Event link 5123456 (yours): the plans go only to riders in that event.",
+  "Event 4567001, learned from a rider's check." or "No event link: the plans find the event by the
+  start time."), a field with "Save event link", and Remove event link; and "Upload a file for this
+  race". The link is the race's: every plan of the race goes only to riders in that event.
+- **The plan's ⋯** (every plan in the list): Rename (the type, on every version of the plan; the
+  label stays the team's name plus the type), New version (the upload page for this plan), "Edit on
+  ZwiftGopher" (with `PUBLIC_URL`, when the plan's live version, else its newest, has a ZwiftGopher
+  link) and Delete plan, which asks first and deletes every version of the plan. It has no Make live:
+  every version's panel has it. A plan of a race that is over has Delete only. Each button names
+  its plan for screen readers. One ⋯ is open at a time; Esc (the focus back on its button) and a
+  click outside close it, and so does a click on another ⋯. Its panel opens in the page flow, so it
+  never covers the next row. An open ⋯ holds the page's reload; closing it ends a strip armed or a
+  field typed in it, so nothing hidden keeps holding the reload.
+- **Make live** (the panel's "Make v3 live", and "Make v4 live" beside a newer version's row) makes
+  that version its race's live version: any version of any plan of the race, as it is (nothing is
+  copied or restored); the team's other races keep their own. It asks first only when it matters: while the gate
+  of its race is open (from 30 minutes before the start until the race is used up, for the plan
+  replaced or the one becoming live) or when its words warn (outdated marks, a rider it moves, a
+  team it leaves with a hole, no start time). Then the button turns, in its place, into a strip with
+  what riders get and when ("Riders in the event get … within a minute"; before the gate "From
+  19:00, riders get …"), "Make live" and Cancel; without the script the server's confirm page asks.
+  Otherwise it acts at once. Either way the page comes back at the race's live pointer
+  (`?r=<race date>#panel`, the version made live; a later reload follows live, so another captain's
+  switch shows there, never a pinned version with Make live; a refusal keeps the version picked,
+  `?v=`): the panel's head says so ("'Rollers · fast' v3 is live for Rollers.") and offers
+  Undo, for 10 minutes and only while nothing else changed; Undo makes the version that was live
+  before live again, under the same rule (an Undo that has to ask is confirmed as an Undo), and lands
+  on that race's live pointer too. Store and make live asks nothing (its "What happens" is the question) but offers
+  the same Undo. The server decides it again on the POST, so a page drawn before the gate opened
+  still asks. Make live, "Make vN live", Undo, Rename, the race's changes and Delete plan carry the
+  team's version: a page drawn before someone else changed the team is refused ("Rollers changed
+  since you opened the page. Nothing was changed.") and drawn anew. A race that is over takes no Make
+  live, Undo, Rename, new version or change of its date, time or link. Restore went with 0.5: a page
+  drawn before it that posts Restore (`POST /manage/plan/back`) gets "This page was out of date.
+  Nothing was changed."
 - **Asking first, in place.** No destructive action happens on one press. The confirm strip
   replaces the button where it was (full width on a phone): what happens, the confirm button and
   Cancel; Esc and Cancel close it, one is open at a time, it has no timeout, a press of the confirm
@@ -216,162 +368,263 @@ place as the current location (`aria-current="location"`). Forms are one column,
   holds the guarded reload. Without the script the button posts and the server answers with a page
   that asks. Delete plan, Delete team, Discard (set apart from Review and store and from Store), New
   ZwiftGopher link, New rider code, Make private, Remove a rider (naming the Zwift ID, also as edited
-  after the strip opened), deleting a recording, and clearing a start time or changing the zone while
-  a race starts within 7 days all ask; a form posts once until the page answers (a double click
+  after the strip opened), deleting a recording, and clearing a weekly team's start time (in race day
+  and time; not when switching to special) or changing the zone while a race starts within 7 days all
+  ask; a form posts once until the page answers (a double click
   never sends it twice); their confirm button has
-  the one danger style (red), the button that asks for it red text on a plain button.
+  the one danger style (red), the button that asks for it red text on a plain button. Moving a race
+  ("Save date and time…" in its ⋯) asks too, its confirm "Move the race" a primary button.
 - **One button system.** Primary (filled blue): a block's main action, at most one, first (Store,
-  Review and store, each settings card's Save, the strip's Make live, Add the team). Secondary
-  (outline): further actions (Upload a plan, Plan on ZwiftGopher, Restore v2…, Make live…, and the
-  Cancel beside a confirm). Quiet (a text link): navigation and side things (Team settings, Club
-  settings, What do these mean?, the way back from a result). Outline with red text: the button that
-  asks first (Delete…, Discard…, Remove…); red filled only as its confirm. One word per action: Save
-  name, Save start time, Save race rhythm, Save club; Discard…; Remove event link; Restore vN.
-- **Plan page** (`/manage/team/<slug>/plan/<id>`): the plan's head (its label, such as "Rollers ·
-  slow", the race, LIVE or Make live, and "Make v3 live" for a newer version that is not live), its
-  rider order, its versions newest first (time, plan code, what changed, with every line in a fold,
-  and "Restore vN" on every version but the newest, the live one and those with the plan code
-  riders have, which would only store the same plan again), then New version (the upload
-  page for this plan), the race date, Remove event link and Delete plan. "Restore vN" makes a new
-  version with vN's content; for the live plan it goes live at once, asking first as Make live does. A raced plan's
-  page shows the lists without buttons.
+  Review and store, Plan on ZwiftGopher in the team page's head and empty card, each settings card's
+  Save, the strip's Make live, Add the team, the panel's Make live while its race has nothing live).
+  Secondary (outline): further actions (Upload a plan without `PUBLIC_URL`, the panel's Make v2 live…
+  while its race has a live version, Rename, Save event link, the ways to a team still to do after a
+  Store, and the Cancel beside a confirm). Quiet (a text link): navigation and side things (Team
+  settings, Club settings, Upload a file instead, the ⋯ buttons, the panel's close link, What do these
+  mean?, How races work). Outline with red text: the button that asks first (Delete…, Discard…,
+  Remove…); red filled only as its confirm. One word per action: Save name, Save race day and
+  time, Save club; Discard…; Remove event link; Make vN live.
 - **Plans have no name.** A plan is its team plus an optional **type** ("Rollers · fast"; "Rollers"
   without one), within one race. Types are unique within a race, and at most one plan of a race has
-  none. The type field suggests the team's earlier types. The planner's team name in the JSON helps
-  to preselect the plan on the next upload; it is shown only as the hint of a received plan (below),
-  cleaned of control and bidi characters and cut at 60 characters.
-- **Received plans.** A plan pushed from ZwiftGopher (below) waits in the inbox for its team. The
-  team page lists every one, newest first ("2 new plans from ZwiftGopher": the time it came, the
-  planner's team name as a hint, the rider count, "Review and store" to its assign page, Discard);
-  the hub lists them under "New plans from ZwiftGopher"; the team's row in the sidebar, the switcher and the hub's tile say "1 new plan" / "2 new plans"
-  (neutral blue, not a problem). The assign page says "From ZwiftGopher, 19:42" and starts with Make
-  live off. A received plan goes after 7 days, an upload left on the assign page (shown nowhere)
-  after 24 hours; deleting a team deletes the plans waiting for it. A new plan comes in by itself:
-  a team page with received plans waiting reloads every 60 seconds (every 30 around a race, as
-  always). The upload page never reloads (a chosen file would go); it says "2 plans from ZwiftGopher
-  are waiting" with the way to the team page.
+  none. Every version of a plan has the plan's type: the type field is in the Store form only for a
+  new plan (it suggests the team's earlier types), a new version keeps its plan's type (a posted type
+  is ignored), and Rename in the plan's ⋯ changes it on every version. The planner's team name in
+  the JSON helps to preselect the plan on the next upload; it is shown only as the hint of a plan not
+  stored yet (below), cleaned of control and bidi characters and cut at 60 characters.
+- **Plans not stored yet.** A plan pushed from ZwiftGopher (below) waits in the inbox for its team,
+  and so does an upload until it is stored. The team page lists both under "Not stored yet", newest
+  first (the time it came, "Sent 19:12" or "Uploaded 19:05", the planner's team name as a hint, the
+  rider count); a row opens its Store form in the panel. The hub lists the pushed ones under "New
+  plans from ZwiftGopher"; the team's row in the sidebar, the switcher and the hub's tile say "1 new
+  plan" / "2 new plans" (neutral blue, not a problem). An upload is the captain's own: it is on the
+  team page only, counts nowhere else and never makes the page reload. A pushed plan's Make live box
+  starts off. A received plan goes after 7 days, an upload after 24 hours; deleting a team deletes
+  the plans waiting for it. A new plan comes in by itself: a team page with received plans waiting
+  reloads every 60 seconds (every 30 around a race, as always). The upload page never reloads (a
+  chosen file would go); it says "2 plans from ZwiftGopher are waiting." with the way to the team
+  page.
 - **Team status** has one line per team, and its colour shows the worst state: red when riders get
-  nothing (no plan, no start time, riders in another event than the event link), amber for "check"
-  (a hole, riders on an older plan code), grey before the gate ("Opens 19:00 ..."), green when all
-  riders have the plan. Before the gate (30 minutes before the start) no rider state is shown,
-  because none is recorded. A team without a live plan is red only from 2 days before its next
-  race; before that it is neutral ("Next race Thu 26 Nov", or "No live plan yet" when plans are
-  stored), so a weekly team is not red in the days after its race.
-- **Club settings** (`/manage/settings`): name and zone, the race day of weekly teams, the masked
-  address with Change e-mail,
-  Mail a new link, the private-club switch (a rider code, shown once) and Remove a rider by Zwift
+  nothing (plans stored but none live, no start time, riders in another event than the event
+  link), amber for "check" (a hole, riders on an older plan code), grey before the gate ("Opens
+  19:00 ..."), green when all riders have the plan. Before the gate (30 minutes before the start)
+  no rider state is shown, because none is recorded. A race with plans but none live is red at
+  once, however far off it is ("No live plan: riders get nothing"): on the team page, in the team
+  rows, on the hub with "Make a plan live", and on the answer to a Store that is not live, also of
+  the same file again ("Not live: riders get nothing" with Make live under it; for a race without
+  any start time "… until it has one and a plan is live"; the Store form's "What happens" says it
+  in red before Store), for a pushed plan as for an uploaded one. A
+  weekly team's regular race day (its weekday and start time) only preselects the date of an upload
+  and of a new race; it is no race of its own. A weekly team with a start time and no race ahead
+  shows the neutral "Next regular race Thu 26 Nov 19:30" on its team page and in its row, with the
+  ways to a plan (a weekly team without a start time: "No start time set"; a special team: "No race
+  planned"), and gets no warning when it uploads nothing; a race moved to another day leaves nothing behind on the
+  regular day. A race that is over is never red: it sits under "Over".
+- **Club settings** (`/manage/settings`): name and zone (there is no club race day: each weekly
+  team has its own), the masked address with Change e-mail,
+  Mail a new link, the private-club switch (a rider code, shown once), "Targets in" W/kg or watts
+  (the unit of the rider tables, `club.targetUnit`; W/kg when never set) and Remove a rider by Zwift
   ID; then a band with the recordings (team, date, rider, a Delete button each that asks first) and their quota,
   the upload log, Delete club and Log out. Captains cannot download a recording.
 - **After a POST** the server answers 303 to the page the form came from, which shows what was done
   once (the flash). It is kept in memory for 5 minutes, bound to the club and the path, and only
-  its id travels in the `__Host-pl_flash` cookie, so a restart loses at most a message. The
-  rider-code page, the result page of Store, the confirm pages (the no-script path of every action
-  that asks first) and refusals are direct answers.
+  its id travels in the `__Host-pl_flash` cookie, so a restart loses at most a message. On the team
+  page the flash stands right above the card (on a phone with nothing picked, on top of the page);
+  Store's carries what the Store did (Upload and Store,
+  below). The rider-code page, the confirm pages (the no-script path of every action that asks
+  first) and refusals are direct answers.
 - **Reload.** The hub and the team pages reload themselves every 30 seconds from 90 minutes
   before to 60 minutes after a live plan's start; outside that window a team page with plans from
   ZwiftGopher waiting reloads every 60 seconds. Pages with forms to type into never do (the upload
-  page among them). With the script the reload is guarded: not while the tab is hidden, a field has
-  focus, a menu is open or a form was changed, and only after a HEAD request of the page answered;
-  otherwise the page says "Not updated since ..." with a Try again link. Without the script a
-  `<noscript>` meta refresh does the reload.
-- **The script** (`/static/app.js`, `server/client.mjs`) is the captain pages' interface: the
-  assign page redraws itself (a GET of itself with the form's fields) when the team, the plan or the
-  live box change, and when the race date is left or a second after its last digit, keeping the
-  scroll position, the focus and the type and live box the captain touched; the confirm strips; the
-  guarded reload; copy buttons. It draws no preview of its own (the assign page's preview is the
-  server's). It writes text through `textContent` only, and everything it shows comes from the
-  server's page. The Content-Security-Policy is `default-src 'none'; script-src 'self';
-  connect-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`.
+  page among them). The team page reloads its own URL, so what is picked stays picked; while it shows
+  a Store form, or a Store's result with something to keep (a red line, a warning, a team still to
+  do), it does not reload (without the script it then has no meta refresh) and says so under the
+  card: "Not updating while the Store form is open · Refresh" ("… while this result is shown …"),
+  Refresh a plain link to the page as it is. Once the card shows a version again it reloads again; a
+  clean result ("is live", "Stored as v4 …") holds nothing and goes with the next reload, so the live
+  card keeps counting. With the script the
+  reload is guarded: not while the tab is hidden, a field has focus, a menu is open, a confirm strip
+  is open or a form was changed, and only after a HEAD request of the page answered; otherwise the
+  page says "Not updated since ..." with a Try again link. Without the script a `<noscript>` meta
+  refresh does the reload.
+- **The script** (`/static/app.js`, `server/client.mjs`) is the captain pages' interface. On the
+  team page a click on a row (or a phone sheet's close link) fetches the panel alone
+  (`?v=<id>&panel=1&tv=<team version>`), drawn by the same server function as the whole page, and
+  swaps it in without a page load; it puts the row's URL in the address bar (`pushState`), and Back
+  and Forward swap again. Only the answer to the last click counts. Any answer but a 200 (409: the
+  team changed since the page was drawn; 404, 429) loads the whole URL instead. The Store form
+  redraws itself the same way (the panel fetched with the form's fields) when the team, the race, the
+  plan or the live box change, a date is picked in the calendar (a click anywhere in the date field
+  opens it), and when the race date, the start time or the event link is left (a typed date or time
+  also a second after its last digit, never midway), keeping the scroll position, the focus and the type and
+  live box the captain touched. Then the confirm strips; the guarded reload; copy buttons. It draws
+  no preview of its own (What happens and the rider table are the server's). It writes text through
+  `textContent` only, and everything it shows comes from the server's page or fragment, parsed with
+  `DOMParser`. The Content-Security-Policy is `default-src 'none'; script-src 'self';
+  connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none';
+  base-uri 'none'`.
 
-**Upload and Store.** A plan arrives in two steps: the upload, then Store on the assign page.
+**Upload and Store.** A plan arrives in two steps: the upload (or a push from ZwiftGopher), then
+Store in the Store form on the team page.
 
 **Upload** (`POST /manage/upload`, multipart, from the upload page):
 
 | Field | Meaning |
 | --- | --- |
 | `team` | fixed by the page |
-| `json` or `paste` | the planner's JSON as a file, or pasted |
-| `text` | the optional text export; the pull watts come from it or from `pull_power` in the JSON |
-| `forPlan` | the plan the page was opened for ("New version" on a plan page, "Upload for Sprockets"), else empty; it only preselects |
+| `json` or `paste` | the planner's JSON as a file, or pasted; the pull watts come from its `pull_power` (export it from ZwiftGopher with pull power) |
+| `forPlan` | the plan the page was opened for (a plan ⋯'s "New version", "Upload for Sprockets"), else empty; it only preselects |
+| `forDate` | the race the page was opened for (`date=`: "Upload a file for this race", "Upload for Sprockets"), else empty; it only preselects, and only a race of the team still to race |
 
 It checks the content (Zwift IDs, names, at most 40 riders with the planner's roster, at most 64 KB stripped),
-strips it, makes an **inbox entry** and answers 303 to the assign page `/manage/inbox/<id>`. A
-refused upload answers 400 with the upload page and the reason on top, and makes no entry. The
-captain picks the file(s) and presses Continue: nothing goes on by itself. The text export is a plain
-optional field beside the JSON; only "Paste the JSON instead" is a fold.
+strips it, makes an **inbox entry** and answers 303 to the team page with the entry picked
+(`/manage/team/<slug>?e=<id>#panel`), its Store form open. A refused upload answers 400 with the
+upload page and the reason on top, and makes no entry (no file and nothing pasted: "Choose the
+planner's JSON export, or paste it."; anything but a planner JSON: "This is not a planner JSON
+export."). The captain picks the file and presses Continue: nothing goes on by itself. Only "Paste
+the JSON instead" is a fold. The upload is the quiet way in: the team page leads with "Plan on
+ZwiftGopher" and has "Upload a file instead" under it. There is no text export any more (a `text`
+part is read and ignored); the text rows of plans stored before stay, and riders still get them.
 
-**The assign page** (`GET /manage/inbox/<id>`) changes nothing. It draws what Store would do, as a
-dry run on a copy of the club:
+**The Store form** (the panel of `/manage/team/<slug>?e=<id>`) changes nothing. From 1180 px it opens
+inside the plan's row in the list and the card (its rider table, What happens, Store and Discard)
+stands in the right column; on a phone both are the sheet. The form holds only what the card and the
+list do not say: no card repeats the riders' names (the row says when the plan came and how many
+ride), no line names the page's own team, and the race only in the race fold's summary.
+It draws what Store would do, as a dry run on a copy of the club:
 - the **team**, preselected: the upload's own team (or the club's only team), with the others in an
-  "Other team" fold;
-- the **plan**: one row per plan of this race, "New version of 'Rollers · fast'" with "live · v2 ·
-  16:05 · 7 of 8 riders the same", then "New plan". Preselected is the plan the upload page was
-  opened for, else the one plan of this race whose earlier uploads carried the same planner name,
-  else "New plan" when the race has no plan yet; otherwise nothing, and the captain picks (Store
-  without a plan answers "Pick a plan."). Riders in common are shown but never preselect: a fast
-  and a slow plan share most riders;
-- the **type** (optional, at most 30 characters, suggested from the team's earlier types). Within a
-  race every plan's type is its own, and at most one plan has none: a second plan needs a type;
-- **Make live**, a checkbox that says what ticking it does. It is on when the team has no live plan
-  or its live plan is used up (4 h after its start), and for a new version of the live plan; it is
-  off for another plan of the race, a new plan next to a live one, and when the live plan belongs to
-  another race that is not used up yet (ticking it then ends that race's plan). The same file as the
-  plan's newest version stores nothing: the box then names that version ("riders get v2 at once
-  instead of v1", or "riders have v2 already"), and ticked it makes that version live;
-- in the "More" fold, the **race date** (a new plan's default: the live plan's date while still to
-  race, else by the team's kind; a new version keeps its plan's date) and the optional **event
-  link** (Zwift or ZwiftPower; only its id is read, nothing is fetched; a new version without one
-  keeps the plan's link). A special team's plan has its race date and **start time** at the top
-  instead, the time required and editable for a new plan and a new version alike (a version keeps
-  its plan's date): it is prefilled with the race's start time for that date, else the team's old
-  start time, else empty, and never carries over from another date. The newest upload for a date
-  sets the race's start, so a mistyped time is fixed by uploading again (a new version is enough);
-  every other plan of that date moves with it, and the preview and the result say so ("Race on Sun
-  29 Nov now starts at 21:15 (was 20:15); 'Cogs · slow' moves with it."). The plan page's head
-  line shows the race's time. A time that is over already is refused for a version too ("The race
-  on … is over"), and a Store whose time was drawn for another date (the date changed without a
-  redraw) moves no race that has a time of its own: the page is drawn again ("Check the choices:
-  the start time was for another date."). Weekly teams have no time field: their plans start at
-  the team's start time;
-- **what happens**: the outcome ("v3 of 'Rollers', live for Thu 19 Nov 19:30. Riders get it from
-  19:00."; after the gate "Riders in the event get it within a minute."), what changed against the version it follows, what a cap drops, the moves and holes
-  ("Ben moves from Sprockets to Rollers.", "Still to do: Sprockets"), and the warnings: the team hint
-  first ("This plan says Sprockets", "It looks like Sprockets (7 of 8 riders)"), a change made by
-  someone else since the page was drawn (`base`), no start time, a special race's start time this
-  Store changes, no pull watts, the import warnings. While the date (or a special team's start
+  "Other team" fold (a Store for another team lands on that team's page; a team chosen there names
+  itself above the fold);
+- the **race**: when the team has two or more races ahead, one radio per race before the plans
+  ("Sun 22 Nov · 18:00", "2 plans"), the form's race checked: the race the upload page was opened
+  for, else the team's nearest race still to race. A pushed plan carries no date, so it is never
+  filed under a race silently. Choosing another race redraws the form for it;
+- **Store as**: one row per plan of the team's races ahead (a plan of another race than the form's
+  says its race), "New version of 'Rollers · fast'" with "live · v2 · 16:05 · 7 of 8 riders the
+  same", then "New plan"; a plan of a race that is over is no choice. Picking a plan of another race
+  moves the form to that race. Preselected is the plan the upload page was opened for, else the one
+  plan of this race whose earlier uploads carried the same planner name, else "New plan" when the
+  race has no plan yet; otherwise nothing, and the captain picks (Store without a plan answers "Pick
+  a plan."). Riders in common are shown but never preselect: a fast and a slow plan share most
+  riders;
+- the **type**, only for "New plan", after the box, the last field before the race fold (optional, at most 30 characters, suggested from the team's
+  earlier types; a new version keeps its plan's type). Within a race every plan's type is its own,
+  and at most one plan has none: a second plan needs a type;
+- **Make live**, a checkbox that says what ticking it does, for the plan's race: the team's other
+  races keep their live versions. It is on when that race has nothing live or its live version is
+  used up (4 h after its start), and for a new version of the live plan; it is off for another plan
+  of the race and a new plan next to a live one. A plan pushed from ZwiftGopher starts with it off.
+  The same file as the plan's newest version stores nothing: the box then names that version
+  ("riders get v2 at once instead of v1", or "riders have v2 already"), and ticked it makes that
+  version live;
+- last, in the **race fold** (a fold at the form's bottom, below "Store as", the box and the type, so
+  opening it or a choice there moves nothing above; on a phone it stands just above the rider
+  table): the **race date** and the **start time** side by side, each hint under its box, then the
+  event link. Its summary says which race the plan joins, as the date decides it: "Race: Thu 26 Nov ·
+  19:30 · Change" (an emptied time: the race's, which Store keeps), with "· Event 5123456" when the
+  race has an event (the link typed, else its own, else the one it learned, unless the time typed
+  moves the race, which clears that one), "Race: no date yet" without one. It is closed for a weekly team whose next
+  race is prefilled, and open when the captain has to look: a special team, no race
+  ahead to prefill, a race other than the team's next one (another race radio, a typed date, a plan
+  of a later race, or the date the upload named), a dry run that says something about the date, the
+  time or the link ("Choose the race date.", "Enter the start time as HH:MM.", a link that does not
+  parse), and a refused Store about them (a date that is no date, a race that is over, a time that
+  is no time, a link that does not parse, the form drawn for another race, the race's start time
+  changed meanwhile, or a team or plan changed without a redraw while a date was typed: the form is
+  drawn for its default race, and the fold shows the typed date went). Closed, its fields are posted
+  all the same, so a Store without the script stores the prefilled date and time. With the script,
+  opening it sets the hidden `raceOpen` the redraws send, so a redraw keeps it open, and one closed
+  while a redraw runs stays closed; a required field left empty in it opens it. The race date is one date field,
+  prefilled with the form's race (the team's next race by its rhythm); a click anywhere in it opens
+  the calendar where the browser can (`showPicker`), and without the script it is a plain date field;
+  its hint says "Another date makes a new race". A new version keeps its plan's date: the same box
+  shows it, read only, its hint "The plan's date", so
+  switching between "New plan" and a version moves nothing; another date makes a new race there (an
+  extra race needs no second team). The **start time** is prefilled for every kind of team, with no
+  hint: the race's own time, else the weekly team's (19:30). Posting the team's time keeps the race
+  on the team's rhythm (nothing stored of its own), any other time is the race's own. The prefill
+  follows the date; a time the captain typed for the drawn date stays. Then the **event link**
+  (Zwift or ZwiftPower; only its id is read, nothing is fetched; under it the link the chosen race
+  has now: "This race's event link now: 5123456"). A special team's start time is required and
+  editable for a new plan and a new version alike (a version keeps its plan's date): it is prefilled
+  with the race's start time for that date, else the team's old start time, else empty, and (as a
+  weekly team's) never carries over from another date. Time and link belong to the race: a time
+  given here sets the race's start and a link its event link, for every plan of that race, so a
+  mistyped time is fixed by uploading again (a new version is enough) or in the race's ⋯; What
+  happens and the Store flash say so ("Race on Sun 29 Nov now starts at 21:15 (was 20:15); 'Cogs ·
+  slow' moves with it.", "Race on Sun 22 Nov now has event link 5123456. … Riders in another event
+  then get nothing from 'Rollers', the race's live plan."). An empty time or link leaves the race's
+  as they are. A time that is over already is refused for a version too ("The race on … is over"). A
+  Store for another race than the form was drawn for (a date typed, or another race radio, without a
+  redraw) stores nothing: the form is drawn for that race ("Check the choices: the preview was for
+  another race."). So does a Store after someone else changed the race's start time since the form
+  was drawn (another captain, or the race's ⋯ in another tab; also the team's time, for a race on
+  the team's rhythm): the form is drawn again with the race's time as it is now ("Check the choices:
+  the race's start time was changed meanwhile."), so a time the form only showed never puts the race
+  back;
+- **What happens**: the outcome ("v3 of 'Rollers', live for Thu 19 Nov 19:30. Riders get it from
+  19:00."; after the gate "Riders in the event get it within a minute."), what a cap drops, the moves
+  and holes ("Ben moves from Sprockets to Rollers.", "Still to do: Sprockets"), and the warnings: the
+  team hint first ("This plan says Sprockets", "It looks like Sprockets (7 of 8 riders)"), a change
+  made by someone else since the form was drawn (`base`), no start time, a special race's start time
+  this Store changes, no pull watts, the import warnings. While the date (or a special team's start
   time) is still empty it says "Choose the race date and start time." in a neutral line: an error
-  shows only for a value that is there but wrong, or on Store;
-- the riders in order with pull time and target, folded (the planner's roster is not shown).
+  shows only for a value that is there but wrong, or on Store. What changed is not a line here: the
+  rider table shows it. It stands in the card, above its action bar;
+- the **rider table** of the plan, against the live version of the race the form has chosen (no
+  team or date chosen: nothing to compare), never the planner's roster; then in the card's action
+  bar **Store** (or **Store and make live**) and, at the bar's other end, **Discard…**.
 
-With the script, a change of team, plan or the live box, and leaving the race date or the start
-time (or a second after its last digit, once complete), redraw the page (a GET of itself with the
-form's fields: `team`, `as`, `live`, `type`, `date`, `start`, `startFor` (the date the time was
-drawn for), `event`, `drawn`, `touched`). A redraw for the same team and plan keeps what was chosen; after a team or plan change
-the box and the type go back to their defaults, except what the captain touched.
+With the script, a change of team, race, plan or the live box, a date picked in the calendar (at once,
+on its change), and leaving the race date, the start time or the event link (a typed date or time
+also a second after its last digit, once complete, never midway), redraw the
+form in place (the panel fetched with the form's fields: `team`, `race`, `as`, `live`, `type`, `date`,
+`start`, `startFor` (the race the form was drawn for), `startWas` (that race's start time as drawn),
+`event`, `drawn`, `touched`, `raceOpen`). A redraw for the same team and plan keeps what was chosen; after a team
+or plan change the box and the type go back to their defaults, except what the captain touched.
+While a Store form is open the page does not reload itself, and says so (Reload, above). Without the
+script nothing redraws: a
+plan chosen by hand, or another team or race, makes the first Store answer "Check the choices: the
+preview was for another team or plan." with the form drawn for that choice, and the second Store
+stores. Tell captains: without the script a received plan with no plan preselected needs two
+presses of Store.
 
-**Store** (`POST /manage/inbox/<id>`: `team`, `as`, `live`, `type`, `date`, `start`, `event`, `base`,
-`drawn`) stores the version and removes the entry, in one step, and answers the result page: "'Rollers
-· fast' v3 is live for Thu 19 Nov 19:30. Plan code RE5CFQ." or "Stored as v2 of 'Rollers · slow',
-not live. Riders keep 'Rollers · fast' v4.", what this changes, the warnings, the riders and "Wrong
-file?" with "Restore v2" (after a new version) or Delete (after a new plan). A plan whose content,
-type and event link equal its newest version stores nothing ("Same as v2: nothing new stored"); the
-live box still applies. A refusal (a race already over, a special team's plan without a date or start time, an empty or
-taken type, a cap) answers 400
-with the assign page and the reason on top, and the entry stays. Store pressed for a team or plan the
-preview was not drawn for stores nothing and draws the page again ("Check the choices"). A second
-Store of the same entry answers 400 "This plan is stored or no longer here." **Discard**
-(`POST /manage/inbox/<id>/discard`) removes the entry and goes back to the team page with "Discarded
-the plan with 8 riders (Ben, Cleo …)."
+**Store** (`POST /manage/inbox/<id>`: `team`, `race`, `as`, `live`, `type`, `date`, `start`, `startFor`,
+`startWas`, `event`, `base`, `drawn`, `touched`, `raceOpen`, the last two only carried for the page) stores the version and removes the entry, in one step, and
+answers 303 to the team page with the new version picked: `?r=<race date>#panel` when it is live now
+(the race's live pointer, so a reload follows live), else `?v=<id>#panel` (a Store for another team:
+that team's page) and the Store flash in the panel's head: "'Rollers · fast' v3 is live for Thu 19
+Nov 19:30. Plan code RE5CFQ." or "Stored as v2 of 'Rollers · slow', not live. Riders keep 'Rollers
+· fast' v4.", then when riders get it (and the plan live before that stays as another plan), the
+race's event link, what this changes (what a cap dropped, the moves, the teams still to do, each
+with its way to the upload page "Upload for Sprockets"), the warnings, and Undo after a Store that
+switched the race's live version. A version stored not live into a race with a live version keeps
+the panel's Make live a secondary button (a pushed plan must not go live by a stray click); into a
+race with nothing live the flash says in red "Stored as v1 of 'Rollers · sunday'. Not live: riders
+get nothing until you press Make live." and Make live is the primary button. There is no "Wrong file?": a wrong file made live is undone with Undo, or with Make
+live of the version live before (its row reads "was live"). While the flash's result has something
+to keep (a red line, a warning, a team still to do) the page does not reload itself and says so; a
+clean result goes with the next reload. A plan whose content and event link equal its newest version
+(a new version's type is its plan's) stores nothing ("Same as 'Rollers · fast' v2: nothing new
+stored."); the live box still
+applies. A refusal (a race already over, a special team's plan without a date or start time, an
+empty or taken type, a cap) answers 400 with the team page, the entry picked and its form as
+posted, the reason on top, and the entry stays. Store pressed for a team or plan the form was not
+drawn for stores nothing and draws the form again ("Check the choices"). A second Store of the same
+entry answers 400 with the team page, whose panel says "This plan is stored or no longer here."
+**Discard** (`POST /manage/inbox/<id>/discard`) removes the entry and goes back to the team page (or
+the hub, where its Discard was) with "Discarded the plan with 8 riders (Ben, Cleo …)."
 
 The body may be 256 KB (the planner's raw files are larger than the stored plan, which is at most
 64 KB; a raw export of 40 riders is about 90 KB). Before any file is parsed, a file with more than
 16 levels, 4000 objects and arrays or 20000 commas is refused: a planner export has far fewer. An
 upload takes the club's slot: one body per club at a time, 8 on the server in all (more get 503
-with `Retry-After: 5`). Uploads and assign-page draws share a budget of 60 per club per 10 minutes
-(429 with `Retry-After: 600`): every draw of the assign page runs the dry run and counts, so one
-upload costs 2 (the POST and the first draw); a refused Store does not count. Pages from before plan
-versions (`POST /manage/undo`, `POST /manage/upload/preview`) change nothing and answer 303 with
-"This page was out of date. Nothing was changed." Deleting a team retires its slug for good and counts against the
+with `Retry-After: 5`). Uploads and draws of the Store form share a budget of 60 per club per 10
+minutes (429 with `Retry-After: 600`): every draw of the form (the whole page with a plan not stored
+yet picked, or the panel's redraw) runs the dry run and counts, so one upload costs 2 (the POST and
+the first draw); a refused Store does not count. Pages from before plan versions (`POST
+/manage/undo`, `POST /manage/upload/preview`) and Restore from before 0.5 (`POST /manage/plan/back`)
+change nothing and answer 303 with "This page was out of date. Nothing was changed." Deleting a
+team retires its slug for good and counts against the
 daily limit below.
 
 **Operator page** (`/admin`). HTTP Basic login with `ADMIN_USER` / `ADMIN_PASS` (else the
@@ -462,8 +715,8 @@ data (plans, the inbox, plan codes) are constants too.
 | wrong logins on `/admin`, per client address | 10 per 15 minutes, then 429. Correct credentials always pass |
 | wrong rider codes, per public client address | 20 per hour, then 429 for checks that carry codes |
 | recordings | 4 new files per day per rider and team; one body at a time |
-| plan uploads and assign-page draws | one upload body per club at a time, 8 on the server in all (503, `Retry-After: 5`); uploads and draws together 60 per club per 10 minutes (429, `Retry-After: 600`) |
-| plans | 8 per team (a full team drops its oldest raced plan, else the upload is refused), 5 per race, 20 versions per plan: the oldest version that is not live goes, and the assign page says so first |
+| plan uploads and Store form draws | one upload body per club at a time, 8 on the server in all (503, `Retry-After: 5`); uploads and draws together 60 per club per 10 minutes (429, `Retry-After: 600`) |
+| plans | 8 per team (a full team drops its oldest raced plan, else the upload is refused), 5 per race, 20 versions per plan: the oldest version that is not live goes, and the Store form says so first |
 | inbox | 20 entries and 640 KB per club, one entry at most 320 KB; an upload drops the oldest, a push is refused (409); an upload goes after 24 hours, a received plan after 7 days |
 | ZwiftGopher push | 30 per team per hour (429, `Retry-After: 3600`); 60 failed tries (unknown or expired tokens) per public client address per hour, valid pushes not counted; one body per club and 2 on the server at a time, apart from the uploads (503, `Retry-After: 5`); the body at most 256 KB (413) within 10 seconds (408) |
 | plan codes per recording | 10; the rest are ignored |
@@ -514,6 +767,12 @@ DATA_DIR/
   logs/.incoming/           uploads being written; what a crash leaves goes after a day
   logs/<slug>/              v1 recordings, left as they are, never read
   dumps/paceline-<date>.db  nightly dumps of paceline.db, the newest 7 (see Database dumps)
+  dumps/paceline-pre-races-<date>.db   the copy taken before schema 3 (0.4, races) changed the
+                            data; not one of the 7, deleted (while 0.4 or later runs) with the
+                            first nightly dump 7 days after its date
+  dumps/paceline-pre-plan-types-<date>.db   the copy taken before schema 4 (0.5, one type per
+                            plan) changed the data; kept and deleted the same way (while 0.5 or
+                            later runs)
   imported-<date>/          the 0.3 files after the one-time import (circles/, trash/, backups/,
                             tombstones.json, seen.json, server.json, every sigs.json, versions.json
                             and .bad file): never read, delete by hand within 7 days (see
@@ -542,10 +801,46 @@ moved. "Upgrading from 0.3" below has the details and what to do.
 Club files from before plan versions lose their stored plans when they are loaded: the teams stay,
 the start logs `club <cid>: <n> plans in the old format dropped (no plan versions); its teams stay`,
 and captains upload again. From the production switch on, every change to stored data comes with a
-migration, or loads old data unchanged: a special team has an optional `raceStarts` (0.3.1),
-{'YYYY-MM-DD': 'HH:MM'}, the start of its race on each date, written by every Store of its plans
-and dropped for a date with no plan left; a date without one (plans stored by 0.3.0) starts at the
-team's start time, as before.
+migration (a schema step, `PRAGMA user_version`), or loads old data unchanged.
+
+**Races (schema 3, 0.4).** A team keeps its races by date:
+
+```
+team = {name, start: 'HH:MM' | null, kind: 'weekly' | 'special', weekday: 1..7 | null,
+        version, changedAt, races: {'YYYY-MM-DD': race}, …}
+race = {start: 'HH:MM' | null, pinnedEventId: number | null, eventId: number | null,
+        boundAt: ISO time | null, live: version id | null}
+```
+
+`race.start` null means the team's start time. `pinnedEventId` is the captain's event link,
+`eventId` and `boundAt` the event learned from a rider's check. Plans and their versions stay in
+`club.sheets`; a version's race is the race of its team and date. A team has a race for exactly
+every date that has a version of it (the race comes with its first plan and goes with its last),
+and `live` is a version of that team and date or null. The first start of 0.4 converts every club,
+in `clubs` and in the trash, from the 0.3 shape (the team's one live pointer and `raceStarts`, the
+event link and learned event on each version, the club's race day) in one transaction, after a
+backup (Database dumps): each team gets a race for every date with plans, its start from
+`raceStarts` (special) or none (weekly), the team's live plan as its race's live plan, the event
+link and learned event of the live version, else of that date's newest version (a different link
+another plan of that date carried goes to the club's log), and a weekly team without a day of its
+own gets the club's race day (Thursday without one), so no race moves.
+
+**Versions (schema 4, 0.5).** A version is a row of `club.sheets`:
+
+```
+sheet = {team, date, plan, n, type, label, json, text, sig, at, via, liveAt?, zgShare?, …}
+```
+
+`plan` is the id of its plan (the versions of a plan share it, `n` counts them), `date` its race.
+`race.live` may point at any version of the race, of any of its plans; Make live, Store with the live
+box and Undo set `liveAt` (ISO time) on the version that became live, and it stays when another
+version goes live (that row then says "was live 18:57"). A version stored before 0.5 has no `liveAt`: its rows say "live" or
+nothing. **One type per plan:** every version of a plan has the plan's type and label. A Store as a
+version takes the plan's type whatever the form posts, and Rename changes every version. The first
+start of 0.5 gives every version, in `clubs` and in the trash, the type of its plan's highest
+version and rebuilds its label, in one transaction after a backup (Database dumps), writing only the
+rows that change; a club loaded from elsewhere (an import, a trash restore) gets the same on load.
+No `copyOf` is written any more (Restore went); an old copy is an ordinary version.
 
 ## Plan check
 
@@ -606,7 +901,8 @@ stays open until the sheet is used up, 4 hours after `S`. Before that, and for e
 event, a record carries only `circle, team, slug, sheet, label, role, date, startAt, opensAt,
 uploadedAt, sig` and `"body": false`. The 30 minutes are the constant `PLAN_OPEN_MS` in `select.mjs`.
 
-The server learns a sheet's Zwift event id only from a check that gets the content. A rider's "in
+The server learns a race's Zwift event id only from a check that gets the content (a race with an
+event link set by its captain needs none). A rider's "in
 event" mark is recorded once his own sheet in that club has opened, which can happen without content
 (for example when an event pin does not match).
 
@@ -634,16 +930,16 @@ within an hour, checks from that address that carry codes get `429 {"error":"bus
 ## ZwiftGopher push
 
 Proof of concept (19 Nov 2026). With `PUBLIC_URL` (or `PACELINE_HOST`) set, the team page of every
-team has **"Plan on ZwiftGopher"** beside "Upload a plan" (user, 19 Nov 2026: one step before the
-upload page; in the empty card it is the second button): a link to
+team has **"Plan on ZwiftGopher"** as the main button of its head, with the quiet "Upload a file
+instead" under it (races spec §4; the same pair in the empty card): a link to
 `https://zwiftgopher.com/TTT/?paceline=<token>&plhost=<host>[#t=<share value>]` in a new tab. The captain makes the plan there, ZwiftGopher posts it to this server, and it waits in
-the team's inbox (`source: "receive"`, `via: "zwiftgopher"`) until the captain stores it on the
-assign page, as an upload. It is never live before that Store, and Make live starts off.
+the team's inbox (`source: "receive"`, `via: "zwiftgopher"`) until the captain stores it with the
+Store form on the team page ("Not stored yet"), as an upload. It is never live before that Store,
+and Make live starts off.
 
 **Token.** Stateless: nothing is stored per token. 40 lower-case hex characters: 8 of the expiry
 (unix seconds, the link's draw plus 7 days) and 32 of HMAC-SHA256(secret,
-`push:<cid>:<slug>:<gen>:<expiry>`) cut to 128 bit. Every draw of the team page (and the plan page)
-mints a fresh one.
+`push:<cid>:<slug>:<gen>:<expiry>`) cut to 128 bit. Every draw of the team page mints a fresh one.
 The secret is made at the first start and kept in `paceline.db` (meta `push_secret`): tokens survive
 restarts, and a dump or backup restores it. It is shown nowhere. `<gen>` is the team's `pushGen`
 (absent in clubs stored by 0.3.1: 0). A push finds the team by checking the MAC against every team
@@ -677,8 +973,8 @@ about 3 KB for a team: riders with FTP, height and power profiles). It is captai
 - An upload or a push keeps it only when `plan.share_link` starts with exactly
   `https://zwiftgopher.com/TTT/#t=`, the rest is `^[A-Za-z0-9_-]+$` and the link is at most 16384
   characters; anything else is dropped without a word. Only the `#t=` value is kept, as `zgShare` on
-  the inbox entry and then on the stored version (a Restore copy keeps it), never inside the plan's
-  JSON or text.
+  the inbox entry and then on the stored version (a copy made by Restore before 0.5 kept it), never
+  inside the plan's JSON or text.
 - It counts toward the entry's bytes (320 KB per entry: a plan at its 64 KB cap plus a 16 KB link
   fits) and the club's 2 MB, like everything else.
 - It is never in a rider's answer (`/api/v3/rider` sends the plan's JSON and text only), never in the
@@ -688,8 +984,9 @@ about 3 KB for a team: riders with FTP, height and power profiles). It is captai
   plan cannot be edited), also when the erasure list applies a removal again.
 - The team page's "Plan on ZwiftGopher" appends `#t=<value>` of the live version (one not raced yet),
   else of the newest version of the next race's plans, else nothing; the planner then opens with
-  that plan loaded. The plan page has **"Edit on ZwiftGopher"** with its own version's value (the
-  live one, else the newest) and a fresh token for the team, only when that version has one.
+  that plan loaded. A plan's ⋯ on the team page has **"Edit on ZwiftGopher"** with its own
+  version's value (the live one, else the newest) and a fresh token for the team, only when that
+  version has one.
 
 **CORS headers on the answers** also carry `Access-Control-Expose-Headers: Retry-After`, so the
 planner's page can read it.
@@ -703,7 +1000,7 @@ a `PUBLIC_URL` with `http:` or a path prefix sends the planner to the wrong plac
 The contract, to forward as it is:
 
 > **Paceline → ZwiftGopher.** A captain on Paceline clicks "Plan on ZwiftGopher" on the team page
-> (or "Edit on ZwiftGopher" on a plan's page) and lands on
+> (or "Edit on ZwiftGopher" in a plan's ⋯ menu there) and lands on
 > `https://zwiftgopher.com/TTT/?paceline=<token>&plhost=<host>`, followed by `#t=<value>` when that
 > team already has a plan whose export carried `plan.share_link`: the `#t=` part of that link, so
 > the calculator opens with that plan loaded.
@@ -943,6 +1240,43 @@ The log says `dump written: dumps/paceline-<date>.db (<n> bytes)`; a failed dump
 `dump overdue`. A temp file a crash left is deleted after a day. After each dump the server
 checkpoints `paceline.db-wal` into `paceline.db` and empties it to 0 bytes (a failure there is only
 logged).
+
+**The backup before schema 3.** The first start of 0.4 (server 0.4.0-beta.1 and later) on a
+database of 0.3 converts every club to races (Data layout). Before it changes anything it writes
+`dumps/paceline-pre-races-<date>.db` (`<date>` in UTC), a full copy of the database made like a
+nightly dump, and logs
+`paceline-server: paceline.db: backup before schema 3: dumps/paceline-pre-races-<date>.db (<n> bytes)`,
+then, only when a club was converted,
+`paceline-server: paceline.db: schema 3 (races): <n> clubs and <m> trashed clubs converted`.
+If the backup cannot be written the server does not start and the database is unchanged: fix
+`dumps/` (owner uid 1000, free space) and start again. A new, empty database needs no backup. The
+file is not one of the 7 nightly dumps: while 0.4 or later runs, it goes with the first nightly
+dump written from 00:00 UTC seven days after its date on, not exactly 7 × 24 h after the upgrade
+(the privacy page says "Database dumps: 7 days"). To go back to 0.3, restore it as a dump (below,
+steps 1 to 4) and start the older image, never 0.4 again: 0.4 would convert the restored database
+once more. An older image refuses the converted database (`paceline.db has schema 3; this server
+knows up to 2`), and it never deletes the backup (it prunes only `paceline-<date>.db`): after the
+restore, move `dumps/paceline-pre-races-<date>.db` out of `dumps/` and delete it within 7 days of its
+date. Everything stored since the upgrade is lost.
+
+**The backup before schema 4.** The first start of 0.5 (server 0.5.0-beta.1 and later) on a database
+of 0.4 gives every version of a plan its plan's type (Data layout, "Versions"). Before it changes
+anything it writes `dumps/paceline-pre-plan-types-<date>.db` (`<date>` in UTC), a full copy made like
+a nightly dump, and logs
+`paceline-server: paceline.db: backup before schema 4: dumps/paceline-pre-plan-types-<date>.db (<n> bytes)`,
+then, only when a club changed,
+`paceline-server: paceline.db: schema 4 (plan types): <n> clubs and <m> trashed clubs changed`.
+A database still at schema 2 (0.3) takes steps 3 and 4 in the same start behind the `pre-races`
+backup alone; there is then no `pre-plan-types` file. If the backup cannot be written the server
+does not start and the database is unchanged: fix `dumps/` and start again. A new, empty database
+needs no backup. The file is not one of the 7 nightly dumps: while 0.5 or later runs, it goes with
+the first nightly dump written from 00:00 UTC seven days after its date on. To go back to 0.4,
+restore it as a dump (below, steps 1 to 4) and start the 0.4 image, never 0.5 again: 0.5 would
+change the restored database once more. The 0.4 image refuses the changed database (`paceline.db
+has schema 4; this server knows up to 3`), and it never deletes the backup (it prunes backup names
+of one word only, such as `pre-races`): after the restore, move
+`dumps/paceline-pre-plan-types-<date>.db` out of `dumps/` and delete it within 7 days of its date.
+Everything stored since the upgrade is lost. `server/DEPLOY-SWARM.md` has the steps for the swarm.
 
 **Deleted data does not linger in the file.** `paceline.db` is opened with SQLite's `secure_delete`
 on: a deleted or changed row's old bytes are overwritten with zeros, and the nightly checkpoint
@@ -1259,6 +1593,23 @@ A checkout reads the engine from `../pages/src/engine/`, as the image layout doe
 
 ### Rollback and Remove a rider
 
+**Going back from 0.5 to 0.4** needs the backup taken before schema 4: stop the server, restore
+`dumps/paceline-pre-plan-types-<date>.db` as "Restoring a dump" says, then start the 0.4 image (not
+0.5: it would change the restored database again), and take the backup out of `dumps/` (the 0.4
+image never deletes it; delete it within 7 days of its date, wherever it sits). Without the restore,
+the 0.4 image refuses the database and does not start. It works only while the backup is there (at
+most 7 days); after that only an operator's backup goes back before it. Pages left open across the
+upgrade are harmless: a Restore button answers "This page was out of date. Nothing was changed.",
+and the old plan and Store a plan URLs lead to the team page. To go back from 0.5 to 0.3, restore
+the `pre-races` backup instead (below), while it is there.
+
+**Going back from 0.4 to 0.3** needs the backup taken before schema 3: stop the server, restore
+`dumps/paceline-pre-races-<date>.db` as "Restoring a dump" says, then start the 0.3 image (not 0.4:
+it would convert the restored database again), and take the backup out of `dumps/` (the 0.3 image
+never deletes it; delete it within 7 days of its date, wherever it sits). Without the restore, the
+0.3 image refuses the database and does not start. It works only while the backup is there (at most
+7 days; it can be up to a day earlier); after that only an operator's backup goes back before it.
+
 **Going back to an image from before the database** (0.3.0-beta.3 or older) needs the steps in
 "Going back to a file-based image" under "Upgrading from 0.3": the old image does not read
 `paceline.db`, and without them it starts with no clubs. Everything changed since the import is
@@ -1288,12 +1639,32 @@ the mod's tests, which include `tests/planserver.test.mjs`.
 
 ### Smoke test of the captain pages (required before every push)
 
-The captain pages run on one script (`/static/app.js`, `server/client.mjs`); only Make live works
-without it. `server/tests/smoke-captain.mjs` checks the pages and the script in headless Chrome over
+The captain pages run on one script (`/static/app.js`, `server/client.mjs`); the team page's rows,
+Make live and Store also work without it. `server/tests/smoke-captain.mjs` checks the pages and the script in headless Chrome over
 CDP (Node 22's `WebSocket`, no puppeteer); it also checks that the public pages load without a
 script, fit 390 px and have 44 px targets, that `/` with the club cookie opens `/manage`, and with
-two clubs in the cookie that the captain footer switches between them. It is not part of `npm run test:server`, but every push
-needs it to pass: every line `ok`, exit 0. Run it from the repo root:
+two clubs in the cookie that the captain footer switches between them. Check group 11 covers the
+races: a team page with two races (the later race folded), the race's ⋯ and a plan's ⋯ at 390 px,
+Esc and a click outside, the guarded reload held while a ⋯ is open, "Save date and time…" asking in
+its place and moving the race (with the script, and without it through the server's question page),
+Rename in a plan's ⋯ and Make live from the panel (its Undo on the later race's live row, in its card
+once swapped in, never twice), a race that is over under "Over" with Delete
+only in its plan's ⋯ and a read-only panel, and the race radios in the Store form of a pushed plan.
+Check group 12 covers the team page as the team cockpit at 390 and 1280 px: two columns from 1180
+(one card: the live version's with nothing picked, a picked version's in its place before and after
+the gate, the live row's "4/6 have it" after it; the card in the same place and width for the live
+version, a version and a plan not stored yet, its table header the same distance from its top and its
+action bar from its bottom, the race head one line; the live row's `?r=`), a row swapping the panel in place (one request with `panel=1`, no page load, the last of two quick clicks
+winning), Back and Forward, a stale page loading in full, the guarded reload keeping `?v=` and
+holding while a Store form or a Store result with a warning is open (the page saying so, with
+Refresh), the live card after the nearest race on a phone and its riders' states (a line under each
+row at 390 px, a long one wrapping, the fourth column at 900), the focus back on the row after the
+phone sheet's ✕, the phone's sheet with and without the script (its close link,
+its scroll place, 44 px targets, nothing wider than the screen), Make live from the panel asking in
+place and through the server's page without the script, Store from the panel (the form in the row,
+a redraw in place, the result as a flash with Make live a secondary button) and Store without the
+script (refused once, then stored). It is not part of `npm run test:server`, but every push needs it
+to pass: every line `ok`, exit 0. Run it from the repo root:
 
     node server/tests/smoke-captain.mjs [--data <dir>] [--shots <dir>]
 
@@ -1303,10 +1674,18 @@ needs it to pass: every line `ok`, exit 0. Run it from the repo root:
   `<dir>` (default: the system's temp folder). Chrome's profile always goes to the system's temp
   folder: Chrome cannot start with a long `TMPDIR`.
 - `--shots <dir>` also saves screenshots of the hub (with things to fix and plans waiting, and
-  with nothing to do), the team page, the assign page, a plan page, the team settings, the team page
-  with its switcher open, the hub of a browser with two clubs (the footer's club switch), the start
-  page (without the club cookie) and the register page.
+  with nothing to do), the team page, the team settings, the team page with its switcher open, the
+  hub of a browser with two clubs (the footer's club switch), the start page (without the club
+  cookie) and the register page; of the races: the team page with two races
+  (`captain-team-races-{390,1280}-light.png`), the open race ⋯ and plan ⋯
+  (`captain-race-menu-390-light.png`, `captain-plan-menu-390-light.png`); and of the team cockpit,
+  `captain-cockpit-<what>-<width>-<scheme>.png`: the page (`{390,1280}-light`, `390-dark`), a
+  version picked (`version-{390,1280}-light`), a plan not stored yet picked with its Store form
+  (`store-{390,1280}-light`), the panel's Make live strip open (`live-armed-390-light`) and a Store's
+  result (`result-1280-light`). The README's screenshots in `docs/images` come from such a run; only
+  the ones it shows are kept there.
 - Chrome is expected at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`. Set
   `CHROME=<path to the Chrome or Chromium binary>` to use another one. Without Chrome the run prints
   `FAIL Chrome not found` and exits 1, so it cannot pass, and the push waits.
-- It takes about 2.5 minutes: the guarded reload and the stale line need three 35 s waits.
+- It takes about 8 minutes (470 s on 21 Nov 2026; longer with `--shots`): the guarded reload and the
+  stale line need several 35 s waits, the team cockpit's group 12 among them.

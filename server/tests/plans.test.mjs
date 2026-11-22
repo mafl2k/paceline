@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     SHARED_SHARE, isUsed, plansOf, planLabel, typeKey, rememberType, teamTypes, racePlans, planOfId,
-    previousVersion, planNames, ridersShared, freeVersionId,
+    previousVersion, planNames, ridersShared, freeVersionId, planTypes,
 } from '../plans.mjs';
 import {isUsed as isUsedViaClub} from '../club.mjs';
-import {club, sheet, T} from './helpers.mjs';
+import {club, sheet, T, race, setLive} from './helpers.mjs';
+import {mixedTypes, typesOf, ONE_TYPE} from './cockpit-fixture.mjs';
 
 
 const EIGHT = ['1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008'];
@@ -33,7 +34,7 @@ test('plansOf: versions grouped by plan, n ascending, newest and live', () => {
             cc0001: ver({team: 'sprockets', label: 'Kettenfett Sprockets'}),
         },
     });
-    c.teams.rollers.live = 'aa0001';
+    setLive(c, 'rollers', 'aa0001');
     const plans = plansOf(c, 'rollers');
     assert.equal(plans.length, 2);
     const a = plans.find(p => p.id === 'aa0001');
@@ -51,7 +52,7 @@ test('plansOf: versions grouped by plan, n ascending, newest and live', () => {
 
 test('plansOf: a live pointer outside the plan is null', () => {
     const c = club({teams: teams(), sheets: {aa0001: ver()}});
-    c.teams.rollers.live = 'zz0001';
+    race(c, 'rollers', '2026-11-19').live = 'zz0001';
     assert.equal(plansOf(c, 'rollers')[0].live, null);
 });
 
@@ -67,7 +68,7 @@ test('racePlans: this race only, the live plan first, then the newest', () => {
             spr001: ver({team: 'sprockets'}),
         },
     });
-    c.teams.rollers.live = 'liv001';
+    setLive(c, 'rollers', 'liv001');
     assert.deepEqual(racePlans(c, 'rollers', NOW).map(p => p.id), ['liv001', 'new001', 'mid001']);
 });
 
@@ -118,6 +119,47 @@ test('planLabel and typeKey', () => {
     assert.equal(planLabel('Rollers', 'fast'), 'Rollers · fast');
     assert.equal(typeKey('  Fast  Lane '), 'fast lane');
     assert.equal(typeKey(null), '');
+});
+
+
+// ---- planTypes: one type per plan (team cockpit spec §4.2, schema 4) ----
+
+test('planTypes: every version takes the type of its plan\'s highest version, and that label', () => {
+    const c = mixedTypes();
+    const before = structuredClone(c);
+    assert.equal(planTypes(c), true);
+    assert.deepEqual(typesOf(c), ONE_TYPE);
+    for (const [id, s] of Object.entries(c.sheets)) {            // nothing but type and label
+        const {type, label, ...rest} = s;
+        const {type: t0, label: l0, ...was} = before.sheets[id];
+        assert.deepEqual(rest, was, id);
+    }
+    assert.deepEqual([c.teams, c.inbox, c.log, c.tokens], [before.teams, before.inbox, before.log, before.tokens]);
+    const once = JSON.stringify(c);
+    assert.equal(planTypes(c), false);                            // a second run changes nothing
+    assert.equal(JSON.stringify(c), once);
+});
+
+test('planTypes: odd data', () => {
+    const c = mixedTypes();
+    delete c.sheets.rb0001.type;                                  // no type key, and its plan's type is none: left as it is
+    c.sheets.rb0001.label = 'Rollers';
+    c.sheets.ra0003 = {...c.sheets.ra0001, n: 2, at: '2026-11-19T11:00:00.000Z', type: 'late', label: 'Rollers · late'};   // n 2 twice: the later `at` decides
+    c.sheets.xa0001 = {...c.sheets.ra0001, team: 'gone', plan: 'xa0001'};          // a team that is gone
+    c.sheets.ya0001 = 7;                                                           // no object
+    assert.equal(planTypes(c), true);
+    assert.deepEqual([c.sheets.ra0001.type, c.sheets.ra0002.type, c.sheets.ra0003.type], ['late', 'late', 'late']);
+    assert.equal(Object.hasOwn(c.sheets.rb0001, 'type'), false);
+    assert.deepEqual([c.sheets.xa0001.type, c.sheets.xa0001.label, c.sheets.ya0001], ['fast', 'Rollers · fast', 7]);
+    for (const odd of [null, 7, {teams: 1, sheets: {}}, {teams: {}, sheets: null}]) {
+        assert.equal(planTypes(odd), false);                      // never throws
+    }
+    // an `at` that is no string (one that cannot even be turned into one) does not decide, nor throw
+    const d = mixedTypes();
+    d.sheets.ra0002.n = 1;
+    d.sheets.ra0002.at = {toString: 1};
+    assert.equal(planTypes(d), true);
+    assert.deepEqual([d.sheets.ra0001.type, d.sheets.ra0002.type, d.sheets.ra0002.label], ['fast', 'fast', 'Rollers · fast']);
 });
 
 test('rememberType and teamTypes: most recent first, distinct, at most 10', () => {

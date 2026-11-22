@@ -10,8 +10,11 @@ import {analyse, publicResult} from '../tools/ride-report/analyse.mjs';
 import {parseRecording, readPlan, parsePlanArg} from '../tools/ride-report/load.mjs';
 import {renderMarkdown} from '../tools/ride-report/render.mjs';
 import {frontPerTick, markSwaps, turnsOf, groundTruth} from '../tools/ride-report/checks/pulls.mjs';
+import {recoveryPlanS, stintEaseOff} from '../tools/ride-report/checks/countdown.mjs';
+import {chaosPhases, liveChaosAt, replayChaosAt} from '../tools/ride-report/checks/puller.mjs';
 import {simulateView, judgeView, viewsCheck, MODELS} from '../tools/ride-report/checks/views.mjs';
 import {makeRide} from '../tools/ride-report/ride.mjs';
+import {replay} from '../tools/ride-report/replay.mjs';
 import {run, parseArgs, readRecording} from '../tools/ride-report/report.mjs';
 import {planSig} from '../pages/src/engine/plan.mjs';
 import * as M from './fixtures/ride-report/make.mjs';
@@ -250,6 +253,113 @@ test('4 countdown: one 10 s jump down, recovery vs plan, prediction error, READY
 });
 
 
+test('4 countdown: the plan sum follows the overhead split and leaves the rider before me at plan', () => {
+    const riders = [['m', 60], ['a', 30], ['b', 50], ['c', 40], ['d', 90]].map(([id, pullS]) => ({id, pullS}));
+    // After me (m): a 30 + 10, b 50 + 5, c 40 + 10 (40 s is still short), d 90 (directly before me, plan only).
+    assert.equal(recoveryPlanS(riders, 'm'), 40 + 55 + 50 + 90);
+    // c away: d stays the rider before me.
+    assert.equal(recoveryPlanS(riders, 'm', r => r.id === 'c'), 40 + 55 + 90);
+    // The rider before me comes from the plan order round the corner: with d away it is c, at plan.
+    assert.equal(recoveryPlanS(riders, 'm', r => r.id === 'd'), 40 + 55 + 40);
+    // Me in the middle (b): the order runs on from the rider after me and wraps: c 50, d 95, m 65, a (before me) 30.
+    assert.equal(recoveryPlanS(riders, 'b'), 50 + 95 + 65 + 30);
+});
+
+
+test('4 countdown: errors against T0, the ease-off of the rider before me', () => {
+    // T0 = the rider before me eases off (user, 21 Nov 2026). In the fixture the puller rides 320 W
+    // and 250 W off the front, so the 85 % rule puts T0 at his stint's end + 1 s, my start.
+    const t = R.countdown.t0;
+    assert.deepEqual(t.before.map(b => [b.start, b.T0, b.main, b.errs, b.readyLeadS]), [
+        [S(150), S(150), false, [null, null, 0, -10, -10], 20],
+        [S(270), S(270), false, [null, null, 0, 0, 0], 10],
+        [S(390), S(390), true, [null, null, 0, 0, 0], 10],
+    ]);
+    assert.equal(t.n, 1);
+    assert.equal(t.absErrorMedianS, 0);
+    assert.equal(t.late10Pct, 0);
+    assert.equal(t.readyLeadMedianS, 10);
+    assert.equal(t.shadow, null);
+    assert.match(R.countdown.verdict, /gegen T0 \|Fehler\| Median 0 s/);
+    assert.doesNotMatch(R.countdown.verdict, /fest/);
+});
+
+
+test('4 countdown: the shadow against T0', () => {
+    const r = report({cdOld: 5}).countdown;
+    const t = r.t0;
+    // The fixed rule's clock 5 s above the shown one: 5 s late everywhere, 10 s early less 5 s after the jump.
+    assert.deepEqual(t.shadow.before.map(b => b.errs), [[null, null, 5, -5, -5], [null, null, 5, 5, 5], [null, null, 5, 5, 5]]);
+    assert.deepEqual(t.shadow.before.map(b => b.readyLeadS), [15, 5, 5]);
+    assert.equal(t.shadow.absErrorMedianS, 5);
+    assert.equal(t.shadow.signedMedianS, 5);
+    assert.equal(t.shadow.late10Pct, 100);
+    assert.equal(t.shadow.readyLeadMedianS, 5);
+    assert.equal('shadow' in t.shadow, false);
+    // The live part is as without the shadow.
+    const {shadow, ...live} = t;
+    const {shadow: none, ...base} = R.countdown.t0;
+    assert.equal(none, null);
+    assert.deepEqual(live, base);
+    assert.match(r.verdict, /gegen T0 \|Fehler\| Median 0 s \(fest 5 s\)/);
+});
+
+
+test('4 countdown: the shadow counts only where a countdown showed, not in chaos', () => {
+    // The recorder writes det.cdOld in chaos too, while the windows show the dim "≠": those ticks
+    // must not step the shadow clock (21 Nov 2026).
+    const text = M.makeRecording({chaos: 'live', cdOld: 5});
+    const inChaos = text.split('\n').map(l => {
+        if (!l.includes('"k":"chaos"')) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        t.det.cdOld = {t: 1, standing: false};
+        return JSON.stringify(t);
+    }).join('\n');
+    const shadowOf = x => publicResult(analyse(x, {plans: []}).result).countdown.t0.shadow;
+    const base = shadowOf(text);
+    assert.ok(base.before.some(b => b.errs.includes('chaos')), JSON.stringify(base.before));
+    assert.ok(inChaos.split('\n').filter(l => l.includes('"cdOld":{"t":1')).length > 0);
+    assert.deepEqual(shadowOf(inChaos), base);
+});
+
+
+test('4 countdown: T0 before my start when the rider before me eases off early', () => {
+    // Alma eases off to 100 W for the last 8 s of her pull (+142…+149 s before my turn at +150 s):
+    // the 85 % rule's last full step is +142 s, so T0 = +143 s, 7 s before my start. Every error
+    // against T0 is the one against my start + 7 s, the READY lead before T0 7 s shorter.
+    const t = report({easeOffS: 8}).countdown.t0;
+    assert.deepEqual(t.before.map(b => [b.start, b.T0, b.main, b.errs, b.readyLeadS]), [
+        [S(150), S(143), false, [null, null, 7, -3, -3], 13],
+        [S(270), S(263), false, [null, null, 7, 7, 7], 3],
+        [S(390), S(383), true, [null, null, 7, 7, 7], 3],
+    ]);
+    assert.deepEqual([t.n, t.signedMedianS, t.absErrorMedianS, t.late10Pct, t.readyLeadMedianS], [1, 7, 7, 100, 3]);
+    // The fixed shadow 10 s below my shown clock: early against T0, so the signed median is not
+    // the absolute one.
+    const sh = report({easeOffS: 8, cdOld: -10}).countdown.t0.shadow;
+    assert.deepEqual(sh.before.map(b => [b.T0, b.errs, b.readyLeadS]), [
+        [S(143), [null, null, -3, -13, -13], 23],
+        [S(263), [null, null, -3, -3, -3], 13],
+        [S(383), [null, null, -3, -3, -3], 13],
+    ]);
+    assert.deepEqual([sh.n, sh.signedMedianS, sh.absErrorMedianS, sh.late10Pct, sh.readyLeadMedianS], [1, -3, 3, 0, 13]);
+});
+
+
+test('stintEaseOff: the 85 % rule on a stint\'s rows', () => {
+    const ts0 = M.T0;
+    const ticks = Array.from({length: 40}, (_, i) => ({ts: ts0 + i * 1000,
+        riders: [{id: 'x', age: 100, power: i < 30 ? 300 : 100}, {id: 'y', age: 100, power: 400}]}));
+    const p = {id: 'x', start: ts0, end: ts0 + 39000, i0: 0, i1: 39};
+    assert.equal(stintEaseOff({ticks}, p), ts0 + 30000 + 1000);
+    // Stale power (age > 2 s) is no sample: without enough samples there is no ease-off.
+    const stale = ticks.map(t => ({...t, riders: t.riders.map(x => ({...x, age: 5000}))}));
+    assert.equal(stintEaseOff({ticks: stale}, p), null);
+});
+
+
 test('5 gaps: the real gap, the one in full draft, warnings shown and replayed', () => {
     const G = R.gaps;
     assert.equal(G.real.n, 1);
@@ -457,6 +567,137 @@ test('8 views: every plan rider as me, the recorder by his own id', () => {
     assert.deepEqual(Object.keys(v.total), ['old', 'new']);
     assert.deepEqual(v.riders.map(x => x.new.pulls), [1, 1, 2, 1]);
     assert.equal(v.total.new.pulls, 5);
+});
+
+
+// Chaos (20 Nov 2026): the front leaves the plan's order (tests/fixtures/ride-report/make.mjs,
+// chaos). Dora back in front at +150 s and +230 s (the rider before Alma: 'back', bad), held
+// 30 s each (BACK_HOLD_MS); the second makes 2 bad of the last 4: chaos from her adoption at
+// +260 s. Then Alma (+270), me (+300) and Cleo (+330) in plan order: Cleo, adopted 3 s later, is
+// the third change in order and ends it. Plan P1 all race.
+const C = report({chaos: true}, []);
+
+test('3 chaos phases: one replay phase ended by the order, none live in a recording without det.order', () => {
+    const ch = C.puller.chaos;
+    assert.deepEqual(ch.replay, [{from: S(260), to: S(332), s: 73, endedBy: 'order'}]);
+    assert.deepEqual([ch.live, ch.liveRecorded], [[], false]);
+    // Chaos seconds are judged like normal running (the info window shows a puller): no reason
+    // excludes them, and the judged ones are counted apart.
+    assert.equal(Object.hasOwn(C.puller.excluded, 'chaos'), false);
+    assert.ok(ch.judged.replay.s > 60 && ch.judged.replay.s <= 73, JSON.stringify(ch.judged));
+    assert.ok(Number.isFinite(ch.judged.replay.agreePct));
+    assert.deepEqual(ch.judged.live, {s: 0, agreePct: null});
+    assert.match(C.puller.verdict, /; Chaos: Replay 1 Phase \(73 s\)$/);
+    // Without chaos: nothing.
+    assert.deepEqual([R.puller.chaos.live, R.puller.chaos.replay], [[], []]);
+    assert.doesNotMatch(R.puller.verdict, /Chaos/);
+});
+
+
+test('3 chaos phases: the live state (det.order) gives its own phase', () => {
+    const L = report({chaos: 'live'}, []).puller.chaos;
+    assert.deepEqual([L.live, L.liveRecorded], [[{from: S(M.CHAOS_FROM_S), to: S(M.CHAOS_TO_S - 1), s: 70, endedBy: 'order'}], true]);
+    assert.deepEqual(L.replay, C.puller.chaos.replay);
+    assert.ok(L.judged.live.s > 60, JSON.stringify(L.judged));
+});
+
+
+test('3 chaos phases: how a phase ends (order, plan, finish mode, end)', () => {
+    const rows = (flags, {finishFrom = Infinity, planFrom = Infinity} = {}) =>
+        [...flags].map((f, i) => ({ts: i * 1000, chaos: f === 'x', finish: i >= finishFrom, sig: i >= planFrom ? 'B' : 'A'}));
+    assert.deepEqual(chaosPhases(rows('..xxx..')), [{from: 2000, to: 4000, s: 3, endedBy: 'order'}]);
+    // A new plan resets the order state.
+    assert.deepEqual(chaosPhases(rows('.xx.', {planFrom: 3})), [{from: 1000, to: 2000, s: 2, endedBy: 'plan'}]);
+    // Finish mode takes over (the chaos state is kept there, but the windows show the final sprint).
+    assert.deepEqual(chaosPhases(rows('.xxxx', {finishFrom: 3})), [{from: 1000, to: 2000, s: 2, endedBy: 'finish'}]);
+    assert.deepEqual(chaosPhases(rows('..xx')), [{from: 2000, to: 3000, s: 2, endedBy: 'end'}]);
+    assert.deepEqual(chaosPhases(rows('x.x')), [{from: 0, to: 0, s: 1, endedBy: 'order'}, {from: 2000, to: 2000, s: 1, endedBy: 'end'}]);
+    assert.deepEqual(chaosPhases([]), []);
+    // A tick is in chaos by the order state, also while a climb pause shows its own reason; never
+    // by det.view, which still says 'rest' in chaos.
+    assert.deepEqual([liveChaosAt({order: {chaos: true, out: []}, reason: 'climb'}), liveChaosAt({reason: 'chaos'}),
+                      liveChaosAt({view: 'rest', order: {chaos: false, out: []}}), liveChaosAt(null)], [true, true, false, false]);
+    assert.deepEqual([replayChaosAt({skipped: false, reason: 'climb', rot: {order: {chaos: true}}}),
+                      replayChaosAt({skipped: false, reason: null, rot: {order: {chaos: false}}}),
+                      replayChaosAt({skipped: true, reason: 'noplan', rot: {order: {chaos: true}}})], [true, false, false]);
+});
+
+
+test('4 countdown: chaos seconds count as silent, not as errors', () => {
+    const c = C.countdown;
+    // My pulls at +30, +300 and +420 s. As shown (my clock kept counting by the regular schedule):
+    // before +300 s the clock said +270 s (−30 s) and, after the jump at +271 s, +390 s (+90 s).
+    assert.deepEqual(c.before.map(b => b.start), [S(30), S(300), S(420)]);
+    assert.deepEqual(c.before[1].errs, [-150, -30, -30, -30, 90]);
+    // With the replay's chaos seconds (+260…+332 s) silent, the looks at +270 and +290 s are no errors.
+    const z = c.chaos.replay;
+    assert.equal(c.chaos.replayS, 73);
+    assert.deepEqual(z.before[1].errs, [-150, -30, -30, 'chaos', 'chaos']);
+    assert.deepEqual(z.errorAt.map(e => e.n), [c.errorAt[0].n, c.errorAt[1].n, c.errorAt[2].n, c.errorAt[3].n - 1, c.errorAt[4].n - 1]);
+    // The jump at +271 s lies in chaos: not counted there.
+    assert.ok(c.jumps.list.some(j => j.at === S(271)), JSON.stringify(c.jumps.list));
+    assert.equal(z.jumps, c.jumps.n - 1);
+    assert.ok(z.absErrorMedianS <= c.absErrorMedianS, `${z.absErrorMedianS} vs ${c.absErrorMedianS}`);
+    assert.match(c.verdict, /; Chaos: live 0 s still, heutige Engine 73 s still: \|Fehler\| Median \d+ → \d+ s$/);
+    // Without chaos nothing changes.
+    assert.equal(R.countdown.chaos.replayS, 0);
+    assert.deepEqual(R.countdown.chaos.replay.before.map(b => b.errs), R.countdown.before.map(b => b.errs));
+    assert.doesNotMatch(R.countdown.verdict, /Chaos/);
+});
+
+
+test('4 countdown: the live chaos dash ("≠") is silent, no error', () => {
+    const c = report({chaos: 'live'}, []).countdown;
+    assert.deepEqual(c.before[1].errs, [-150, -30, -30, 'chaos', 'chaos']);
+    assert.equal(c.jumps.list.some(j => j.at === S(271)), false);
+    assert.equal(c.chaos.liveS, M.CHAOS_TO_S - M.CHAOS_FROM_S - 30);    // my pull (+300…+329 s) is no dash
+});
+
+
+test('8 views: chaos seconds of the replay are silent for both models', () => {
+    const pulls = rotationPulls(4);
+    const to = pulls.at(-1).end;
+    // Silent from 150 s to 199 s (the tick index here is the second); A pulls 140…179 s, B from 180 s.
+    const silent = i => i >= 150 && i < 200;
+    const run = key => simulateView(viewRide, pulls, 'me', model(key), {to, tickAt: ts => ts / 1000, silent});
+    for (const key of ['old', 'new']) {
+        const ser = run(key);
+        assert.deepEqual([149, 150, 199, 200].map(s => ser.find(x => x.ts === s * 1000).v === null), [false, true, true, false]);
+    }
+    const r = publicResult(analyse(M.makeRecording({chaos: true})).result).views;
+    assert.equal(r.rules.chaosS, 73);
+    assert.equal(R.views.rules.chaosS, 0);
+    // In the chaos ride the looks that fall into the replay's chaos (+260…+332 s) have no value.
+    const ride = makeRide(parseRecording(M.makeRecording({chaos: true})));
+    const w = {from: S(0), to: ride.finish.at};
+    const gt = groundTruth(ride, w);
+    const looks = v => v.riders.reduce((a, x) => a + x.new.errorAt.reduce((b, e) => b + e.n, 0) + x.old.errorAt.reduce((b, e) => b + e.n, 0), 0);
+    const without = viewsCheck(ride, gt, {...w, minPulls: 2});
+    const withChaos = viewsCheck(ride, gt, {...w, minPulls: 2, frames: replay(ride).frames});
+    assert.ok(looks(withChaos) < looks(without), `${looks(withChaos)} vs ${looks(without)}`);
+});
+
+
+test('report.md: the chaos phases after the pause table, chaos in the countdown', () => {
+    const md = renderMarkdown(C);
+    const pauses = md.indexOf('**Anstiegs-/Abfahrtspausen:**');
+    const chaos = md.indexOf('**Chaos-Phasen**');
+    assert.ok(pauses > 0 && chaos > pauses && chaos < md.indexOf('## 4.'), `${pauses} ${chaos}`);
+    assert.match(md, /\| Replay \| \+4:20 \| \+5:32 \| 73 \| 3 Wechsel in Planfolge \|/);
+    assert.match(md, /live: nicht aufgezeichnet/);
+    assert.match(md, /\*\*Chaos \(still statt Countdown\):\*\*/);
+    assert.match(renderMarkdown(report({chaos: 'live'}, [])), /\| live \| \+4:25 \| \+5:34 \| 70 \| 3 Wechsel in Planfolge \|/);
+    assert.match(renderMarkdown(R), /\*\*Chaos-Phasen\*\*[^\n]*\n\n_keine_/);
+});
+
+
+test('report.md: the countdown against T0', () => {
+    const md = renderMarkdown(R);
+    assert.match(md, /\*\*Gegen T0\*\*/);
+    assert.match(md, /Schatten: entfällt/);
+    const sh = renderMarkdown(report({cdOld: 5}));
+    assert.match(sh, /Schatten \(feste Zuschläge bis 0\.3\.4-beta\.4, det\.cdOld\): /);
+    assert.doesNotMatch(sh, /Schatten: entfällt/);
 });
 
 

@@ -161,6 +161,7 @@ export function makeTick(nearby, ids, now, {fallback = false} = {}) {
 // of a rider in no plan in the recording; the rows already keep only those riders). The rotation's
 // chain and the gap warnings follow plan riders only, but state carried over a plan change (the
 // wheel cue) can still name a rider of the plan before. `gap` keeps its numbers, without the id.
+// `order.out` (riders sitting out, 20 Nov 2026) keeps only the ids that pass.
 export const DET_ID_FIELDS = ['puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue'];
 
 export function detPlanOnly(det, ids, selfId) {
@@ -177,6 +178,9 @@ export function detPlanOnly(det, ids, selfId) {
     }
     if (out.gap && typeof out.gap === 'object' && 'id' in out.gap) {
         out.gap = {...out.gap, id: ok(out.gap.id)};
+    }
+    if (out.order && typeof out.order === 'object' && Array.isArray(out.order.out)) {
+        out.order = {...out.order, out: out.order.out.filter(id => id != null && known(id))};
     }
     return out;
 }
@@ -331,6 +335,14 @@ export function leaseStep(current, me, now) {
 }
 
 
+// Whether `me` holds the lease as stored (audit fixes, 20 Nov 2026, W4; probe s6-close: a closed
+// recorder left its lease behind, a 7 s hole in the ticks until LEASE_STALE_MS ran out). A window
+// that closes removes only a lease it holds, never another window's.
+export function leaseHeld(current, me) {
+    return current?.id === me;
+}
+
+
 export function toJsonl(meta, ticks) {
     const head = {kind: 'paceline-recording', v: 1, ...meta};
     return [head, ...ticks].map(x => JSON.stringify(x)).join('\n') + '\n';
@@ -343,4 +355,13 @@ export function recordingFileName({team, selfName, startedAt}) {
     const stamp = `${p(d.getFullYear(), 4)}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
     const clean = s => String(s ?? '').replace(/[^A-Za-z0-9]/g, '_');
     return `paceline-${clean(team)}-${stamp}-${clean(selfName)}.jsonl`;
+}
+
+
+// What the recordings list in the settings window shows, as a key (audit fixes, 20 Nov 2026, W7):
+// whether a recording runs, its session and the live session. The window re-read the stored
+// recordings on every storage event of the recording state, which also fires with each heartbeat
+// (lastSeenAt): probe s4-settings. It re-reads only when this key changes.
+export function recListKey(state, liveId) {
+    return JSON.stringify([state?.recording === true, state?.sessionId ?? null, liveId ?? null]);
 }

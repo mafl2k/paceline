@@ -1,7 +1,7 @@
 // The ZwiftGopher push (proof of concept, 19 Nov 2026): the team's upload page links to the planner
 // with a short-lived token, ZwiftGopher posts the plan JSON back to POST /api/v3/push with it, and
 // the plan lands in the club's inbox for that team (source 'receive', via 'zwiftgopher'), to be
-// stored by the captain on the assign page like an upload. Never live before that Store.
+// stored by the captain with the Store form on the team page like an upload. Never live before that Store.
 //
 // The token is stateless, nothing is stored per token: 40 lower-case hex characters, the expiry
 // (unix seconds, 8 hex) and HMAC-SHA256(secret, `push:<cid>:<slug>:<gen>:<expiry>`) cut to 128 bit
@@ -210,7 +210,7 @@ async function push(req, res, {store, cfg, now, push: state}, query, method, ans
         }
         // a leading BOM goes, as for an upload
         const text = body.toString('utf8').replace(/^\uFEFF/, '');
-        const read = checkTexts([text], {json: true});
+        const read = checkTexts([text]);
         if (!read.ok) {
             answer(400, {error: read.code, message: read.error});
             return;

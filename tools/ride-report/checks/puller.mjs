@@ -18,6 +18,49 @@ export function pausedAt(det) {
 }
 
 
+// Chaos (20 Nov 2026, spec 2026-11-20-paceline-chaos-counter sections 3 and 6): the engine finds the
+// team no longer rides the plan's order and the countdown goes silent; the info window still shows
+// the real puller, so these seconds are judged here like normal running. A tick is in chaos by the
+// order state: live det.order.chaos (or det.reason 'chaos'; det.view still says 'rest'/'next'
+// there), in the replay the engine's state `order`. Recordings before 0.3.4 have no det.order:
+// no live phases then (the replay still finds them).
+export function liveChaosAt(det) {
+    return !!det && (det.order?.chaos === true || det.reason === 'chaos');
+}
+
+
+// The same for a replay frame: the engine's order state, which a climb or descent pause in chaos
+// keeps (the reason is 'climb' then, but the phase goes on).
+export function replayChaosAt(frame) {
+    return !!frame && !frame.skipped && frame.rot?.order?.chaos === true;
+}
+
+
+// The chaos phases in rows [{ts, chaos, finish, sig}] (the race window's ticks in order): runs of
+// chaos ticks outside finish mode, and how each ended: 'order' (changes in the plan's order again),
+// 'plan' (a new plan code: the order state starts over), 'finish' (finish mode; the state is kept
+// there, but the windows show the final sprint) or 'end' (the race window ended).
+export function chaosPhases(rows) {
+    const out = [];
+    let a = null;
+    rows.forEach((r, i) => {
+        const on = r.chaos && !r.finish;
+        if (on && a === null) {
+            a = i;
+        }
+        if (a === null || (on && i + 1 < rows.length)) {
+            return;
+        }
+        const last = on ? i : i - 1;
+        const next = on ? null : r;
+        const endedBy = !next ? 'end' : next.sig !== rows[last].sig ? 'plan' : next.finish ? 'finish' : 'order';
+        out.push({from: rows[a].ts, to: rows[last].ts, s: num((rows[last].ts - rows[a].ts) / 1000 + 1), endedBy});
+        a = null;
+    });
+    return out;
+}
+
+
 function judge(ride, truth, pullerOf, {from, to, excluded}) {
     let judged = 0, agree = 0, unseen = 0, unseenNamed = 0;
     const bad = [];
@@ -224,6 +267,23 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
     const lockOut = ls => ls.map(l => ({from: l.a, s: num((l.b - l.a) / 1000 + 1), puller: L(l.puller),
                                         front: [...l.truths].map(L).join('/'),
                                         km: num((meRows[l.i0]?.eventDistance ?? NaN) / 1000, 2), afterPause: !!l.afterPause}));
+    // Chaos phases, live and replay, and how the seconds in them were judged (normal running).
+    const inRace = i => ticks[i].ts >= from && ticks[i].ts <= to;
+    const liveOn = ticks.map(t => liveChaosAt(t.det));
+    const repOn = frames.map(replayChaosAt);
+    const rowsOf = (on, finish, sig) => ticks.map((t, i) => (inRace(i) ? {ts: t.ts, chaos: on[i], finish: finish(i), sig: sig(i)} : null))
+        .filter(Boolean);
+    const liveRecorded = ticks.some(t => t.det && Object.hasOwn(t.det, 'order'));
+    const chaosJudged = (on, pullerOf) => {
+        const x = judge(ride, truth, pullerOf, {from, to, excluded: excluded.map((e, i) => e || !on[i])});
+        return {s: x.judged, agreePct: pct(x.agree, x.judged)};
+    };
+    const chaos = {
+        liveRecorded,
+        live: chaosPhases(rowsOf(liveOn, i => ticks[i].det?.finish === true, i => ride.sigs[i])),
+        replay: chaosPhases(rowsOf(repOn, i => !!frames[i].rot?.finish, i => frames[i].plan?.sig ?? null)),
+        judged: {live: chaosJudged(liveOn, live), replay: chaosJudged(repOn, rep)},
+    };
     const out = {
         judgedTicks: J.judged, excluded: why,
         live: {agreePct: pct(J.agree, J.judged), wrongS: J.bad.length, unseenTicks: J.unseen, unseenNamedUnrecorded: J.unseenNamed,
@@ -236,6 +296,7 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
         replay: {agreePct: pct(JR.agree, JR.judged), wrongS: JR.bad.length, locks: lockOut(repLocks),
                  fidelity},
         pauses: pauseList,
+        chaos,
     };
     out.verdict = `live ${out.live.agreePct ?? '–'} % richtig (${out.live.wrongS} s falsch), Verzug Median ${out.live.lagMedianS ?? '–'} s ` +
         `(p90 ${out.live.lagP90S ?? '–'} s), ${lockList.length} Hänger > 10 s` +
@@ -243,5 +304,10 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
         `; heutige Engine im Replay ${out.replay.agreePct ?? '–'} %` +
         (missingRows.length ? ` (Replay unvollständig: ${missingRows.map(f => `${f.sig} Front ${f.frontPct} %`).join(', ')})` : '') +
         (otherPlan.length ? ` (Replay mit ${ride.planAllSig}, live lief ${otherPlan.map(f => f.sig).join(', ')}: dort nicht mit live vergleichbar)` : '');
+    const phases = (xs, label) => (xs.length ? `${label} ${xs.length} Phase${xs.length > 1 ? 'n' : ''} (${xs.reduce((a, x) => a + x.s, 0)} s)` : null);
+    const chaosText = [phases(chaos.live, 'live'), phases(chaos.replay, 'Replay')].filter(Boolean);
+    if (chaosText.length) {
+        out.verdict += `; Chaos: ${chaosText.join(', ')}`;
+    }
     return out;
 }

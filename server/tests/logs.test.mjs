@@ -676,7 +676,9 @@ function archiveSetup(t) {
 }
 
 const ARCHIVED = ['plan', 'n', 'label', 'type', 'date', 'sig', 'recSig', 'uploadedAt', 'at', 'via', 'copyOf', 'json', 'text'];
-const archived = v => ({...Object.fromEntries(ARCHIVED.map(k => [k, v[k]])), pastSigs: v.pastSigs ?? []});
+// (a field the version does not have is archived as null, as logs.mjs writes it: copyOf on every
+// version since Restore went)
+const archived = v => ({...Object.fromEntries(ARCHIVED.map(k => [k, v[k] ?? null])), pastSigs: v.pastSigs ?? []});
 
 
 test('archiveVersions: only versions a recording used, by recSig or the current sig; an id stored stays as it is', t => {

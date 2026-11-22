@@ -55,26 +55,30 @@ const sevIcon = sev => (sev === 'err' ? 'x' : sev === 'warn' ? 'alert' : 'info')
 
 // The fix items of one team (UI panel wave 3), each {sev, text, act}: the team page's problem in its
 // words and its button. No start time (the red callout: Set the start time, or a special race's
-// upload); no live plan near the race (the red status: plans stored, "Make one of its plans live" on
-// the team page; none stored, Upload a plan); each note (riders in another event, a rider who now
-// rides another team: Remove event link, Upload without <rider>).
+// upload); plans stored but none live, at any distance from the race (spec §8: the red status, "Make
+// a plan live" to the race's plans on the team page); each note (riders in another event, a rider
+// who now rides another team: Remove event link, Upload without <rider>). A weekly team's regular
+// race day without a plan is no race: nothing to do (spec §8). "Make a plan live" goes to the team
+// page with the race's one plan picked (its newest version, ?v=<id>#panel; team cockpit spec §5.6),
+// with two or more to the race's block (#race-<date>).
 function fixItems(club, view, now) {
     const items = [];
     const {status} = view;
     if (status.kind === 'no-start') {
-        items.push({sev: 'err', text: status.text, act: noStartAction(club, view, now, {hub: true})});
-    } else if (status.sev === 'err' && status.kind === 'none-live') {
+        items.push({sev: 'err', text: status.text, act: noStartAction(club, view, now, {hub: true}), teamWide: !view.special});
+    } else if (status.kind === 'none-live') {
         items.push({sev: 'err', text: status.text,
-            act: `<a class="btn secondary small" href="${esc(teamPath(view.slug))}#plans-h">${esc(t('tv-row-none-live'))}${teamSr(view, true)}</a>`});
-    } else if (status.sev === 'err' && status.kind === 'no-plan') {
-        items.push({sev: 'err', text: status.text,
-            act: `<a class="btn secondary small" href="/manage/upload?team=${esc(view.slug)}">${ic('upload')}${esc(t('tp-upload-plan'))}${teamSr(view, true)}</a>`});
+            act: `<a class="btn secondary small" href="${esc(makeLiveHref(view))}">${esc(t('hub-make-live'))}${teamSr(view, true)}</a>`});
     }
     for (const n of view.notes) {
         items.push({sev: n.sev, text: n.title, act: noteAction(club, view, n, now, {hub: true})});
     }
     return items;
 }
+
+
+// Where "Make a plan live" of a race (a raceView with plans, none live) goes on the team page.
+const makeLiveHref = view => (view.plans.length === 1 ? `${teamPath(view.slug)}?v=${view.plans[0].id}#panel` : `${teamPath(view.slug)}#race-${view.date}`);
 
 
 // One line of the hub's lists: the icon, the team (a link) and `when`, the words, the buttons.
@@ -84,10 +88,27 @@ function hubLi(view, {sev, icon, when, text, acts}) {
 }
 
 
-// "To do before the race": every fix item across teams, by start time (none last), then the worst
-// first; '' without any.
+// The views of a team's races ahead (teamView.races; races spec §4b), or the team's own view when it
+// has none (a special team without a race, a weekly team's regular race day: neither gives an item,
+// spec §8).
+const raceViews = view => (view.races.length ? view.races : [view]);
+
+
+// "To do before the race": every fix item across teams and their races ahead, each with its race's
+// day and time, by start time (none last), then the worst first; '' without any. A weekly team
+// without a start time has one "No start time" item, its nearest race's: one fix (its settings' start
+// time) for every race of the team. A special team's race without one has its own (its upload).
 function todoHtml(club, views, now) {
-    const items = views.flatMap((view, i) => fixItems(club, view, now).map((item, j) => ({...item, view, i, j})));
+    const noStart = new Set();
+    const items = views.flatMap(raceViews).flatMap((race, i) => fixItems(club, race, now).map((item, j) => ({...item, view: race, i, j})))
+        .filter(x => {
+            if (!x.teamWide) {
+                return true;
+            }
+            const first = !noStart.has(x.view.slug);
+            noStart.add(x.view.slug);
+            return first;
+        });
     if (!items.length) {
         return '';
     }
@@ -104,7 +125,7 @@ function todoHtml(club, views, now) {
 
 
 // "New plans from ZwiftGopher": every plan waiting across teams (in team order, each team's newest
-// first), with the team page's Review and store (its assign page) and Discard (back here, asking
+// first), with Review and store (the team page with it picked, ?e=<id>#panel) and Discard (back here, asking
 // first in its place); '' without any.
 function receivedHtml(views) {
     const lis = views.flatMap(view => view.received.map(r => {
@@ -112,7 +133,7 @@ function receivedHtml(views) {
         if (r.name !== null) {
             what.unshift(t('tp-received-name', {name: r.name}));
         }
-        const acts = `<a class="btn primary small" href="/manage/inbox/${esc(r.id)}">${esc(t('tp-received-review'))}${teamSr(view, true)}</a>`
+        const acts = `<a class="btn primary small" href="${esc(`${teamPath(view.slug)}?e=${r.id}#panel`)}">${esc(t('tp-received-review'))}${teamSr(view, true)}</a>`
             + discardForm(r.id, '/manage', r.line, {small: true, team: view.name});
         return hubLi(view, {sev: 'info', icon: 'file', when: t('tp-received-at', {at: r.at}), text: what.join(' · '), acts});
     }));
@@ -129,16 +150,17 @@ function receivedHtml(views) {
 
 
 // One table per race day, from the next to RACE_DAYS ahead (a next race further away: that one
-// alone): one row per team whose race is that day (its view's race), with the team, its start, the
-// live plan and its version, "4 of 6 have it" once the plan is open or "opens 19:00" before, and the
-// worst state's icon (its words for screen readers). [] without any race ahead.
-function racesHtml(club, views, rows, now) {
+// alone): one row per team and race that day (races spec §4b: a team is in every day's table it has
+// a race in; a regular race day without a plan is none, spec §8), with the team, its start, the live plan and its version, "4 of 6 have it" once the
+// plan is open or "opens 19:00" before, and the race's worst state's icon (its words for screen
+// readers, teamRow's of that race). [] without any race ahead.
+function racesHtml(club, views, now) {
     const tz = club.tz;
     const today = localDate(now, tz);
     const last = addDays(today, RACE_DAYS);
     const all = new Map();
-    for (const view of views) {
-        const date = view.S !== null ? localDate(view.S, tz) : view.raceDate;
+    for (const view of views.flatMap(v => v.races)) {
+        const date = view.date;
         if (date !== null && date >= today) {
             all.set(date, [...(all.get(date) ?? []), view]);
         }
@@ -154,7 +176,7 @@ function racesHtml(club, views, rows, now) {
             const riders = v.open ? `${esc(t('hub-has', {has: v.has, n: v.count}))}<span class="desk"> ${esc(t(v.count === 1 ? 'hub-has-tail-one' : 'hub-has-tail'))}</span>`
                 : v.live?.sent ? esc(t('hub-opens', {opens: localHHMM(v.gateAt, tz)})) : '<span class="muted">–</span>';
             return `<tr><td><a href="${esc(teamPath(v.slug))}">${esc(v.name)}</a></td><td class="t">${start}</td><td>${plan}</td><td>${riders}</td>`
-                + `<td class="st"><span class="sevicon ${esc(v.sev)}">${ic(v.icon)}<span class="sr">${esc(rows.get(v.slug).main)}</span></span></td></tr>`;
+                + `<td class="st"><span class="sevicon ${esc(v.sev)}">${ic(v.icon)}<span class="sr">${esc(teamRow(v).main)}</span></span></td></tr>`;
         });
         const day = byDate.get(date)[0].when.day;
         return `<section class="card" aria-labelledby="race-${k}-h">
@@ -191,7 +213,7 @@ function firstRun(club, {now, seen, flash, others}) {
     <h2 id="add-h">${esc(t('fr-add'))}</h2>
     <form class="stack" method="post" action="/manage/team">${hidden({action: 'add'})}
       <label class="field">${esc(t('team-name-label'))}<input name="name" maxlength="40" required autocomplete="off" placeholder="${esc(t('fr-placeholder'))}"></label>
-      ${rhythmFields(club, {kind: 'weekly', weekday: null, start: ''})}
+      ${rhythmFields(club, {kind: 'weekly', weekday: 4, start: ''})}
       <button class="btn primary block" type="submit">${ic('plus')}${esc(t('team-add'))}</button>
     </form>
   </section>
@@ -220,7 +242,7 @@ export function teamsPage(club, {now, seen = {}, flash = null, refresh = true, o
     const next = nextRaceAt(club, now);
     const nothing = todo || received ? ''
         : sevLine('ok', 'checkCircle', next === null ? t('hub-nothing-none') : t('hub-nothing', {race: localLabel(next, club.tz)}), 'nothing');
-    const blocks = [nothing, todo, received, ...racesHtml(club, views, rowOf, now)].filter(Boolean);
+    const blocks = [nothing, todo, received, ...racesHtml(club, views, now)].filter(Boolean);
     const tileOf = slug => tile(rowOf.get(slug));
     const tiles = slugs.filter(s => !folded.has(s)).map(tileOf);
     // special teams with nothing in the next 14 days, below the rest (decision 11); the fold holds no

@@ -10,6 +10,7 @@ import {normalizePlan} from '../pages/src/engine/plan.mjs';
 import {CID_RE, ZWIFT_RE, SIG_RE, MOD_RE, isEventId, compareModVersion, normalizeRiderCode, riderCodeHash} from './ids.mjs';
 import {PLAN_OPEN_MS, planOpen, pickForRider, servable, roleIn} from './select.mjs';
 import {isPrivate, learnEvent} from './club.mjs';
+import {raceOfSheet} from './races.mjs';
 import {clientIp, isPublicIp} from './limits.mjs';
 
 export const CODE_HEADER = 'x-paceline-codes';
@@ -52,8 +53,9 @@ export function sheetEtag(cid, slug, id, sheet) {
 }
 
 
-// One plan record. Without its body it carries only the metadata (spec §6.1): no etag and no
-// eventId, so it can never pass for a plan the mod holds.
+// One plan record of a pick (select.mjs pickForRider). Without its body it carries only the metadata
+// (spec §6.1): no etag and no eventId, so it can never pass for a plan the mod holds. The event id is
+// the race's (races spec §3): its link, else the event it learned.
 export function planRecord(club, pick, {body}) {
     const {sheet, S} = pick;
     const head = {
@@ -64,7 +66,7 @@ export function planRecord(club, pick, {body}) {
         return {...head, uploadedAt: sheet.uploadedAt, sig: sheet.sig, body: false};
     }
     return {
-        ...head, eventId: sheet.pinnedEventId ?? sheet.eventId, uploadedAt: sheet.uploadedAt, sig: sheet.sig,
+        ...head, eventId: pick.race.pinnedEventId ?? pick.race.eventId, uploadedAt: sheet.uploadedAt, sig: sheet.sig,
         etag: sheetEtag(club.id, pick.slug, pick.id, sheet), body: true, json: sheet.json, text: sheet.text,
     };
 }
@@ -197,11 +199,11 @@ export function handleRider(req, res, {store, cfg, now, codeFails}, zwiftId, que
         let pick = eventPick(c);
         const body = inEvent && pick !== null && planOpen(pick.S, now);
         // Only a rider listing may bind the event id; a bench listing never does.
-        if (body && pick.role === 'rider' && pick.sheet.eventId == null && pick.sheet.pinnedEventId == null) {
+        if (body && pick.role === 'rider' && pick.race.eventId == null && pick.race.pinnedEventId == null) {
             try {
                 store.change(cid, d => learnEvent(d, pick.id, q.event, now));
                 c = store.get(cid);
-                pick = {...pick, sheet: c.sheets[pick.id]};
+                pick = {...pick, sheet: c.sheets[pick.id], race: raceOfSheet(c, c.sheets[pick.id])};
             } catch (e) {
                 console.error(`paceline-server: learning the event of club ${cid} failed: ${e.message}`);
             }

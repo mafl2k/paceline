@@ -134,3 +134,20 @@ test('endsAtGateClose: only a file plan loaded by the time the event was last se
     assert.equal(L.endsAtGateClose(server, T0 + H), false);
     assert.equal(L.endsAtGateClose(null, T0 + H), false);
 });
+
+
+test('planEntry: the entry the windows ride, never an ended file plan with the server on', () => {
+    const on = {serverOn: true};
+    const old = L.normalizeLibrary({plans: {O: {json: '{}', text: null, loadedAt: T0, team: 'Update Paceline'}}, active: 'O'});
+    assert.equal(L.planEntry(old, {now: T0 + H, ...on}), null);
+    assert.equal(L.planEntry(old, {now: T0 + H, serverOn: false}).sig, 'O');
+
+    const lib = L.addPlan(L.normalizeLibrary(null), L.fileEntry({sig: 'F', json: '{}', text: null, now: T0}));
+    assert.equal(L.planEntry(lib, {now: T0 + H, ...on}).sig, 'F');
+    assert.equal(L.planEntry(lib, {now: T0 + 18 * H, ...on}), null);
+    assert.equal(L.planEntry(lib, {now: T0 + 18 * H, serverOn: false}).sig, 'F');
+
+    const server = L.addPlan(lib, {sig: 'V', json: '{}', text: null, loadedAt: T0, source: 'server'});
+    assert.equal(L.planEntry(server, {now: T0 + 40 * H, ...on}).sig, 'V');
+    assert.equal(L.planEntry(L.normalizeLibrary(null), {now: T0, ...on}), null);
+});

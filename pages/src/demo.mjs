@@ -243,7 +243,9 @@ export function startDemo(plan, onNearby) {
             // B's soft start: the rider before me has swung aside, so I am in the wind already.
             const inWind = atFront ||
                 (self && at.sg.soft && at.u >= at.sg.dur - SOFT_LEAD_S);
-            const grade = at && at.sg.grade ? at.sg.grade : 0;
+            // On the flat my road rolls a little (below 1 %, far from a climb or descent), so the
+            // Action window's grade field shows something plausible.
+            const grade = at && at.sg.grade ? at.sg.grade : self ? Math.round(0.008 * Math.sin(s / 23) * 1000) / 1000 : 0;
             // Distance to the finish (self only, while the team rides): 500 m FINISH_LAST_S
             // before the end of the team ride.
             const toFinish = self && at ?

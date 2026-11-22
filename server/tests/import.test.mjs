@@ -8,7 +8,9 @@ import path from 'node:path';
 import {readJson, readClub, loadTombstones, loadSeen, loadSettings, importFiles} from '../import-files.mjs';
 import {openDb} from '../db.mjs';
 import {ARCHIVE_MAX} from '../logs.mjs';
-import {club, sheet, T, rows, changes, refuseWrites} from './helpers.mjs';
+import {club, sheet, T, rows, changes, refuseWrites, assertRaceShape} from './helpers.mjs';
+import {PRE_RACES, rawClub} from './pre-races.mjs';
+import {mixedTypes, typesOf, ONE_TYPE} from './cockpit-fixture.mjs';
 
 const CID = 'k7f3q9x2m4';
 const CID2 = 's9pk2m4q7d';
@@ -91,13 +93,15 @@ test('readClub: the load rule, then the checks; the error carries the prefix', t
     const dir = tempDir(t);
     const file = path.join(dir, `${CID}.json`);
     const old = sheet({team: 'rollers', label: 'Rollers fast', date: '2026-11-19', riders: ['1001'], uploadedAt: '2026-11-19T10:00:00.000Z'});
-    const data = club({teams: {rollers: {name: 'Rollers', start: '19:30', live: 'ol0001', version: 2, changedAt: null, undo: {what: 'x'}}}});
+    // a file as 0.3 wrote it
+    const data = rawClub({teams: {rollers: {name: 'Rollers', start: '19:30', live: 'ol0001', version: 2, changedAt: null, undo: {what: 'x'}}}});
     data.sheets = {ol0001: old};
     delete data.inbox;
     fs.writeFileSync(file, JSON.stringify(data));
     const {result: c, warned} = captureWarn(() => readClub(file, CID, 'damaged circle file circles/x.json', {warn: true}));
     assert.deepEqual(c.sheets, {});
-    assert.equal(c.teams.rollers.live, null);
+    assert.equal(Object.hasOwn(c.teams.rollers, 'live'), false);
+    assert.deepEqual(c.teams.rollers.races, {});
     assert.equal(Object.hasOwn(c.teams.rollers, 'undo'), false);
     assert.deepEqual(c.inbox, []);
     assert.deepEqual(warned, [`paceline-server: club ${CID}: 1 plans in the old format dropped (no plan versions); its teams stay`]);
@@ -299,6 +303,37 @@ test('import: everything in one transaction, then the files move to imported-<da
     assert.deepEqual(again.lines.filter(l => /import/.test(l)), []);
     assert.deepEqual(again.warned, [leftover]);
     assert.equal(again.server.db.meta('imported_at'), '2026-11-19T12:00:00.000Z');
+});
+
+
+test('import: a club file in the 0.3 shape is stored with races', async t => {
+    const dir = tempDir(t);
+    plant03(dir);
+    // the active club as 0.3 wrote it: team.live, the event fields on its versions
+    const raw = PRE_RACES.find(([n]) => n === 'pinned')[1]();
+    putJson(dir, `circles/${CID}.json`, raw);
+    const {server} = await serverOn(dir, {now: NOW});
+    t.after(() => closed(server));
+    const row = JSON.parse(server.db.sql.prepare('SELECT json FROM clubs WHERE cid = ?').get(CID).json);
+    assertRaceShape(row);
+    assert.deepEqual(row.teams.rollers.races, {
+        '2026-11-19': {start: null, pinnedEventId: 4567890, eventId: 4567891, boundAt: null, live: 'ra0001'},
+    });
+    assert.deepEqual(server.store.get(CID).teams.rollers.races, row.teams.rollers.races);
+    // the trashed club's row too
+    assertRaceShape(JSON.parse(server.db.sql.prepare('SELECT json FROM trash WHERE cid = ?').get(TRASHED).json));
+});
+
+
+test('import: a club file whose versions carry different types is stored with one type per plan', async t => {
+    const dir = tempDir(t);
+    plant03(dir);
+    putJson(dir, `circles/${CID}.json`, mixedTypes());
+    const {server} = await serverOn(dir, {now: NOW});
+    t.after(() => closed(server));
+    const row = JSON.parse(server.db.sql.prepare('SELECT json FROM clubs WHERE cid = ?').get(CID).json);
+    assert.deepEqual(typesOf(row), ONE_TYPE);
+    assert.deepEqual(typesOf(server.store.get(CID)), ONE_TYPE);
 });
 
 

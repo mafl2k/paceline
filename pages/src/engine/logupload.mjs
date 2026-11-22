@@ -168,10 +168,16 @@ export const UPLOAD_DROP_FIELDS = ['heartrate', 'cadence'];
 // wkg (the plan's pull_wkg) goes with weight: watts / wkg gives the weight, and the consent text
 // says "no weight or FTP". The recording on the rider's PC keeps it.
 export const UPLOAD_DROP_PLAN_FIELDS = ['weight', 'ftp', 'adjustment', 'wkg'];
+// Head line fields never uploaded: the upload bookkeeping the session row carries (audit fixes,
+// 20 Nov 2026, W3). A failed attempt wrote uploadTriedAt and uploadError into the row, which is the
+// head line, so the retry's bytes differed from the first copy (probe s3-upload: heads not identical,
+// uploadTriedAt/uploadError in the second). The server compares its own processed file on a retry
+// (server/logs.mjs:1606-1615), so a landed first copy then answered 409 'exists'.
+export const UPLOAD_DROP_HEAD_FIELDS = ['uploadedAt', 'uploadTriedAt', 'uploadError'];
 
 
 // The recording as uploaded, cut down to what the analysis needs:
-// - head line: the plan's riders lose weight, FTP, adjustment and wkg;
+// - head line: loses the upload bookkeeping (W3), its plan's riders lose weight, FTP, adjustment and wkg;
 // - ticks: only my own row, the rows of riders in the head plan (starters and bench) and the rows
 //   marked `inPlan: true` (a rider of the plan loaded at that tick, makeTick) stay, so a watched
 //   rider outside the team is left out; every row loses heart rate and cadence. The flag exists
@@ -200,10 +206,16 @@ export function stripForUpload(jsonl) {
             const list = plan ? [...(Array.isArray(plan.riders) ? plan.riders : []),
                                  ...(Array.isArray(plan.bench) ? plan.bench : [])] : [];
             ids = new Set(list.filter(r => r && typeof r === 'object').map(r => String(r.id)));
-            if (!plan || !Array.isArray(plan.riders)) {
-                return line;
-            }
             let changed = false;
+            for (const f of UPLOAD_DROP_HEAD_FIELDS) {
+                if (Object.hasOwn(obj, f)) {
+                    delete obj[f];
+                    changed = true;
+                }
+            }
+            if (!plan || !Array.isArray(plan.riders)) {
+                return changed ? JSON.stringify(obj) : line;
+            }
             for (const r of plan.riders) {
                 for (const f of UPLOAD_DROP_PLAN_FIELDS) {
                     if (r && typeof r === 'object' && Object.hasOwn(r, f)) {

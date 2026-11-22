@@ -8,11 +8,11 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-import {writeDump, pruneDumps, dumpDue, makeDumpJob, leftoverFolders, DUMP_KEEP, LEFTOVER_DAYS} from '../dump.mjs';
+import {writeDump, writeBackup, pruneDumps, dumpDue, makeDumpJob, leftoverFolders, DUMP_KEEP, PRE_KEEP_DAYS, LEFTOVER_DAYS} from '../dump.mjs';
 import {openDb, SCHEMA_VERSION} from '../db.mjs';
 import {openStore} from '../store.mjs';
 import {zonedToUtc} from '../time.mjs';
-import {club} from './helpers.mjs';
+import {club, T} from './helpers.mjs';
 
 const TZ = 'Europe/Berlin';
 const CID = 'k7f3q9x2m4';
@@ -67,7 +67,7 @@ test('writeDump: dumps/paceline-<local date>.db through a dot temp file; a copy 
         assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM clubs').get().n, 1);
         assert.equal(copy.prepare('SELECT cid FROM clubs').get().cid, CID);
         assert.equal(copy.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-        assert.equal(SCHEMA_VERSION, 2);
+        assert.equal(SCHEMA_VERSION, 4);
         assert.equal(copy.prepare('PRAGMA journal_mode').get().journal_mode, 'delete');
     } finally {
         copy.close();
@@ -132,6 +132,102 @@ test('pruneDumps keeps the newest 7 and removes temp files and their journals ol
     } finally {
         fs.rmSync(dir, {recursive: true, force: true});
     }
+});
+
+
+test('writeBackup: dumps/paceline-<name>-<UTC date>.db, a complete copy of the database as it was', t => {
+    const {dir, db} = setup(t);
+    const dumps = path.join(dir, 'dumps');
+    // 23:30 UTC is already 22 Nov in Berlin: the name has the UTC date
+    const {file, bytes} = writeBackup(db.sql, dir, 'pre-races', T('2026-11-21T23:30:00Z'));
+    assert.equal(file, path.join(dumps, 'paceline-pre-races-2026-11-21.db'));
+    assert.deepEqual(fs.readdirSync(dumps), ['paceline-pre-races-2026-11-21.db'], 'no .tmp left');
+    assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+    assert.equal(fs.statSync(dumps).mode & 0o777, 0o750);
+    assert.equal(bytes, fs.statSync(file).size);
+    const read = () => {
+        const copy = new DatabaseSync(file, {readOnly: true});
+        try {
+            return {
+                clubs: copy.prepare('SELECT cid FROM clubs').all().map(r => r.cid),
+                version: copy.prepare('PRAGMA user_version').get().user_version,
+            };
+        } finally {
+            copy.close();
+        }
+    };
+    assert.deepEqual(read(), {clubs: [CID], version: 4});
+    // a second call replaces it (also a leftover temp file and its journal)
+    db.sql.prepare('INSERT INTO clubs (cid, json) VALUES (?, ?)').run('p2m8c4t1v9', '{}');
+    const left = path.join(dumps, '.paceline-pre-races-2026-11-21.db.tmp');
+    fs.writeFileSync(left, 'half a backup from a crash');
+    fs.writeFileSync(left + '-journal', 'its journal');
+    writeBackup(db.sql, dir, 'pre-races', T('2026-11-21T08:00:00Z'));
+    assert.deepEqual(fs.readdirSync(dumps), ['paceline-pre-races-2026-11-21.db']);
+    assert.deepEqual(read(), {clubs: [CID, 'p2m8c4t1v9'], version: 4});
+    // a name pruneDumps would not find is refused
+    for (const name of ['races', 'pre-', 'pre-../x', 'pre-Races', '2026-11-21']) {
+        assert.throws(() => writeBackup(db.sql, dir, name, T('2026-11-21T08:00:00Z')), TypeError, name);
+    }
+    assert.equal(probeFromChild(dir), 'locked');
+});
+
+
+test('pruneDumps: a pre-migration backup is not one of the 7 and goes 7 days after its date', () => {
+    const dir = tmp();
+    try {
+        assert.equal(PRE_KEEP_DAYS, 7);
+        const dumps = path.join(dir, 'dumps');
+        fs.mkdirSync(dumps);
+        const dates = ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27'];
+        for (const d of dates) {
+            fs.writeFileSync(path.join(dumps, `paceline-${d}.db`), d);
+        }
+        const pre = 'paceline-pre-races-2026-11-21.db';
+        fs.writeFileSync(path.join(dumps, pre), 'backup');
+        // a stale temp file of a backup goes like a dump's
+        const stale = path.join(dumps, '.paceline-pre-races-2026-11-19.db.tmp');
+        for (const f of [stale, stale + '-journal']) {
+            fs.writeFileSync(f, 'x');
+            fs.utimesSync(f, new Date(T('2026-11-19T08:00:00Z')), new Date(T('2026-11-19T08:00:00Z')));
+        }
+        // the last moment within 7 days of its date: it stays, and it is not counted among the 7
+        assert.equal(pruneDumps(dir, T('2026-11-27T23:59:59Z')), 1);
+        assert.deepEqual(fs.readdirSync(dumps).sort(), [...dates.slice(1).map(d => `paceline-${d}.db`), pre].sort());
+        // 7 days after its date (M8: at most 7 days after it was written): it goes; not counted
+        assert.equal(pruneDumps(dir, T('2026-11-28T00:00:00Z')), 0);
+        assert.deepEqual(fs.readdirSync(dumps).sort(), dates.slice(1).map(d => `paceline-${d}.db`).sort());
+    } finally {
+        fs.rmSync(dir, {recursive: true, force: true});
+    }
+});
+
+
+test('writeBackup and pruneDumps: a backup name of several words', t => {
+    const {dir, db} = setup(t);
+    const dumps = path.join(dir, 'dumps');
+    const {file, bytes} = writeBackup(db.sql, dir, 'pre-plan-types', T('2026-11-21T23:30:00Z'));
+    assert.equal(file, path.join(dumps, 'paceline-pre-plan-types-2026-11-21.db'));
+    assert.deepEqual(fs.readdirSync(dumps), ['paceline-pre-plan-types-2026-11-21.db'], 'no .tmp left');
+    assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+    assert.equal(bytes, fs.statSync(file).size);
+    for (const name of ['pre-plan-', 'pre--types', 'pre-plan-Types', 'pre-plan_types']) {
+        assert.throws(() => writeBackup(db.sql, dir, name, T('2026-11-21T08:00:00Z')), TypeError, name);
+    }
+    assert.deepEqual(fs.readdirSync(dumps), ['paceline-pre-plan-types-2026-11-21.db']);
+    // beside 8 nightly dumps: not one of the 7, and it goes 7 days after its date
+    const dates = ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27'];
+    for (const d of dates) {
+        fs.writeFileSync(path.join(dumps, `paceline-${d}.db`), d);
+    }
+    const stale = path.join(dumps, '.paceline-pre-plan-types-2026-11-19.db.tmp');
+    fs.writeFileSync(stale, 'x');
+    fs.utimesSync(stale, new Date(T('2026-11-25T23:59:59Z')), new Date(T('2026-11-25T23:59:59Z')));   // two days old
+    assert.equal(pruneDumps(dir, T('2026-11-27T23:59:59Z')), 1);
+    assert.deepEqual(fs.readdirSync(dumps).sort(),
+        [...dates.slice(1).map(d => `paceline-${d}.db`), 'paceline-pre-plan-types-2026-11-21.db'].sort());
+    assert.equal(pruneDumps(dir, T('2026-11-28T00:00:00Z')), 0);
+    assert.deepEqual(fs.readdirSync(dumps).sort(), dates.slice(1).map(d => `paceline-${d}.db`).sort());
 });
 
 

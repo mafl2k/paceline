@@ -1,12 +1,14 @@
 // Run with: node --test server/tests/api.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {setRiderCode, clearRiderCode, uploadSheet, removeRider, backTo} from '../club.mjs';
+import {setRiderCode, clearRiderCode, uploadSheet, removeRider, renamePlan} from '../club.mjs';
+// Restore went with the team cockpit (team cockpit spec §4.1); its copies made before stay ordinary versions
+import {backTo} from './legacy-back.mjs';
 import {riderCodeHash} from '../ids.mjs';
 import {CODE_HEADER, MAX_CODES, CODE_FAILS_MAX, readCodes, sheetEtag} from '../api.mjs';
 import fs from 'node:fs';
-import {importFiles, findMe, normalizePlan, parseTextExport} from '../../pages/src/engine/plan.mjs';
-import {club, sheet, planJson, startServer, T, CODE_SECRET, changes} from './helpers.mjs';
+import {importFiles, findMe, normalizePlan} from '../../pages/src/engine/plan.mjs';
+import {club, sheet, planJson, startServer, T, CODE_SECRET, changes, race, liveId} from './helpers.mjs';
 import {makeClub, serve, intake, storeOk, storedClub, DATE as M_DATE} from './manage-helpers.mjs';
 
 const KF = 'k7f3q9x2m4';
@@ -159,10 +161,12 @@ test('v3: circles', async t => {
     const juniors = club({id: 'j5n7r2t8w3', name: 'Kettenfett Juniors', createdAt: '2026-11-05T10:00:00.000Z'});
     const dropped = club({id: 'x9v2c7m4q1', name: 'Kettenfett Dropouts', createdAt: '2026-11-02T10:00:00.000Z'});
     const pending = {
-        ...club({id: 'n4p6q8r2s5', name: 'Kettenfett Hopefuls', createdAt: '2026-08-01T10:00:00.000Z'}),
+        ...club({
+            id: 'n4p6q8r2s5', name: 'Kettenfett Hopefuls', createdAt: '2026-08-01T10:00:00.000Z',
+            teams: {hopefuls: team('Hopefuls', '19:30', 'ha0001')},
+            sheets: {ha0001: sheet({team: 'hopefuls', label: 'Hopefuls', date: DATE, riders: ['1001'], uploadedAt: '2026-11-19T15:00:00.000Z', plan: 'ha0001'})},
+        }),
         status: 'pending', confirmedAt: null,
-        teams: {hopefuls: team('Hopefuls', '19:30', 'ha0001')},
-        sheets: {ha0001: sheet({team: 'hopefuls', label: 'Hopefuls', date: DATE, riders: ['1001'], uploadedAt: '2026-11-19T15:00:00.000Z', plan: 'ha0001'})},
     };
     const s = await setup(t, {clubs: [kettenfett(), spokesmen(), masters, veterans, juniors, dropped, pending]});
     s.store.trash('x9v2c7m4q1');
@@ -251,7 +255,7 @@ test('v3: the 06:00 case serves and hints nothing', async t => {
     const unjoined = await s.get('1001', params);
     assert.deepEqual(unjoined.hint, []);
     assert.equal(s.store.seenOf(KF)['1001'].inEvent, false);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, null);
 });
 
 
@@ -289,7 +293,7 @@ test('v3: seen and the learned event id', async t => {
     const {at, ...entry} = s.store.seenOf(KF)['1001'];
     assert.deepEqual(entry, {sig: 'RE5CFQ', mod: MOD, sheet: 'ra0001', inEvent: true, event: 4567890});
     assert.equal(at, new Date(s.clock.now).toISOString());
-    let stored = s.store.get(KF).sheets.ra0001;
+    let stored = race(s.store.get(KF), 'rollers', DATE);
     assert.equal(stored.eventId, 4567890);
     assert.equal(stored.boundAt, new Date(s.clock.now).toISOString());
 
@@ -297,7 +301,7 @@ test('v3: seen and the learned event id', async t => {
     const other = await s.get('1002', inEvent({joined: KF, event: '4567891'}));
     assert.equal(other.plans[0].body, true);
     assert.equal(other.plans[0].eventId, 4567890);
-    stored = s.store.get(KF).sheets.ra0001;
+    stored = race(s.store.get(KF), 'rollers', DATE);
     assert.equal(stored.eventId, 4567890);
     assert.equal(s.store.seenOf(KF)['1002'].event, 4567891);
 
@@ -311,20 +315,45 @@ test('v3: seen and the learned event id', async t => {
 });
 
 
+test('the learned event is the race\'s', async t => {
+    const s = await setup(t, {clubs: [kettenfett()]});
+    const out = await s.get('1001', inEvent({joined: KF}));
+    assert.equal(out.plans[0].eventId, 4567890);
+    let c = s.store.get(KF);
+    assert.equal(race(c, 'rollers', DATE).eventId, 4567890);
+    assert.equal(race(c, 'rollers', DATE).boundAt, new Date(s.clock.now).toISOString());
+    for (const [id, v] of Object.entries(c.sheets)) {
+        assert.equal(Object.hasOwn(v, 'eventId'), false, id);
+    }
+    // a new version of the plan, made live, is the same race: it answers with the learned event
+    s.store.change(KF, d => uploadSheet(d, {
+        slug: 'rollers', json: planJson('Rollers fast', [...BEN, '1004']), text: null, as: 'ra0001', live: true,
+        base: d.teams.rollers.version, pinnedEventId: null, via: 'file',
+    }, {now: s.clock.now, newId: () => 'rb0002'}));
+    c = s.store.get(KF);
+    assert.equal(liveId(c, 'rollers'), 'rb0002');
+    assert.equal(Object.hasOwn(c.sheets.rb0002, 'eventId'), false);
+    const after = await s.get('1002', inEvent({joined: KF, event: '4567891'}));
+    assert.equal(after.plans[0].sheet, 'rb0002');
+    assert.equal(after.plans[0].eventId, 4567890);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, 4567890);
+});
+
+
 test('v3: a pinned sheet learns nothing', async t => {
     const s = await setup(t, {clubs: [kettenfett({pinnedEventId: 4567890})]});
     const out = await s.get('1001', inEvent({joined: KF}));
     assert.equal(out.plans[0].body, true);
     assert.equal(out.plans[0].eventId, 4567890);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, null);
-    assert.equal(s.store.get(KF).sheets.ra0001.boundAt, null);
-    // a version stored without a link carries the plan's; a typeless plan of team Rollers reads
-    // 'Rollers'
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).boundAt, null);
+    // a version stored without a link: the race keeps its link; a typeless plan of team Rollers
+    // reads 'Rollers'
     s.store.change(KF, c => uploadSheet(c, {
         slug: 'rollers', json: planJson('Rollers fast', [...BEN, '1004']), text: null, as: 'ra0001', live: true,
         base: c.teams.rollers.version, pinnedEventId: null, via: 'file',
     }, {now: s.clock.now, newId: () => 'rb0002'}));
-    assert.equal(s.store.get(KF).sheets.rb0002.pinnedEventId, 4567890);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).pinnedEventId, 4567890);
     const after = await s.get('1001', inEvent({joined: KF}));
     assert.equal(after.plans[0].sheet, 'rb0002');
     assert.equal(after.plans[0].label, 'Rollers');
@@ -340,10 +369,14 @@ test('v3: a new version changes sheet and etag, and the record keeps exactly its
     assert.deepEqual(Object.keys(before.inside).sort(), BODY_KEYS);
     assert.deepEqual(Object.keys(before.outside).sort(), GATE_KEYS);
     assert.equal(before.inside.sheet, 'ra0001');
-    s.store.change(KF, c => uploadSheet(c, {
-        slug: 'rollers', json: planJson('Rollers fast', [...BEN, '1004']), text: null, as: 'ra0001', type: 'fast', live: true,
-        base: c.teams.rollers.version, pinnedEventId: null, via: 'file',
-    }, {now: s.clock.now, newId: () => 'rb0002'}));
+    s.store.change(KF, c => {
+        uploadSheet(c, {
+            slug: 'rollers', json: planJson('Rollers fast', [...BEN, '1004']), text: null, as: 'ra0001', live: true,
+            base: c.teams.rollers.version, pinnedEventId: null, via: 'file',
+        }, {now: s.clock.now, newId: () => 'rb0002'});
+        // a version keeps its plan's type: Rename is how the plan became 'fast'
+        renamePlan(c, 'rollers', 'ra0001', 'fast', s.clock.now);
+    });
     const after = await read();
     assert.deepEqual(Object.keys(after.inside).sort(), BODY_KEYS);
     assert.deepEqual(Object.keys(after.outside).sort(), GATE_KEYS);
@@ -359,7 +392,7 @@ test('v3: a new version changes sheet and etag, and the record keeps exactly its
 });
 
 
-test('v3: Back to vN serves vN\'s sig and upload time', async t => {
+test('v3: a Restore copy made before Restore went serves vN\'s sig and upload time', async t => {
     const s = await setup(t, {clubs: [kettenfett()]});
     const v1 = structuredClone(s.store.get(KF).sheets.ra0001);
     s.store.change(KF, c => uploadSheet(c, {
@@ -438,7 +471,7 @@ test('v3: the gate opens 30 min before S on the server\'s clock', async t => {
     assert.equal(p.startAt, '2026-11-19T18:30:00.000Z');
     assert.equal(p.sig, stored.sig);
     assert.deepEqual(out.hint, [{id: SP, name: 'Spokesmen CC', riders: [], uploadedAt: '2026-11-19T15:00:00.000Z', body: false}]);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, null);
     assert.equal(s.store.seenOf(KF)['1001'].inEvent, false);
     assert.equal(s.store.seenOf(KF)['1001'].event, null);
     assert.equal(s.store.seenOf(KF)['1001'].sheet, 'ra0001');
@@ -453,8 +486,8 @@ test('v3: the gate opens 30 min before S on the server\'s clock', async t => {
     assert.equal(p.etag, sheetEtag(KF, 'rollers', 'ra0001', stored));
     assert.equal(p.eventId, 4567890);
     assert.deepEqual(out.hint, [{id: SP, name: 'Spokesmen CC', riders: ['1001', '1004', '1005'], uploadedAt: '2026-11-19T15:00:00.000Z', body: true}]);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, 4567890);
-    assert.equal(s.store.get(SP).sheets.pa0001.eventId, null, 'an unjoined club learns nothing');
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, 4567890);
+    assert.equal(race(s.store.get(SP), 'spokes', DATE).eventId, null, 'an unjoined club learns nothing');
     assert.equal(s.store.seenOf(KF)['1001'].inEvent, true);
     assert.equal(s.store.seenOf(KF)['1001'].event, 4567890);
     assert.deepEqual(s.store.seenOf(SP), {}, 'an unjoined club gets no seen entry');
@@ -473,7 +506,7 @@ test('v3: a spoofed early start moves nothing', async t => {
     assert.deepEqual(Object.keys(out.plans[0]).sort(), GATE_KEYS);
     assert.equal(out.plans[0].body, false);
     assert.deepEqual(out.hint.map(h => [h.id, h.riders, h.body]), [[SP, [], false]]);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, null);
     assert.equal(s.store.seenOf(KF)['1001'].inEvent, false);
     assert.equal(s.store.seenOf(KF)['1001'].event, null);
 });
@@ -550,7 +583,7 @@ test('v3: a private club needs its code', async t => {
     assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, code: 'needed'}]);
     assert.doesNotMatch(JSON.stringify(out.plans) + JSON.stringify(out.hint), /p2m8c4t1v9|Spokesmen/);
     assert.deepEqual(s.store.seenOf(SP), {});
-    assert.equal(s.store.get(SP).sheets.pa0001.eventId, null);
+    assert.equal(race(s.store.get(SP), 'spokes', DATE).eventId, null);
 
     // the code, not joined: listed with the code as read, and hinted
     out = await s.get('1001', inEvent({joined: KF}), codes('7q4mz-2kx9b'));
@@ -565,7 +598,7 @@ test('v3: a private club needs its code', async t => {
     assert.equal(rec.circle.name, 'Spokesmen CC');
     assert.deepEqual(out.hint, []);
     assert.equal(s.store.seenOf(SP)['1001'].inEvent, true);
-    assert.equal(s.store.get(SP).sheets.pa0001.eventId, 4567890);
+    assert.equal(race(s.store.get(SP), 'spokes', DATE).eventId, 4567890);
 
     // a new code ends the old one at once
     s.store.change(SP, c => setRiderCode(c, riderCodeHash('9V6PW3TQ2H', CODE_SECRET), s.clock.now));
@@ -675,12 +708,12 @@ test('v3: only a rider listing binds the event id, a bench listing does not', as
     assert.equal(out.plans[0].role, 'bench');
     assert.equal(out.plans[0].body, true);
     assert.equal(out.plans[0].eventId, null);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, null);
-    assert.equal(s.store.get(KF).sheets.ra0001.boundAt, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, null);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).boundAt, null);
     // a rider on the same sheet still binds it
     const rider = await s.get('1001', inEvent({joined: KF}));
     assert.equal(rider.plans[0].eventId, 4567890);
-    assert.equal(s.store.get(KF).sheets.ra0001.eventId, 4567890);
+    assert.equal(race(s.store.get(KF), 'rollers', DATE).eventId, 4567890);
 });
 
 
@@ -813,16 +846,16 @@ function shownRiders(json, text) {
 test('a planner export: height, FTP and power profile are neither stored nor served, weight stays', async t => {
     const fixture = name => fs.readFileSync(new URL(`../../tests/fixtures/${name}`, import.meta.url), 'utf8');
     const json = fixture('rollers.json');
-    const txt = fixture('rollers.txt');
     const orig = JSON.parse(json);
     for (const k of [...PRIVATE_KEYS, 'weight']) {
         assert.ok(keysDeep(orig).has(k), `the fixture carries ${k}`);
     }
     const {club: c, cookie} = makeClub();
     const srv = await serve(t, {club: c, cookie});
-    // Rollers: stored and live; Sprockets: left in the inbox
-    await storeOk(srv, cookie, {team: 'rollers', json, text: txt}, {date: M_DATE});
-    await intake(srv, cookie, {team: 'sprockets', json, text: txt});
+    // Rollers: stored and live; Sprockets: left in the inbox (the JSON export alone: the text upload
+    // went, races Task 7)
+    await storeOk(srv, cookie, {team: 'rollers', json}, {date: M_DATE});
+    await intake(srv, cookie, {team: 'sprockets', json});
     const onDisk = storedClub(srv);
     const club = JSON.parse(onDisk);
     assert.equal(Object.keys(club.sheets).length, 1);
@@ -832,7 +865,7 @@ test('a planner export: height, FTP and power profile are neither stored nor ser
         assert.ok(!onDisk.includes(`"${k}"`), k);
     }
 
-    const expected = shownRiders(orig, parseTextExport(txt));
+    const expected = shownRiders(orig, null);
     assert.equal(expected.riders.length, 6);
     // a listed rider, and a rider in the roster (the bench), checking in their race (S 18:30Z)
     for (const id of ['5100002', '510007']) {

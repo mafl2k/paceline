@@ -347,6 +347,29 @@ test('stripForUpload: without a plan only my own row stays', () => {
     assert.equal(t.watchingId, '1');
 });
 
+test('stripForUpload: the head line leaves out the upload bookkeeping, so a retry sends the same bytes (W3)', () => {
+    // 20 Nov 2026 audit (W3, s3-upload): a failed attempt writes uploadTriedAt/uploadError into the session
+    // row, the row is the head line, so the retry's bytes differed from the first copy (409 'exists').
+    assert.deepEqual(U.UPLOAD_DROP_HEAD_FIELDS, ['uploadedAt', 'uploadTriedAt', 'uploadError']);
+    const tick = {ts: 1, riders: [{id: '1', self: true, power: 250}]};
+    const plain = {sessionId: '1', plan: null, slug: 'team-a', circle: 'c000000001'};
+    const planned = {...plain, plan: {sig: 'ABC', riders: [{id: '1', name: 'Me', pullS: 60, weight: 72}]}};
+    for (const base of [plain, planned]) {
+        const want = U.stripForUpload(toJsonl(base, [tick]));
+        for (const extra of [{uploadTriedAt: 5, uploadError: 'http'},
+                             {uploadedAt: 9, uploadTriedAt: 7, uploadError: 'offline'}]) {
+            const got = U.stripForUpload(toJsonl({...base, ...extra}, [tick]));
+            assert.equal(got, want, JSON.stringify(extra) + (base.plan ? ' with a plan' : ''));
+            const h = JSON.parse(got.split('\n')[0]);
+            for (const f of U.UPLOAD_DROP_HEAD_FIELDS) {
+                assert.equal(Object.hasOwn(h, f), false, f);
+            }
+            assert.equal(h.slug, 'team-a');
+            assert.equal(h.circle, 'c000000001');
+        }
+    }
+});
+
 // 17 Nov 2026 (ZRL): the plan changed mid-race; the upload kept only the head plan's riders and
 // lost the new plan's. A row the recorder marked inPlan stays; the server checks it again.
 test('stripForUpload: keeps a row marked inPlan whose rider is not in the head plan, drops a watched outsider', () => {

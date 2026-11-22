@@ -9,6 +9,10 @@ import {APP_CSS} from '../app-css.mjs';
 import {appPage} from '../ui.mjs';
 
 const CLIENT = fs.readFileSync(new URL('../client.mjs', import.meta.url));
+const ASSET = name => fs.readFileSync(new URL(`../assets/${name}`, import.meta.url));
+const LOGO = ASSET('logo.png');
+const FAVICON = ASSET('favicon.svg');
+const TOUCH = ASSET('apple-touch-icon.png');
 const hash = body => crypto.createHash('sha256').update(body).digest('hex').slice(0, 12);
 const count = (s, part) => s.split(part).length - 1;
 const ENV = {PUBLIC_URL: 'https://ttt-beta.example.org', SMTP_HOST: 'smtp.example.org', MAIL_FROM: 'Paceline <paceline@example.org>'};
@@ -71,7 +75,7 @@ test('static: app.css and app.js, cached by content', async () => {
 
 test('the CSP allows only own scripts, styles and fetches', () => {
     assert.equal(SEC_HEADERS['Content-Security-Policy'],
-        "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+        "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 });
 
 
@@ -96,6 +100,8 @@ test('appPage: the head in order, the skip link first, hrefs pinned to the conte
         '<meta name="theme-color" content="#f3f4f7" media="(prefers-color-scheme: light)">',
         '<meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">',
         '<title>Paceline</title>',
+        `<link rel="icon" href="/static/favicon.svg?v=${hash(FAVICON)}" type="image/svg+xml">`,
+        `<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=${hash(TOUCH)}">`,
         `<link rel="stylesheet" href="/static/app.css?v=${hash(APP_CSS)}">`,
         `<script type="module" src="/static/app.js?v=${hash(CLIENT)}"></script>`,
         '</head>',
@@ -121,6 +127,9 @@ test('public pages link the stylesheet and stay script-free', async () => {
             assert.ok(body.includes('<meta name="color-scheme" content="light dark">'), p);
             assert.match(body, /<body class="public">/, p);
             assert.doesNotMatch(body, /<style|\sstyle=|<script/i, p);
+            assert.ok(body.includes(`<link rel="icon" href="/static/favicon.svg?v=${hash(FAVICON)}" type="image/svg+xml">`), p);
+            // the large logo only on the start page (user, 22 Nov 2026)
+            assert.equal(body.includes(`<img class="home-logo" src="/static/logo.png?v=${hash(LOGO)}" alt="Paceline" width="512" height="512">`), p === '/', p);
         }
     } finally {
         await s.stop();
@@ -167,4 +176,33 @@ test('appPage: a note without the script', () => {
     assert.ok(APP_CSS.includes('.nojs{max-width:44rem;margin:0 auto;padding:.75rem max(1rem,env(safe-area-inset-right)) 0 max(1rem,env(safe-area-inset-left))}'));
     // the no-script redraw button went with decision 13, and so did its rule
     assert.doesNotMatch(APP_CSS, /nojs-only/);
+});
+
+
+test('static: the logo, the favicon and the touch icon, cached by content', async () => {
+    const s = await startServer();
+    try {
+        for (const [path, body, type] of [['/static/logo.png', LOGO, 'image/png'],
+                                          ['/static/favicon.svg', FAVICON, 'image/svg+xml'],
+                                          ['/static/apple-touch-icon.png', TOUCH, 'image/png']]) {
+            const res = await fetch(s.base + path);
+            assert.equal(res.status, 200, path);
+            assert.equal(res.headers.get('content-type'), type, path);
+            assert.equal(res.headers.get('cache-control'), 'no-cache', path);
+            assert.deepEqual(Buffer.from(await res.arrayBuffer()), body, path);
+            securityHeaders(res, path);
+            const pinned = await fetch(s.base + `${path}?v=${hash(body)}`);
+            assert.equal(pinned.headers.get('cache-control'), 'public, max-age=31536000, immutable', path);
+        }
+    } finally {
+        await s.stop();
+    }
+});
+
+
+test('the admin pages carry the favicon too', async () => {
+    const {page} = await import('../pages.mjs');
+    const p = page('Admin', '<p>x</p>');
+    assert.ok(p.includes(`<link rel="icon" href="/static/favicon.svg?v=${hash(FAVICON)}" type="image/svg+xml">`));
+    assert.ok(p.includes(`<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=${hash(TOUCH)}">`));
 });

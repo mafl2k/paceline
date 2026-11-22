@@ -4,13 +4,20 @@
 // refresh window.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {club as clubOf, sheet, planJson, T} from './helpers.mjs';
+import {club as clubOf, sheet, planJson, T, liveId, race, setLive} from './helpers.mjs';
+import {tidyRaces} from '../races.mjs';
 import {
-    teamView, teamRow, teamOrder, backAsk, refreshDue, untilLabel, atLabel, pullTarget, nextRace, SEV, worst,
-    andList, quote, foldedTeams, liveWords, liveQuestion, backQuestion, undoOffer, raceWithin, gateOpen, UNDO_MS,
+    teamView, teamRow, teamOrder, refreshDue, untilLabel, atLabel, pullTarget, nextRace, SEV, worst,
+    andList, quote, foldedTeams, liveWords, liveQuestion, undoOffer, raceWithin, gateOpen, UNDO_MS,
+    raceDates, raceView, nextRaceAt, teamShare, newerNotLive,
 } from '../team-view.mjs';
+import {cockpitClub, plan, NOW} from './cockpit-fixture.mjs';
+import {nextRaceDate} from '../select.mjs';
+import {assignChoices} from '../preselect.mjs';
 import {localDay} from '../time.mjs';
-import {uploadSheet, backTo, makeLive} from '../club.mjs';
+import {uploadSheet, makeLive} from '../club.mjs';
+// Restore went with the team cockpit (team cockpit spec §4.1); copies it made before stay ordinary versions
+import {backTo} from './legacy-back.mjs';
 import {stripSheet, normalizePlan} from '../../pages/src/engine/plan.mjs';
 
 const DATE = '2026-11-19';
@@ -65,7 +72,6 @@ test('teamView: before the gate, the plan in ride order and no rider state', () 
     assert.deepEqual(view.riders.map(r => r.pos), [1, 2, 3, 4, 5, 6]);
     assert.deepEqual(view.riders.map(r => r.name), ['Ben', 'Cleo', 'Dan', 'Eva', 'Finn', 'Gus']);
     assert.ok(view.riders.every(r => r.state === null));
-    assert.equal(view.riders[0].pull, 'Pull 60 s');
     assert.equal(view.has, null);
     assert.equal(view.count, 6);
     // the planner's roster (Hanna) is no part of the view
@@ -75,13 +81,12 @@ test('teamView: before the gate, the plan in ride order and no rider state', () 
     assert.equal(view.gateAt, S - 30 * MIN);
     assert.equal(view.opens, '19:00');
     assert.deepEqual(view.when, {day: 'Thu 19 Nov', time: '19:30', until: 'in 35 min', today: true});
-    const {lines, ...card} = view.live;
-    assert.deepEqual(card, {
+    // (what it changed and Restore went with the old team page's live row)
+    assert.deepEqual(view.live, {
         id: 'rrrr01', label: 'Rollers A', date: DATE, day: 'Thu 19 Nov', sig: live, at: '15:00',
         pinnedEventId: null, eventId: null, sent: true,
-        n: 1, planId: 'rrrr01', versions: 1, prevN: null, summary: 'First version', back: null, newer: null,
+        n: 1, planId: 'rrrr01', versions: 1, newer: null,
     });
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['first', 'First version']]);
     const row = teamRow(view);
     assert.deepEqual(row, {
         slug: 'rollers', name: 'Rollers', sev: 'neutral', icon: 'clock', timeLine: '19:30 · in 35 min',
@@ -167,21 +172,22 @@ function statesSeen(c) {
 }
 
 
-test('teamView: rider states and their order', () => {
+test('teamView: rider states, in ride order', () => {
     const c = statesClub();
     const view = teamView(c, 'rollers', {now: S - 5 * MIN, seen: statesSeen(c)});
+    // in ride order, as the rider table draws them (team cockpit spec §7, amended 22 Nov 2026)
     assert.deepEqual(view.riders.map(r => [r.name, r.pos]), [
-        ['Ben', 4], ['Cleo', 6], ['Dan', 8], ['Hanna', 2], ['Gus', 3], ['Finn', 5], ['Eva', 7], ['Ida', 1],
+        ['Ida', 1], ['Hanna', 2], ['Gus', 3], ['Ben', 4], ['Finn', 5], ['Cleo', 6], ['Eva', 7], ['Dan', 8],
     ]);
     assert.deepEqual(view.riders.map(r => r.state), [
-        {kind: 'other-event', sev: 'err', text: 'In event 4567891 · gets nothing', time: '19:22'},
-        {kind: 'other-team', sev: 'warn', text: 'Rides Sprockets now', time: '19:22'},
-        {kind: 'old-code', sev: 'warn', text: 'Has an older plan (code ABC123)', time: '19:22'},
+        {kind: 'has', sev: 'ok', text: 'Has the plan', time: null},
         {kind: 'none', sev: 'neutral', text: 'Not seen yet', time: null},
         {kind: 'checked', sev: 'neutral', text: 'Checked 19:22 · not in the event yet', time: null},
+        {kind: 'other-event', sev: 'err', text: 'In event 4567891 · gets nothing', time: '19:22'},
         {kind: 'checked', sev: 'neutral', text: 'Checked 19:22 · not in the event yet', time: null},
+        {kind: 'other-team', sev: 'warn', text: 'Rides Sprockets now', time: '19:22'},
         {kind: 'in-event', sev: 'neutral', text: 'In the event · plan comes at the next check', time: '19:22'},
-        {kind: 'has', sev: 'ok', text: 'Has the plan', time: null},
+        {kind: 'old-code', sev: 'warn', text: 'Has an older plan (code ABC123)', time: '19:22'},
     ]);
     assert.equal(view.has, 1);
     assert.equal(view.status.text, '1 of 8 riders have the plan');
@@ -247,8 +253,8 @@ test('teamView: the worst state wins, notes count the fixes', () => {
     assert.equal(view.notes.length, 0);
     assert.equal(teamRow(view).main, '3 of 6 riders have the plan');
     // a hole: a newer Sprockets plan lists Ben
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = sheet({team: 'sprockets', label: 'Sprockets A', date: DATE, riders: ['1001', '1008'], uploadedAt: '2026-11-19T16:00:00.000Z'});
+    setLive(c, 'sprockets', 'ssss01');
     view = teamView(c, 'rollers', {now, seen: s});
     assert.equal(view.sev, 'warn');
     assert.equal(view.notes.length, 1);
@@ -264,7 +270,7 @@ test('teamView: the worst state wins, notes count the fixes', () => {
     assert.equal(row.quiet, '3 of 6 riders have the plan');
     assert.equal(row.short, '1 to fix');
     // a pin mismatch: red, the pin note first
-    c.sheets.rrrr01.pinnedEventId = 4567890;
+    race(c, 'rollers', DATE).pinnedEventId = 4567890;
     s[1005] = seen('2026-11-19T18:22:00Z', {inEvent: true, event: 4567891});
     view = teamView(c, 'rollers', {now, seen: s});
     assert.equal(view.sev, 'err');
@@ -277,51 +283,114 @@ test('teamView: the worst state wins, notes count the fixes', () => {
 });
 
 
-test('teamView: no live plan is red only near the race; plans stored say "No live plan"', () => {
-    // Spokes races on Thursdays (the club's day) at 20:15; the morning after its race it has no plan:
-    // neutral "Next race Thu 26 Nov", not red for six days (UI panel, 19 Nov 2026)
+test('teamView: the regular race day only preselects: a weekly team without plans is neutral at any time (spec §8)', () => {
+    // Spokes races on Thursdays at 20:15 (19:15Z) and has no plan: from the morning after its race to
+    // its regular race's S + 2 h the neutral "Next regular race", never red, never a race of its own
     const c = clubOf({teams: {spokes: team('Spokes', '20:15')}});
-    const after = teamView(c, 'spokes', {now: T('2026-11-20T08:00:00Z'), seen: {}});
-    assert.deepEqual(after.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next race Thu 26 Nov'});
-    assert.equal(after.sev, 'neutral');
-    assert.deepEqual(teamRow(after), {
+    for (const at of ['2026-11-20T08:00:00Z', '2026-11-24T19:15:00Z', '2026-11-26T18:45:00Z', '2026-11-26T19:15:00Z', '2026-11-26T21:15:00Z']) {
+        const v = teamView(c, 'spokes', {now: T(at), seen: {}});
+        assert.deepEqual(v.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next regular race Thu 26 Nov 20:15'}, at);
+        assert.deepEqual([v.sev, v.regular, v.raceDate, v.races, v.notes], ['neutral', true, '2026-11-26', [], []], at);
+        assert.equal(teamRow(v).sev, 'neutral', at);
+    }
+    assert.deepEqual(teamRow(teamView(c, 'spokes', {now: T('2026-11-20T08:00:00Z'), seen: {}})), {
         slug: 'spokes', name: 'Spokes', sev: 'neutral', icon: 'clock', timeLine: 'Thu 26 Nov 20:15 · in 6 days',
-        main: 'Next race Thu 26 Nov', quiet: 'No plan yet', short: 'No plan yet',
+        main: 'Next regular race Thu 26 Nov 20:15', quiet: 'No plan yet', short: 'No plan yet',
     });
-    // red from 2 days before the start (Thu 26 Nov 19:15Z)
-    assert.equal(teamView(c, 'spokes', {now: T('2026-11-24T19:14:59Z'), seen: {}}).status.sev, 'neutral');
-    const near = teamView(c, 'spokes', {now: T('2026-11-24T19:15:00Z'), seen: {}});
-    assert.deepEqual(near.status, {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: 'No plan: riders get nothing'});
-    assert.equal(teamRow(near).quiet, 'Upload a plan to fix this');
-
-    // a plan stored for that race, none live: the row says "No live plan", never "upload one"
-    c.sheets.pppp01 = {...sheet({team: 'spokes', label: 'Spokes', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-20T09:00:00.000Z'}), plan: 'pppp01'};
-    const stored = teamView(c, 'spokes', {now: T('2026-11-20T10:00:00Z'), seen: {}});
-    assert.deepEqual(stored.status, {sev: 'neutral', kind: 'none-live', icon: 'noPlan', text: 'No live plan yet'});
-    assert.deepEqual([teamRow(stored).main, teamRow(stored).quiet, teamRow(stored).short], ['No live plan yet', 'Make one of its plans live', 'No live plan']);
-    const storedNear = teamView(c, 'spokes', {now: T('2026-11-26T18:00:00Z'), seen: {}});
-    assert.deepEqual(storedNear.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
-    assert.deepEqual(teamRow(storedNear), {
-        slug: 'spokes', name: 'Spokes', sev: 'err', icon: 'noPlan', timeLine: '20:15 · in 1 h 15 min',
-        main: 'No live plan: riders get nothing', quiet: 'Make one of its plans live', short: 'No live plan',
-    });
+    // a week on from S + 2 h
+    assert.equal(teamView(c, 'spokes', {now: T('2026-11-26T21:15:00.001Z'), seen: {}}).status.text, 'Next regular race Thu 3 Dec 20:15');
+    // the rhythm date is no race ahead, only the regular date
+    assert.deepEqual(raceDates(c, 'spokes', T('2026-11-20T08:00:00Z')), {ahead: [], over: [], regular: '2026-11-26'});
 });
 
 
-test('teamView: no plan and no start time are the status, not notes', () => {
+test('teamView: plans stored but none live are red at once, at any distance from the race (spec §8)', () => {
+    // a plan stored on Friday for next Thursday's race, none live: red 6 days ahead already
+    const c = clubOf({teams: {spokes: team('Spokes', '20:15')}});
+    c.sheets.pppp01 = {...sheet({team: 'spokes', label: 'Spokes', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-20T09:00:00.000Z'}), plan: 'pppp01'};
+    tidyRaces(c);
+    for (const at of ['2026-11-20T10:00:00Z', '2026-11-21T10:00:00Z', '2026-11-26T18:00:00Z']) {
+        const v = teamView(c, 'spokes', {now: T(at), seen: {}});
+        assert.deepEqual(v.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'}, at);
+        assert.deepEqual([v.sev, v.regular, v.raceDate], ['err', false, '2026-11-26'], at);
+    }
+    // the picker row 5 days ahead: red, "Make one of its plans live"
+    assert.deepEqual(teamRow(teamView(c, 'spokes', {now: T('2026-11-21T10:00:00Z'), seen: {}})), {
+        slug: 'spokes', name: 'Spokes', sev: 'err', icon: 'noPlan', timeLine: 'Thu 26 Nov 20:15 · in 5 days',
+        main: 'No live plan: riders get nothing', quiet: 'Make one of its plans live', short: 'No live plan',
+    });
+    assert.deepEqual(teamRow(teamView(c, 'spokes', {now: T('2026-11-26T18:00:00Z'), seen: {}})), {
+        slug: 'spokes', name: 'Spokes', sev: 'err', icon: 'noPlan', timeLine: '20:15 · in 1 h 15 min',
+        main: 'No live plan: riders get nothing', quiet: 'Make one of its plans live', short: 'No live plan',
+    });
+    // an over race keeps its rules: no alarm, under Over (S + 2 h on), the regular date neutral again
+    const over = teamView(c, 'spokes', {now: T('2026-11-26T21:15:00.001Z'), seen: {}});
+    assert.deepEqual([over.status.sev, over.status.kind, over.raceDate, over.over.map(o => o.date)], ['neutral', 'next-race', '2026-12-03', ['2026-11-26']]);
+});
+
+
+test('teamView: a weekly team without a start time is neutral until it has a plan whose race has no time (spec §8)', () => {
+    // Cranks races on Thursdays and has no start time: no plan, so no rider is affected yet
+    const c = clubOf({teams: {cranks: team('Cranks', null)}});
+    for (const at of ['2026-11-20T08:00:00Z', '2026-11-26T18:00:00Z']) {
+        const v = teamView(c, 'cranks', {now: T(at), seen: {}});
+        assert.deepEqual([v.status, v.sev, v.noStart, v.regular, v.races], [{sev: 'neutral', kind: 'start-unset', icon: 'clock', text: 'No start time set'}, 'neutral', true, true, []], at);
+    }
+    assert.deepEqual(teamRow(teamView(c, 'cranks', {now: T('2026-11-20T08:00:00Z'), seen: {}})), {
+        slug: 'cranks', name: 'Cranks', sev: 'neutral', icon: 'clock', timeLine: 'No start time',
+        main: 'No start time set', quiet: 'Set a start time and upload a plan', short: 'No start time',
+    });
+    // a plan for its race (no time of its own): the red "No start time", live or not, as before
+    c.sheets.kkkk01 = {...sheet({team: 'cranks', label: 'Cranks', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-20T09:00:00.000Z'}), plan: 'kkkk01'};
+    tidyRaces(c);
+    const notLive = teamView(c, 'cranks', {now: T('2026-11-20T10:00:00Z'), seen: {}});
+    assert.deepEqual([notLive.status, notLive.sev, notLive.regular], [{sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time and no live plan'}, 'err', false]);
+    setLive(c, 'cranks', 'kkkk01');
+    assert.deepEqual(teamView(c, 'cranks', {now: T('2026-11-20T10:00:00Z'), seen: {}}).status,
+        {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time: riders on this plan get nothing'});
+    // the race with its own time: no "No start time" (it has one), red as not live instead
+    setLive(c, 'cranks', null);
+    race(c, 'cranks', '2026-11-26').start = '19:30';
+    assert.deepEqual(teamView(c, 'cranks', {now: T('2026-11-20T10:00:00Z'), seen: {}}).status.kind, 'none-live');
+});
+
+
+test('teamView: a race moved off its rhythm day leaves nothing on that day (spec §8)', () => {
+    // Rollers races on Thursdays at 19:30; this week's race moved to Fri 27 Nov 19:30 with its plan,
+    // none live yet: Thursday 26 Nov shows nothing, the team's state is Friday's (red at once)
+    const c = clubOf({
+        teams: {rollers: {...team('Rollers', '19:30'), kind: 'weekly', weekday: 4}},
+        sheets: {fri001: {...sheet({team: 'rollers', label: 'Rollers', date: '2026-11-27', riders: ROLLERS, uploadedAt: '2026-11-20T09:00:00.000Z'}), plan: 'fri001', zgShare: 'abcdefghij'}},
+    });
+    const now = T('2026-11-21T10:00:00Z');
+    assert.deepEqual(raceDates(c, 'rollers', now), {ahead: ['2026-11-27'], over: [], regular: null});
+    const v = teamView(c, 'rollers', {now, seen: {}});
+    assert.deepEqual([v.raceDate, v.races.map(r => r.date), v.status.kind, v.status.sev], ['2026-11-27', ['2026-11-27'], 'none-live', 'err']);
+    // the club's next race is Friday's, not the vacated Thursday
+    assert.equal(nextRace(c, now), 'Fri 27 Nov');
+    // the planner link carries the Friday plan's share (the race the page is about)
+    assert.equal(teamShare(c, 'rollers', now), 'abcdefghij');
+    // the regular race day still preselects: the upload's default date is the rhythm's Thursday
+    assert.equal(nextRaceDate(c, 'rollers', now), '2026-11-26');
+    assert.equal(assignChoices(c, {id: 'up0001', team: 'rollers', json: planJson('Rollers', ROLLERS)}, new URLSearchParams(), now).date, '2026-11-26');
+});
+
+
+test('teamView: no plan (neutral, spec §8) and no start time are the status, not notes', () => {
     const c = clubOf({
         teams: {spokes: team('Spokes', '20:15'), cogs: team('Cogs', null, 'cccc01'), cranks: team('Cranks', null)},
         sheets: {cccc01: sheet({team: 'cogs', label: 'Cogs B', date: DATE, riders: ['1008'], uploadedAt: '2026-11-19T17:00:00.000Z'})},
     });
     const now = S - 5 * MIN;
+    // no plan 50 min before the regular race: neutral, the regular race day is no race (spec §8)
     const spokes = teamView(c, 'spokes', {now, seen: {}});
-    assert.deepEqual(spokes.status, {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: 'No plan: riders get nothing'});
+    assert.deepEqual(spokes.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next regular race Thu 19 Nov 20:15'});
     assert.deepEqual(spokes.notes, []);
-    assert.equal(spokes.sev, 'err');
+    assert.equal(spokes.sev, 'neutral');
     assert.equal(spokes.live, null);
     assert.deepEqual(teamRow(spokes), {
-        slug: 'spokes', name: 'Spokes', sev: 'err', icon: 'noPlan', timeLine: '20:15 · in 50 min',
-        main: 'No plan: riders get nothing', quiet: 'Upload a plan to fix this', short: 'No plan',
+        slug: 'spokes', name: 'Spokes', sev: 'neutral', icon: 'clock', timeLine: '20:15 · in 50 min',
+        main: 'Next regular race Thu 19 Nov 20:15', quiet: 'No plan yet', short: 'No plan yet',
     });
     const cogs = teamView(c, 'cogs', {now, seen: {1008: seen('2026-11-19T18:20:00Z')}});
     assert.deepEqual(cogs.status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time: riders on this plan get nothing'});
@@ -337,8 +406,10 @@ test('teamView: no plan and no start time are the status, not notes', () => {
         slug: 'cogs', name: 'Cogs', sev: 'err', icon: 'clock', timeLine: 'No start time',
         main: 'No start time: riders on this plan get nothing', quiet: '\'Cogs B\' is ready · set a start time', short: 'No start time',
     });
+    // no start time and no plan: a setting, no rider affected yet: neutral (coordinator, spec §8)
     const cranks = teamView(c, 'cranks', {now, seen: {}});
-    assert.equal(cranks.status.text, 'No start time and no plan');
+    assert.deepEqual(cranks.status, {sev: 'neutral', kind: 'start-unset', icon: 'clock', text: 'No start time set'});
+    assert.equal(teamRow(cranks).sev, 'neutral');
     assert.equal(teamRow(cranks).quiet, 'Set a start time and upload a plan');
     assert.equal(teamRow(cranks).short, 'No start time');
 });
@@ -404,9 +475,10 @@ test('teamView: a roster rider who starts for another team gives this team no ro
     // Hanna (1007) is only in Rollers' roster and starts for Sprockets; her check resolved to
     // Sprockets' plan, in Sprockets' event
     const c = base();
-    c.teams.sprockets.live = 'ssss01';
-    c.sheets.ssss01 = sheet({team: 'sprockets', label: 'Sprockets A', date: DATE, riders: ['1007', '1009'], uploadedAt: '2026-11-19T14:30:00.000Z', pinnedEventId: 4567899});
-    c.sheets.rrrr01.pinnedEventId = 4567890;
+    c.sheets.ssss01 = sheet({team: 'sprockets', label: 'Sprockets A', date: DATE, riders: ['1007', '1009'], uploadedAt: '2026-11-19T14:30:00.000Z'});
+    setLive(c, 'sprockets', 'ssss01');
+    race(c, 'sprockets', DATE).pinnedEventId = 4567899;
+    race(c, 'rollers', DATE).pinnedEventId = 4567890;
     const live = c.sheets.rrrr01.sig;
     const all = Object.fromEntries(ROLLERS.map(id => [id, seen('2026-11-19T18:15:00Z', {sig: live, inEvent: true, event: 4567890})]));
     all['1007'] = seen('2026-11-19T18:20:00Z', {sig: c.sheets.ssss01.sig, sheet: 'ssss01', inEvent: true, event: 4567899});
@@ -440,10 +512,6 @@ test('pullTarget: W/kg first, then watts', () => {
     // nothing
     const bare = sheet({team: 'rollers', label: 'Rollers A', date: DATE, riders: ['1001'], uploadedAt: '2026-11-19T14:00:00.000Z'});
     assert.equal(pullTarget(bare, normalizePlan(bare.json, bare.text).plan.riders[0]), null);
-    // the rider row carries it
-    const c = base();
-    c.sheets.rrrr01.json.riders['1002'].pull_wkg = 4.25;
-    assert.equal(teamView(c, 'rollers', {now: S - 60 * MIN, seen: {}}).riders[1].pull, 'Pull 60 s · 4.3 W/kg');
 });
 
 
@@ -478,7 +546,7 @@ test('teamOrder: by start time, no start last, then name, never by status', () =
     });
     assert.deepEqual(teamOrder(c), ['rollers', 'axles', 'sprockets', 'cranks']);
     // Rollers red (no plan): still first
-    c.teams.rollers.live = null;
+    setLive(c, 'rollers', null);
     assert.equal(teamView(c, 'rollers', {now: S, seen: {}}).sev, 'err');
     assert.deepEqual(teamOrder(c), ['rollers', 'axles', 'sprockets', 'cranks']);
 });
@@ -521,7 +589,7 @@ test('foldedTeams: special teams with nothing in 14 days fold, weekly never', ()
     // a live plan still to race: yesterday's 23:30 start at 00:30 Berlin
     const late = kinds('2026-11-18');
     late.teams.cogs.start = '23:30';
-    late.teams.cogs.live = 'cccc01';
+    setLive(late, 'cogs', 'cccc01');
     assert.deepEqual([...foldedTeams(late, T('2026-11-18T23:30Z'))], []);
     assert.deepEqual([...foldedTeams(late, T('2026-11-19T00:30:00.001Z'))], ['cogs']);
     // a weekly team with nothing never folds; Rollers without a kind is weekly
@@ -568,74 +636,6 @@ function upload(c, {type, riders = ROLLERS, as = 'new', live = true, at = UP, da
 }
 
 
-test('backAsk: what riders get, then holes and moves in words; null without a question', () => {
-    // ported from backWords (fix round 1: only backAsk is left); Back of the live plan always asks
-    // before the gate (UP is 18:50 in Berlin, the gate 19:00) no "at once" but when riders get it,
-    // then the riders that change, as the version diffs name them (UI panel, 19 Nov 2026)
-    const ASK = 'From 19:00, riders get v1 instead of v2.';
-    // Rollers is live on v2 without Ben; its v1 lists Ben, who now rides Sprockets
-    const withSprockets = (c, riders, uploadedAt = '2026-11-19T16:00:00.000Z') => {
-        c.teams.sprockets.live = 'ssss01';
-        c.sheets.ssss01 = sheet({team: 'sprockets', label: 'Sprockets A', date: DATE, riders, uploadedAt});
-    };
-    let c = structuredClone(base());
-    withSprockets(c, ['1001', '1009']);
-    upload(c, {as: 'rrrr01', riders: ROLLERS.slice(1)});
-    const kept = structuredClone(c);
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?`);
-    assert.deepEqual(c, kept, 'backAsk changes nothing');
-    // a plan named by any of its version ids, and n as the form sends it
-    assert.equal(backAsk(c, 'rollers', {plan: c.teams.rollers.live, n: '1'}, UP), `${ASK} With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?`);
-    // after the gate: riders in the event get it within a minute
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, S - 10 * MIN),
-        'Riders in the event get v1 instead of v2 within a minute. With v1: Ben in. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?');
-    // the newest n, an unknown n or plan, or a team that is gone: nothing to say
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 2}, UP), null);
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 7}, UP), null);
-    assert.equal(backAsk(c, 'rollers', {plan: 'zzzzzz', n: 1}, UP), null);
-    assert.equal(backAsk(c, 'gone', {plan: 'rrrr01', n: 1}, UP), null);
-
-    // several holes
-    c = structuredClone(base());
-    withSprockets(c, ['1001', '1002', '1009']);
-    upload(c, {as: 'rrrr01', riders: ROLLERS.slice(2)});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben and Cleo in. v1 lists Ben and Cleo, who now ride Sprockets. Rollers then rides without them. Restore v1 anyway?`);
-
-    // a move: v1 (uploaded 16:00) lists Ida, who rides Sprockets (15:00) since v2 left her out
-    c = structuredClone(base({uploadedAt: '2026-11-19T16:00:00.000Z'}));
-    c.sheets.rrrr01 = sheet({team: 'rollers', label: 'Rollers A', date: DATE, riders: [...ROLLERS, '1008'], uploadedAt: '2026-11-19T16:00:00.000Z', plan: 'rrrr01'});
-    withSprockets(c, ['1008', '1009'], '2026-11-19T15:00:00.000Z');
-    upload(c, {as: 'rrrr01', riders: ROLLERS});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ida in. Ida moves from Sprockets to Rollers. Restore v1 anyway?`);
-
-    // no moves and no holes: only what riders get
-    c = structuredClone(base());
-    upload(c, {as: 'rrrr01', riders: ROLLERS.slice(1)});
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), `${ASK} With v1: Ben in.`);
-    // riders out too: v3 has Ben again (v2 then drops him), v4 only Cleo, Dan and Hanna
-    const both = structuredClone(c);
-    upload(both, {as: 'rrrr01', riders: [...ROLLERS.slice(1), '1001']});
-    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 2}, UP), 'From 19:00, riders get v2 instead of v3. With v2: Ben out.');
-    upload(both, {as: 'rrrr01', riders: ['1002', '1003', '1007']});
-    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 1}, UP), 'From 19:00, riders get v1 instead of v4. With v1: 4 riders in, Hanna out.');
-    // the same riders in another order: no rider line
-    upload(both, {as: 'rrrr01', riders: ['1003', '1002', '1007']});
-    assert.equal(backAsk(both, 'rollers', {plan: 'rrrr01', n: 4}, UP), 'From 19:00, riders get v4 instead of v5.');
-    // a stale page: no question, the POST refuses it
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1, version: c.teams.rollers.version - 1}, UP), null);
-    // a team without a start time gets nothing: no "at once"
-    c.teams.rollers.start = null;
-    assert.equal(backAsk(c, 'rollers', {plan: 'rrrr01', n: 1}, UP), 'Riders get nothing until Rollers has a start time. With v1: Ben in.');
-
-    // a plan that is not live: null, even with a hole
-    c = structuredClone(base());
-    withSprockets(c, ['1001', '1009']);
-    const b = upload(c, {type: 'B', riders: ['1001', '1008'], live: false});
-    upload(c, {as: b.id, riders: ['1008'], live: false});
-    assert.equal(backAsk(c, 'rollers', {plan: b.id, n: 1}, UP), null);
-});
-
-
 // Rollers without a plan yet, then its plan 'Rollers' as uploads build it (the clock of `at`).
 function versionsClub() {
     return clubOf({teams: {rollers: team('Rollers', '19:30'), sprockets: team('Sprockets', '19:30')}});
@@ -644,7 +644,7 @@ const V1 = ['1001', '1003', '1004', '1005', '1006'];          // Ben, Dan, Eva, 
 const V2 = ['1002', '1003', '1004', '1005', '1006'];          // Cleo in, Ben out
 
 
-test('teamView: the live version, its summary and Back', () => {
+test('teamView: the live version', () => {
     const c = versionsClub();
     const r1 = upload(c, {riders: V1, at: T('2026-11-19T14:00:00Z')});
     const r2 = upload(c, {as: r1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
@@ -653,40 +653,19 @@ test('teamView: the live version, its summary and Back', () => {
     assert.equal(view.live.n, 2);
     assert.equal(view.live.planId, r1.planId);
     assert.equal(view.live.versions, 2);
-    assert.equal(view.live.prevN, 1);
-    // the change note carries its version (UI panel, 19 Nov 2026: never "Back to v1: …" beside Restore v1)
-    assert.equal(view.live.summary, 'v2: Cleo in, Ben out');
-    assert.deepEqual(view.live.lines.map(l => l.text), ['Cleo in (1st)', 'Ben out']);
     assert.equal(view.live.at, '16:00');
-    assert.equal(view.live.back.n, 1);
-    // Back of the live plan always asks (decision 12): nothing moves, no hole, so only what riders get
-    assert.deepEqual(view.live.back, {n: 1, words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out.'});
     assert.equal(view.live.newer, null);
-    // Back's words when v1 lists a rider who now rides Sprockets
-    c.teams.sprockets.live = 'ssss01';
-    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
-    const asked = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
-    assert.deepEqual(asked.live.back, {n: 1, words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out. v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?'});
-    // a Back copy reads as one
-    const r3 = upload(c, {as: r1.planId, riders: V1, at: T('2026-11-19T16:40:00Z')});
-    c.sheets[r3.id].copyOf = 1;
-    const copy = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
-    assert.equal(copy.live.n, 3);
-    assert.equal(copy.live.prevN, 2);
-    assert.equal(copy.live.summary, 'v3 (restored v1): Ben in, Cleo out');
-    // a real Back: the copy reads as made at the Back (17:40), not at v1's upload (15:00)
+    // what it changed and Restore went with the old team page's live row (the panel's rider table has them)
+    for (const gone of ['prevN', 'summary', 'lines', 'back']) {
+        assert.equal(Object.hasOwn(view.live, gone), false, gone);
+    }
+    // a Restore copy made before Restore went reads as made at the Restore (17:40), not at v1's upload (15:00)
     const backed = structuredClone(c);
     const k = backTo(backed, 'rollers', {plan: r1.planId, n: 1, version: backed.teams.rollers.version}, {now: T('2026-11-19T16:40:00Z'), newId: () => 'bbbb01'});
     assert.equal(backed.sheets[k.id].uploadedAt, backed.sheets[r1.id].uploadedAt, 'uploadedAt stays the precedence time');
     const afterBack = teamView(backed, 'rollers', {now: S - 35 * MIN, seen: {}});
     assert.equal(afterBack.live.id, k.id);
     assert.equal(afterBack.live.at, '17:40');
-    // the version before is the stored one below: with v2 gone (cap, Remove a rider) it is v1
-    delete c.sheets[r2.id];
-    const gap = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
-    assert.equal(gap.live.prevN, 1);
-    assert.equal(gap.live.back.n, 1);
-    assert.equal(gap.live.summary, 'v3 (restored v1): Same as v1');
 });
 
 
@@ -703,8 +682,8 @@ test('teamView: a newer version that is not live', () => {
     assert.equal(view.plans.length, 1, 'the live plan\'s newer version is not another plan');
     assert.equal(view.plans[0].id, r2.id);
     // its outdated marks: v3 lists Cleo, who now rides Sprockets
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    setLive(c, 'sprockets', 'ssss01');
     view = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
     assert.deepEqual(view.live.newer.marks, [{id: '1002', name: 'Cleo', rides: 'sprockets', ridesName: 'Sprockets'}]);
     // a newer version made by Back while another version is live: its own time, not its upload's
@@ -712,9 +691,15 @@ test('teamView: a newer version that is not live', () => {
     const d1 = upload(d, {riders: V1, at: T('2026-11-19T14:00:00Z')});
     upload(d, {as: d1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
     upload(d, {as: d1.planId, riders: ['1002', '1003'], at: T('2026-11-19T15:30:00Z')});
-    const live3 = d.teams.rollers.live;
+    const live3 = liveId(d, 'rollers');
     const k = backTo(d, 'rollers', {plan: d1.planId, n: 2, version: d.teams.rollers.version}, {now: T('2026-11-19T16:50:00Z'), newId: () => 'bbbb03'});
-    d.teams.rollers.live = live3;
+    // the copy went live; Restore stamped liveAt on such a copy until it went (its frozen copy predates liveAt)
+    d.sheets[k.id].liveAt = new Date(T('2026-11-19T16:50:00Z')).toISOString();
+    setLive(d, 'rollers', live3);
+    // the Back copy went live (liveAt): a version that was live gets no notice (team cockpit spec §5.6)
+    assert.equal(teamView(d, 'rollers', {now: S - 35 * MIN, seen: {}}).live.newer, null);
+    // as data from before liveAt it has none
+    delete d.sheets[k.id].liveAt;
     const nw = teamView(d, 'rollers', {now: S - 35 * MIN, seen: {}}).live.newer;
     assert.deepEqual([nw.id, nw.n, nw.at], [k.id, 4, '17:50']);
     assert.equal(d.sheets[k.id].uploadedAt, '2026-11-19T15:00:00.000Z');
@@ -744,10 +729,12 @@ test('teamView: other plans are this race\'s, each by its newest version', () =>
     const other = teamView(backed, 'rollers', {now: S - 35 * MIN, seen: {}}).plans.find(p => !p.live);
     assert.deepEqual([other.id, other.n, other.at], [k.id, 3, '17:45']);
     assert.equal(backed.sheets[k.id].uploadedAt, backed.sheets[b1.id].uploadedAt);
-    // a plan for next week's race: listed with its own day, in the fixed order
+    // a plan for next week's race: listed under that race, not this one (races spec §4)
     const next = upload(c, {type: 'next', riders: ['1009'], live: false, at: T('2026-11-19T14:30:00Z'), date: '2026-11-26'});
     const two = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
-    assert.deepEqual(two.plans.map(p => [p.id, p.day, p.live]), [[live.id, 'Thu 19 Nov', true], [b2.id, 'Thu 19 Nov', false], [next.id, 'Thu 26 Nov', false]]);
+    assert.deepEqual(two.plans.map(p => [p.id, p.day, p.live]), [[live.id, 'Thu 19 Nov', true], [b2.id, 'Thu 19 Nov', false]]);
+    assert.deepEqual(two.races.map(r => [r.date, r.plans.map(p => [p.id, p.day, p.live])]),
+        [['2026-11-19', [[live.id, 'Thu 19 Nov', true], [b2.id, 'Thu 19 Nov', false]]], ['2026-11-26', [[next.id, 'Thu 26 Nov', false]]]]);
     assert.ok(!('others' in two), 'no others any more');
 });
 
@@ -764,11 +751,12 @@ test('teamView: has v1, not the live v2', () => {
     let view = teamView(c, 'rollers', {now: S - 5 * MIN, seen: checks});
     assert.deepEqual(stateOf(view, 'Cleo'), {kind: 'old-code', sev: 'warn', text: 'Has v1, not the live v2', time: '19:22'});
     assert.deepEqual(stateOf(view, 'Dan'), {kind: 'old-code', sev: 'warn', text: 'Has an older plan (code ABC123)', time: '19:22'});
-    // another plan's code is no version of the live plan
+    // another plan's code is no version of the live plan: it names that plan and its n (team cockpit
+    // spec §5.6)
     const b = upload(c, {type: 'B', riders: ['1009'], live: false, at: T('2026-11-19T15:10:00Z')});
     const bSig = c.sheets[b.id].sig;
     view = teamView(c, 'rollers', {now: S - 5 * MIN, seen: {1002: seen(at, {sig: bSig, sheet: r2.id})}});
-    assert.equal(stateOf(view, 'Cleo').text, `Has an older plan (code ${bSig})`);
+    assert.deepEqual(stateOf(view, 'Cleo'), {kind: 'old-code', sev: 'warn', text: 'Has \'Rollers · B\' v1, not the live one', time: '19:22'});
     // the highest version with that code: v3 stores v1's content again, not live
     upload(c, {as: r1.planId, riders: V1, live: false, at: T('2026-11-19T16:00:00Z')});
     view = teamView(c, 'rollers', {now: S - 5 * MIN, seen: checks});
@@ -782,7 +770,7 @@ test('refreshDue: 90 min before to 60 min after any servable S', () => {
     for (const [at, on] of [['16:59', false], ['17:00', true], ['19:30', true], ['19:31', false]]) {
         assert.equal(refreshDue(c, T(`2026-11-19T${at}:00Z`)), on, at);
     }
-    c.teams.rollers.live = null;
+    setLive(c, 'rollers', null);
     assert.equal(refreshDue(c, S), false);
 });
 
@@ -826,7 +814,7 @@ test('teamView: the live row\'s n is the live version\'s', () => {
     assert.equal(view.plans.length, 1);
     assert.equal(view.plans[0].live, true);
     assert.equal(view.plans[0].n, 5);
-    assert.equal(view.plans[0].id, c.teams.rollers.live);
+    assert.equal(view.plans[0].id, liveId(c, 'rollers'));
     assert.equal(view.live.n, 5);
     assert.equal(view.live.newer.n, 6);
     assert.equal(view.live.newer.id, v6.id);
@@ -842,8 +830,6 @@ test('teamView: a damaged version does not break the view', () => {
     assert.doesNotThrow(() => {
         view = teamView(c, 'rollers', {now: S - 35 * MIN, seen: {}});
     });
-    assert.equal(view.live.summary, null);
-    assert.deepEqual(view.live.lines, []);
     assert.equal(view.live.n, 2);
 });
 
@@ -859,10 +845,10 @@ test('liveWords: what Make live does, in words', () => {
     assert.equal(liveWords(c, 'rollers', slow.id, S - 30 * MIN), 'Riders in the event get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1 within a minute.');
     assert.equal(liveWords(c, 'rollers', slow.id, S - 30 * MIN - 1), 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1.');
     // the outdated marks follow: Cleo now rides Sprockets
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    setLive(c, 'sprockets', 'ssss01');
     assert.equal(liveWords(c, 'rollers', slow.id, now), 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1. '
-        + '\'Rollers · slow\' still lists Cleo, who now rides another team. Make it live anyway?');
+        + '\'Rollers · slow\' v1 still lists Cleo, who now rides another team. Make it live anyway?');
     // without a live plan
     const d = versionsClub();
     const only = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
@@ -873,33 +859,90 @@ test('liveWords: what Make live does, in words', () => {
     assert.equal(liveWords(d, 'rollers', only.id, now), 'Riders get nothing until Rollers has a start time.');
     c.teams.rollers.start = null;
     assert.equal(liveWords(c, 'rollers', slow.id, now), 'Riders get nothing until Rollers has a start time. '
-        + '\'Rollers · slow\' still lists Cleo, who now rides another team. Make it live anyway?');
-    assert.equal(fast.id, c.teams.rollers.live);
+        + '\'Rollers · slow\' v1 still lists Cleo, who now rides another team. Make it live anyway?');
+    assert.equal(fast.id, liveId(c, 'rollers'));
 });
 
 
-test('liveWords: a plan of another race ends the live plan for its race, and asks', () => {
-    // a team has one live plan (UI panel, 19 Nov 2026: the audit's worst finding): making next
-    // week's plan live leaves tonight's race without a plan
+test('liveQuestion: Make live in one race says and asks nothing about another race', () => {
+    // live is per race (races spec §1): making next week's plan live leaves tonight's live plan
     const c = versionsClub();
     const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
     const next = upload(c, {type: 'next', riders: V2, live: false, date: '2026-11-26', at: T('2026-11-19T14:10:00Z')});
-    assert.equal(c.teams.rollers.live, fast.id);
-    const words = 'Rollers · next\' v1 for Thu 26 Nov becomes live. That ends \'Rollers · fast\' v1 for Thu 19 Nov: riders get nothing for that race. Make it live anyway?';
-    assert.equal(liveWords(c, 'rollers', next.id, S - 35 * MIN), `'${words}`);
-    // the same after the gate and during the race: tonight's plan is still to be served
-    assert.equal(liveWords(c, 'rollers', next.id, S + 60 * MIN), `'${words}`);
-    // once tonight's plan is used up (S + 4 h, as the assign page's box), nothing ends
-    assert.equal(liveWords(c, 'rollers', next.id, S + 4 * 60 * MIN + 1), 'From Thu 26 Nov 19:00, riders get \'Rollers · next\' v1.');
-    // the other way round: next week's plan live, tonight's made live ends next week's
+    const words = 'From Thu 26 Nov 19:00, riders get \'Rollers · next\' v1.';
+    // before tonight's gate, after it and during the race: the 26 Nov race has no live plan
+    for (const now of [S - 35 * MIN, S + 60 * MIN]) {
+        assert.deepEqual(liveQuestion(c, 'rollers', next.id, now), {words, ask: false, marks: []});
+    }
+    // tonight's plan is not touched by it
+    assert.equal(liveId(c, 'rollers', DATE), fast.id);
+    // the other way round: next week's plan live, tonight's plan made live names only tonight's race
     const d = versionsClub();
     const tonight = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
     upload(d, {type: 'next', riders: V2, live: true, date: '2026-11-26', at: T('2026-11-19T14:10:00Z')});
-    assert.equal(liveWords(d, 'rollers', tonight.id, S - 35 * MIN), '\'Rollers · fast\' v1 for Thu 19 Nov becomes live. That ends \'Rollers · next\' v1 for Thu 26 Nov: riders get nothing for that race. Make it live anyway?');
+    assert.deepEqual(liveQuestion(d, 'rollers', tonight.id, S - 35 * MIN), {words: 'From 19:00, riders get \'Rollers · fast\' v1.', ask: false, marks: []});
+    // within the race: the plan it replaces, that race's live plan
+    const slow = upload(d, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:20:00Z')});
+    makeLive(d, 'rollers', tonight.id, S - 40 * MIN);
+    assert.deepEqual(liveQuestion(d, 'rollers', slow.id, S - 35 * MIN),
+        {words: 'From 19:00, riders get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1.', ask: false, marks: []});
     // with outdated marks the marks' question is the one question
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: '2026-11-26', riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
-    assert.equal(liveWords(c, 'rollers', next.id, S - 35 * MIN), `'${words.replace(' Make it live anyway?', '')} 'Rollers · next' still lists Cleo, who now rides another team. Make it live anyway?`);
+    setLive(c, 'sprockets', 'ssss01');
+    const q = liveQuestion(c, 'rollers', next.id, S - 35 * MIN);
+    assert.equal(q.words, `${words} 'Rollers · next' v1 still lists Cleo, who now rides another team. Make it live anyway?`);
+    assert.equal(q.ask, true);
+});
+
+
+test('Make vN live of a later race reads that race\'s live plan', () => {
+    // Task 4 review: the later race's questions named the team's nearest live plan
+    const c = versionsClub();
+    const fast = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    const n1 = upload(c, {type: 'next', riders: V1, date: '2026-11-26', at: T('2026-11-19T14:10:00Z')});
+    const n2 = upload(c, {as: n1.planId, riders: V2, live: false, date: '2026-11-26', at: T('2026-11-19T14:20:00Z')});
+    // both races live: tonight's 'fast', the 26 Nov race's v1
+    setLive(c, 'rollers', fast.id);
+    assert.deepEqual([liveId(c, 'rollers', DATE), liveId(c, 'rollers', '2026-11-26')], [fast.id, n1.id]);
+    // Make v2 live in the 26 Nov race: instead of that race's v1, never tonight's plan
+    assert.deepEqual(liveQuestion(c, 'rollers', n2.id, S - 35 * MIN),
+        {words: 'From Thu 26 Nov 19:00, riders get \'Rollers · next\' v2 instead of \'Rollers · next\' v1.', ask: false, marks: []});
+    makeLive(c, 'rollers', n2.id, S - 35 * MIN);
+    assert.deepEqual([liveId(c, 'rollers', DATE), liveId(c, 'rollers', '2026-11-26')], [fast.id, n2.id]);
+    // its Undo is that race's: v1 back, against v2 (not tonight's plan)
+    const u = undoOffer(c, 'rollers', S - 35 * MIN);
+    assert.deepEqual([u.id, u.live], [n1.id, c.sheets[n2.id]]);
+});
+
+
+test('nextRace: a race that is over counts until S + 4 h only with a live plan', () => {
+    // Task 4 review: plans but none live at S + 3 h is no next race
+    const c = versionsClub();
+    const r = upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    assert.equal(nextRaceAt(c, S + 3 * 60 * MIN), S);
+    setLive(c, 'rollers', null);
+    // the next race is then the teams' next one by the rhythm (both race on Thursdays)
+    assert.equal(nextRaceAt(c, S + 3 * 60 * MIN), S + 7 * 24 * 60 * MIN);
+    assert.equal(nextRace(c, S + 3 * 60 * MIN), 'Thu 26 Nov');
+    makeLive(c, 'rollers', r.id, S + 60 * MIN);
+    assert.equal(nextRace(c, S + 3 * 60 * MIN), 'Thu 19 Nov');
+});
+
+
+test('teamView: a weekly team without a start time whose race has its own does not read "No start time"', () => {
+    // Task 4 review: the race's own S counts, not only the team's
+    const c = versionsClub();
+    c.teams.rollers.start = null;
+    upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
+    race(c, 'rollers', DATE).start = '18:00';
+    const view = teamView(c, 'rollers', {now: T('2026-11-19T12:00:00Z'), seen: {}});
+    assert.equal(view.noStart, false);
+    assert.equal(view.S, T('2026-11-19T17:00:00Z'));
+    assert.notEqual(view.status.kind, 'no-start');
+    assert.notEqual(teamRow(view).timeLine, 'No start time');
+    // without it, the race has no time: "No start time"
+    race(c, 'rollers', DATE).start = null;
+    assert.equal(teamView(c, 'rollers', {now: T('2026-11-19T12:00:00Z'), seen: {}}).noStart, true);
 });
 
 
@@ -909,7 +952,9 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
     const now = T('2026-11-19T12:00Z');
     // Cogs has no start time of its own; its live plan of 21 Nov races at 20:15 (19:15Z)
     const c = kinds('2026-11-21');
-    c.teams.cogs = {...c.teams.cogs, start: null, live: 'cccc01', raceStarts: {'2026-11-21': '20:15'}};
+    c.teams.cogs.start = null;
+    setLive(c, 'cogs', 'cccc01');
+    race(c, 'cogs', '2026-11-21').start = '20:15';
     const cogs = teamView(c, 'cogs', {now, seen: {}});
     assert.equal(cogs.S, T('2026-11-21T19:15:00Z'));
     assert.equal(cogs.noStart, false);
@@ -922,10 +967,10 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
     assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:45:00Z'), seen: {}}).open, true);
     assert.equal(teamView(c, 'cogs', {now: T('2026-11-21T18:44:59Z'), seen: {}}).open, false);
     // stored, not live, with its time: "No live plan" as for a weekly team, with its day and time;
-    // neutral while the race is more than 2 days off, red from then (UI panel, 19 Nov 2026)
-    c.teams.cogs.live = null;
+    // red at once, also 2 days off (spec §8)
+    setLive(c, 'cogs', null);
     const stored = teamView(c, 'cogs', {now, seen: {}});
-    assert.deepEqual(stored.status, {sev: 'neutral', kind: 'none-live', icon: 'noPlan', text: 'No live plan yet'});
+    assert.deepEqual(stored.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
     assert.equal(teamRow(stored).timeLine, 'Sat 21 Nov 20:15 · in 2 days');
     const near = teamView(c, 'cogs', {now: T('2026-11-19T19:15:00Z'), seen: {}});
     assert.deepEqual(near.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
@@ -942,7 +987,8 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
 
     // a live plan stored by 0.3.0, neither the race nor the team with a time: red "no start time"
     const old = kinds('2026-11-21');
-    old.teams.cogs = {...old.teams.cogs, start: null, live: 'cccc01'};
+    old.teams.cogs.start = null;
+    setLive(old, 'cogs', 'cccc01');
     const red = teamView(old, 'cogs', {now, seen: {}});
     assert.equal(red.noStart, true);
     assert.deepEqual(red.status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time: riders on this plan get nothing'});
@@ -952,7 +998,7 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
     });
     assert.equal(liveWords(old, 'cogs', 'cccc01', now), 'Riders get nothing: \'Cogs\' has no start time. Upload a new version of it with its start time.');
     // the same plan stored but not live: still red, never "null" in a line (review I3)
-    old.teams.cogs.live = null;
+    setLive(old, 'cogs', null);
     const notLive = teamView(old, 'cogs', {now, seen: {}});
     assert.equal(notLive.noStart, true);
     assert.deepEqual(notLive.status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time for Sat 21 Nov'});
@@ -960,28 +1006,30 @@ test('teamView: a special team races at its race\'s start; "No start time" only 
     assert.deepEqual([row.timeLine, row.quiet], ['No start time', 'Upload a new version with its start time']);
     assert.ok(!JSON.stringify(row).includes('null'), JSON.stringify(row));
     // with the team's start time (0.3.0's way) it races at that, as before
-    old.teams.cogs = {...old.teams.cogs, start: '19:30', live: 'cccc01'};
+    old.teams.cogs.start = '19:30';
+    setLive(old, 'cogs', 'cccc01');
     assert.equal(teamView(old, 'cogs', {now, seen: {}}).S, T('2026-11-21T18:30:00Z'));
 
-    // a weekly team without a start time: "No start time", as before
+    // a weekly team without a start time and without a plan: neutral "No start time set" (spec §8)
     const weekly = kinds();
     weekly.teams.rollers.start = null;
-    assert.deepEqual(teamView(weekly, 'rollers', {now, seen: {}}).status, {sev: 'err', kind: 'no-start', icon: 'clock', text: 'No start time and no plan'});
+    assert.deepEqual(teamView(weekly, 'rollers', {now, seen: {}}).status, {sev: 'neutral', kind: 'start-unset', icon: 'clock', text: 'No start time set'});
 });
 
 
 test('teamView: a special team\'s trap names the race\'s start time, not a team start time', () => {
     // Cogs (special, no time anywhere) has a live plan listing Ida, who rides Rollers now
     const c = kinds('2026-11-19');
-    c.teams.cogs = {...c.teams.cogs, start: null, live: 'cccc01'};
-    c.teams.rollers.live = 'rrrr01';
+    c.teams.cogs.start = null;
+    setLive(c, 'cogs', 'cccc01');
     c.sheets.rrrr01 = sheet({team: 'rollers', label: 'Rollers A', date: DATE, riders: ['1008', '1001'], uploadedAt: '2026-11-19T10:00:00.000Z'});
+    setLive(c, 'rollers', 'rrrr01');
     c.sheets.cccc01.uploadedAt = '2026-11-19T11:00:00.000Z';
     const now = T('2026-11-19T12:00Z');
     assert.deepEqual(teamView(c, 'cogs', {now, seen: {}}).trap.map(x => x.text),
         ['Ida rides Rollers for now; once this race has its start time (it comes with the plan), Ida moves here and Rollers has a hole.']);
     // with the race's start it is sent, and no trap
-    c.teams.cogs.raceStarts = {[DATE]: '21:00'};
+    race(c, 'cogs', DATE).start = '21:00';
     assert.deepEqual(teamView(c, 'cogs', {now, seen: {}}).trap, []);
 });
 
@@ -993,10 +1041,11 @@ test('teamOrder: a special team by its next race\'s start, after the weekly team
     c.teams.owls = {...team('Owls', null), kind: 'weekly', weekday: null};
     c.teams.bolts = {...team('Bolts', '18:00'), kind: 'special', weekday: null};
     // Cogs' race of 21 Nov at 19:45; Bolts has no race (its stale 18:00 does not count)
-    c.teams.cogs = {...c.teams.cogs, start: null, raceStarts: {'2026-11-21': '19:45'}};
+    c.teams.cogs.start = null;
+    race(c, 'cogs', '2026-11-21').start = '19:45';
     assert.deepEqual(teamOrder(c, now), ['rollers', 'cogs', 'axles', 'owls', 'bolts']);
     // without a time Cogs goes after the weekly teams; the special teams without one by name
-    delete c.teams.cogs.raceStarts;
+    race(c, 'cogs', '2026-11-21').start = null;
     assert.deepEqual(teamOrder(c, now), ['rollers', 'axles', 'owls', 'bolts', 'cogs']);
 });
 
@@ -1019,8 +1068,8 @@ test('liveQuestion: asks only while the gate is open or the words warn', () => {
     // the version that is live already never asks
     assert.equal(liveQuestion(c, 'rollers', fast.id, S - 10 * MIN).ask, false);
     // an outdated mark warns before the gate: Cleo now rides Sprockets
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
+    setLive(c, 'sprockets', 'ssss01');
     const marked = liveQuestion(c, 'rollers', slow.id, S - 35 * MIN);
     assert.equal(marked.ask, true);
     assert.ok(marked.words.endsWith('Make it live anyway?'), marked.words);
@@ -1038,8 +1087,8 @@ test('liveQuestion: a plan that takes a rider from another team names the move a
     const c = versionsClub();
     upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
     // Sprockets' live plan lists Cleo, uploaded before 'Rollers · slow': once that is live, Cleo rides Rollers
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1002', '1009'], uploadedAt: '2026-11-19T14:05:00.000Z'}), plan: 'ssss01'};
+    setLive(c, 'sprockets', 'ssss01');
     const slow = upload(c, {type: 'slow', riders: V2, live: false, at: T('2026-11-19T14:10:00Z')});
     const q = liveQuestion(c, 'rollers', slow.id, S - 35 * MIN);
     assert.equal(q.ask, true);
@@ -1048,36 +1097,18 @@ test('liveQuestion: a plan that takes a rider from another team names the move a
 });
 
 
-test('liveQuestion: the gate of the race being replaced asks too', () => {
-    // tonight's plan is live and its gate open; making next week's plan live ends it (and warns anyway)
+test('liveQuestion: the gate of the plan\'s own race asks; another race\'s open gate does not', () => {
+    // tonight's plan is live and its gate open; next week's plan made live ends nothing tonight
+    // (live is per race, races spec §1)
     const c = versionsClub();
     upload(c, {type: 'fast', riders: V1, at: T('2026-11-19T14:00:00Z')});
     const next = upload(c, {type: 'next', riders: V1, live: false, at: T('2026-11-19T14:10:00Z'), date: '2026-11-26'});
-    assert.equal(liveQuestion(c, 'rollers', next.id, S - 10 * MIN).ask, true);
-    // a plan of tonight's race replaced while next week's plan is live: tonight's gate is what is open
+    assert.equal(liveQuestion(c, 'rollers', next.id, S - 10 * MIN).ask, false);
+    // a plan of tonight's race made live while next week's plan is live: tonight's gate is open
     const d = versionsClub();
     const tonight = upload(d, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
     upload(d, {type: 'next', riders: V1, at: T('2026-11-19T14:10:00Z'), date: '2026-11-26'});
     assert.equal(liveQuestion(d, 'rollers', tonight.id, S - 10 * MIN).ask, true);
-});
-
-
-test('backQuestion: Restore asks only while the gate is open or it moves riders, leaves a hole, or has no start time', () => {
-    const c = versionsClub();
-    const r1 = upload(c, {riders: V1, at: T('2026-11-19T14:00:00Z')});
-    upload(c, {as: r1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
-    const pre = backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN);
-    assert.deepEqual(pre, {words: 'From 19:00, riders get v1 instead of v2. With v1: Ben in, Cleo out.', ask: false});
-    assert.equal(backAsk(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN), pre.words);
-    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 30 * MIN).ask, true);
-    // Ben now rides Sprockets: v1 would leave Rollers without him
-    c.teams.sprockets.live = 'ssss01';
-    c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '1009'], uploadedAt: '2026-11-19T16:30:00.000Z'}), plan: 'ssss01'};
-    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN).ask, true);
-    delete c.sheets.ssss01;
-    c.teams.sprockets.live = null;
-    c.teams.rollers.start = null;
-    assert.equal(backQuestion(c, 'rollers', {plan: r1.planId, n: 1}, S - 35 * MIN).ask, true, 'no start time');
 });
 
 
@@ -1107,12 +1138,6 @@ test('undoOffer: the version live before, for 10 minutes, while nothing changed 
     const first = upload(e, {type: 'fast', riders: V1, live: false, at: T('2026-11-19T14:00:00Z')});
     makeLive(e, 'rollers', first.id, at);
     assert.equal(undoOffer(e, 'rollers', at), null, 'no live version before');
-    // Restore of the live plan keeps the version it replaced
-    const f = versionsClub();
-    const r1 = upload(f, {riders: V1, at: T('2026-11-19T14:00:00Z')});
-    const r2 = upload(f, {as: r1.planId, riders: V2, at: T('2026-11-19T15:00:00Z')});
-    backTo(f, 'rollers', {plan: r1.planId, n: 1, version: f.teams.rollers.version}, {now: at, newId});
-    assert.equal(undoOffer(f, 'rollers', at).id, r2.id);
 });
 
 
@@ -1145,7 +1170,9 @@ test('teamView: a special team with two races stored and none live is about the 
     // 'near' Sat 21 Nov 20:15 and 'far' Sat 5 Dec 20:15, neither live: at Sat 21 Nov 19:00 riders get
     // nothing for tonight's race, which the view must say, in red, naming that race
     const c = kinds('2026-11-21', '2026-12-05');
-    c.teams.cogs = {...c.teams.cogs, start: null, raceStarts: {'2026-11-21': '20:15', '2026-12-05': '20:15'}};
+    c.teams.cogs.start = null;
+    race(c, 'cogs', '2026-11-21').start = '20:15';
+    race(c, 'cogs', '2026-12-05').start = '20:15';
     c.sheets.cccc01.label = 'Cogs · near';
     c.sheets.cccc02.label = 'Cogs · far';
     const now = T('2026-11-21T18:00:00Z');
@@ -1157,27 +1184,29 @@ test('teamView: a special team with two races stored and none live is about the 
     // today's race: the time line leaves the day out, as for every team on race day
     assert.equal(teamRow(view).timeLine, '20:15 · in 1 h 15 min');
     assert.equal(teamRow(teamView(c, 'cogs', {now: T('2026-11-20T12:00:00Z'), seen: {}})).timeLine, 'Sat 21 Nov 20:15 · in 1 day');
-    // once tonight's race is over, the far one
+    // once tonight's race is over, the far one: red as well, 13 days ahead (spec §8)
     const later = teamView(c, 'cogs', {now: T('2026-11-22T12:00:00Z'), seen: {}});
     assert.equal(later.raceDate, '2026-12-05');
-    assert.equal(later.status.sev, 'neutral');
+    assert.equal(later.status.sev, 'err');
 });
 
 
 test('teamView: "plans stored" counts only the plans of the race in question (review M1)', () => {
-    // Rollers (weekly, Thursdays 19:30) has only a plan for 26 Nov; on Wed 18 Nov its next race is
-    // the 19th: no plan for it, so "upload one", as 0.3.4 said, not "Make one of its plans live"
+    // Rollers (weekly, Thursdays 19:30) has only a plan for 26 Nov; on Wed 18 Nov the rhythm's 19th
+    // has no plan, so it is no race (spec §8): the view is the 26th's, whose plan is not live: red
     const c = kinds();
     c.sheets.rrrr01 = {...sheet({team: 'rollers', label: 'Rollers', date: '2026-11-26', riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'}), plan: 'rrrr01'};
+    tidyRaces(c);
     const near = teamView(c, 'rollers', {now: T('2026-11-18T12:00:00Z'), seen: {}});
-    assert.deepEqual(near.status, {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: 'No plan: riders get nothing'});
-    assert.notEqual(teamRow(near).quiet, 'Make one of its plans live');
+    assert.equal(near.raceDate, '2026-11-26');
+    assert.deepEqual(near.status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
     // after an unplayed race (S + 2 h to S + 4 h): tonight's plans no longer count for next week's race
     c.sheets.rrrr02 = {...sheet({team: 'rollers', label: 'Rollers · tonight', date: '2026-11-19', riders: ['1001'], uploadedAt: '2026-11-15T10:00:00.000Z'}), plan: 'rrrr02'};
     delete c.sheets.rrrr01;
+    tidyRaces(c);
     const after = teamView(c, 'rollers', {now: T('2026-11-19T21:00:00Z'), seen: {}});
     assert.equal(after.raceDate, '2026-11-26');
-    assert.deepEqual(after.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next race Thu 26 Nov'});
+    assert.deepEqual(after.status, {sev: 'neutral', kind: 'next-race', icon: 'clock', text: 'Next regular race Thu 26 Nov 19:30'});
     // with a plan of the race itself: "No live plan", as before
     const own = teamView(c, 'rollers', {now: T('2026-11-19T12:00:00Z'), seen: {}});
     assert.equal(own.status.kind, 'none-live');
@@ -1190,8 +1219,8 @@ test('liveQuestion: an older version that reopens a hole of this team asks, also
     // Rollers v1 lists Ben; Sprockets has taken him since; v2 without Ben is made live before the gate
     const c = versionsClub();
     const v1 = upload(c, {riders: ['1001', '1002', '1003'], at: T('2026-11-19T10:00:00Z')});
-    c.teams.sprockets.live = 'ssss01';
     c.sheets.ssss01 = {...sheet({team: 'sprockets', label: 'Sprockets', date: DATE, riders: ['1001', '2002', '2003'], uploadedAt: '2026-11-19T11:00:00.000Z'}), plan: 'ssss01'};
+    setLive(c, 'sprockets', 'ssss01');
     const v2 = upload(c, {as: v1.planId, riders: ['1002', '1003', '1004'], live: false, at: T('2026-11-19T12:00:00Z')});
     const now = S - 150 * MIN;
     assert.equal(liveQuestion(c, 'rollers', v2.id, now).ask, false, 'v2 closes the hole: no question');
@@ -1201,6 +1230,160 @@ test('liveQuestion: an older version that reopens a hole of this team asks, also
     // v1 is not its plan's newest version, so outdated() does not see it: the dry run does
     const q = liveQuestion(c, 'rollers', u.id, now + MIN);
     assert.equal(q.ask, true);
-    assert.ok(q.words.endsWith('\'Rollers\' still lists Ben, who now rides another team. Make it live anyway?'), q.words);
+    assert.ok(q.words.endsWith('\'Rollers\' v1 still lists Ben, who now rides another team. Make it live anyway?'), q.words);
     assert.deepEqual(q.marks.map(m => [m.id, m.rides]), [['1001', 'sprockets']]);
+});
+
+
+// ---- the views per race (races spec §4, §4b: "mix") ----
+
+const FRI = T('2026-11-20T10:00:00Z');        // Friday 20 Nov, 11:00 in Berlin
+const raceOf = (fields = {}) => ({start: null, pinnedEventId: null, eventId: null, boundAt: null, live: null, ...fields});
+
+// Kettenfett RC: Rollers weekly on Thursday at 19:30 with the races of Thu 19 Nov (over: 'Rollers'
+// and 'Rollers · slow'), Sun 22 Nov at 18:00 with the event link 5123456 (live 'Rollers · fast', and
+// 'Rollers · slow' stored after it) and Thu 26 Nov (live 'Rollers').
+function racesClub() {
+    const v = (label, type, date, uploadedAt) => sheet({team: 'rollers', label, type, date, riders: ROLLERS, uploadedAt});
+    return clubOf({
+        teams: {
+            rollers: {
+                name: 'Rollers', start: '19:30', kind: 'weekly', weekday: 4, version: 1, changedAt: '2026-11-10T10:00:00.000Z',
+                races: {
+                    '2026-11-19': raceOf(),
+                    '2026-11-22': raceOf({start: '18:00', pinnedEventId: 5123456, live: 'sun001'}),
+                    '2026-11-26': raceOf({live: 'thu001'}),
+                },
+            },
+        },
+        sheets: {
+            old001: v('Rollers', null, '2026-11-19', '2026-11-15T10:00:00.000Z'),
+            old002: v('Rollers · slow', 'slow', '2026-11-19', '2026-11-15T11:00:00.000Z'),
+            sun001: v('Rollers · fast', 'fast', '2026-11-22', '2026-11-18T10:00:00.000Z'),
+            sun002: v('Rollers · slow', 'slow', '2026-11-22', '2026-11-18T11:00:00.000Z'),
+            thu001: v('Rollers', null, '2026-11-26', '2026-11-19T10:00:00.000Z'),
+        },
+    });
+}
+
+// racesClub without the versions `ids` (and their races).
+function without(...ids) {
+    const c = racesClub();
+    for (const id of ids) {
+        delete c.sheets[id];
+    }
+    tidyRaces(c);
+    return c;
+}
+
+
+test('raceDates: races ahead nearest first, the rhythm date only as the regular date without one, over races newest first', () => {
+    const c = racesClub();
+    assert.deepEqual(raceDates(c, 'rollers', FRI), {ahead: ['2026-11-22', '2026-11-26'], over: ['2026-11-19'], regular: null});
+    // Sunday is nearer than the rhythm's Thursday, which has no race: not ahead
+    const withoutThursday = without('thu001');
+    assert.deepEqual(raceDates(withoutThursday, 'rollers', FRI).ahead, ['2026-11-22']);
+    // only an over race: no race ahead, the rhythm date is the regular date (spec §8: no race)
+    const onlyOver = without('sun001', 'sun002', 'thu001');
+    assert.deepEqual(raceDates(onlyOver, 'rollers', FRI), {ahead: [], over: ['2026-11-19'], regular: '2026-11-26'});
+    const specialNoRace = clubOf({teams: {specials: {name: 'Cogs', start: '19:30', kind: 'special', weekday: null, version: 1, races: {}}}});
+    assert.deepEqual(raceDates(specialNoRace, 'specials', FRI), {ahead: [], over: [], regular: null});
+    // over races newest first; the Sunday race is over from its S + 2 h (20:00 Berlin)
+    assert.deepEqual(raceDates(c, 'rollers', T('2026-11-22T19:00:00Z')), {ahead: ['2026-11-22', '2026-11-26'], over: ['2026-11-19'], regular: null});
+    assert.deepEqual(raceDates(c, 'rollers', T('2026-11-22T19:00:00.001Z')), {ahead: ['2026-11-26'], over: ['2026-11-22', '2026-11-19'], regular: null});
+});
+
+
+test('teamView: the nearest race\'s state, and every race ahead with its own live card, plans and riders', () => {
+    const c = racesClub();
+    const v = teamView(c, 'rollers', {now: FRI});
+    assert.equal(v.raceDate, '2026-11-22');
+    assert.equal(v.date, '2026-11-22');
+    assert.deepEqual([v.when.day, v.when.time], ['Sun 22 Nov', '18:00']);
+    assert.equal(v.S, T('2026-11-22T17:00:00Z'));
+    assert.deepEqual(v.event, {id: 5123456, pinned: true});
+    assert.deepEqual(v.races.map(r => [r.date, r.live?.id ?? null, r.plans.map(p => p.id)]),
+        [['2026-11-22', 'sun001', ['sun001', 'sun002']], ['2026-11-26', 'thu001', ['thu001']]]);
+    assert.equal(v.races[0].live, v.live);
+    assert.deepEqual(v.over, [{date: '2026-11-19', day: 'Thu 19 Nov', plans: [{planId: 'old001', label: 'Rollers'}, {planId: 'old002', label: 'Rollers · slow'}]}]);
+    assert.equal(teamRow(v).timeLine.startsWith('Sun 22 Nov 18:00'), true);
+    // the later race: its own time, live card and riders, and no event of its own
+    const thu = v.races[1];
+    assert.deepEqual([thu.when.day, thu.when.time, thu.S, thu.event], ['Thu 26 Nov', '19:30', T('2026-11-26T18:30:00Z'), null]);
+    assert.deepEqual([thu.live.label, thu.count, thu.status.kind], ['Rollers', 6, 'opens']);
+    assert.ok(!('races' in thu) && !('over' in thu) && !('received' in thu), Object.keys(thu).join());
+    assert.deepEqual(v.received, []);
+    // a learned event: not pinned
+    race(c, 'rollers', '2026-11-26').eventId = 4567001;
+    assert.deepEqual(teamView(c, 'rollers', {now: FRI}).races[1].event, {id: 4567001, pinned: false});
+    // the plans in the fixed order: a switch moves only the live flag
+    race(c, 'rollers', '2026-11-22').live = 'sun002';
+    assert.deepEqual(teamView(c, 'rollers', {now: FRI}).plans.map(p => [p.id, p.live]), [['sun001', false], ['sun002', true]]);
+    // a special team without a race: raceView of nothing, no races
+    const none = teamView(clubOf({teams: {specials: {name: 'Cogs', start: '19:30', kind: 'special', weekday: null, version: 1, races: {}}}}), 'specials', {now: FRI});
+    assert.deepEqual([none.raceDate, none.date, none.status.kind, none.races, none.over, none.event], [null, null, 'no-race', [], [], null]);
+});
+
+
+test('raceView: every race with plans but none live is red at once, the nearest and a later one (spec §8)', () => {
+    const c = racesClub();
+    race(c, 'rollers', '2026-11-22').live = null;
+    race(c, 'rollers', '2026-11-26').live = null;
+    const sunday = T('2026-11-22T10:00:00Z');                     // 7 h before the Sunday race
+    const sun = raceView(c, 'rollers', '2026-11-22', {now: sunday});
+    const thu = raceView(c, 'rollers', '2026-11-26', {now: sunday});
+    assert.deepEqual([sun.date, sun.status.kind, sun.status.sev, sun.status.text], ['2026-11-22', 'none-live', 'err', 'No live plan: riders get nothing']);
+    assert.deepEqual([thu.date, thu.status.kind, thu.status.sev, thu.status.text], ['2026-11-26', 'none-live', 'err', 'No live plan: riders get nothing']);
+    assert.deepEqual([sun.live, thu.live, sun.plans.map(p => p.id), thu.plans.map(p => p.id)], [null, null, ['sun001', 'sun002'], ['thu001']]);
+    // the later race is red 4 days before its own start (Thu 26 Nov 18:30Z) already
+    assert.equal(raceView(c, 'rollers', '2026-11-26', {now: T('2026-11-22T18:29:59Z')}).status.sev, 'err');
+    // the team's view is its nearest race's: red, and the later race is red too
+    const v = teamView(c, 'rollers', {now: sunday});
+    assert.deepEqual([v.raceDate, v.status.sev, v.races[1].status.sev], ['2026-11-22', 'err', 'err']);
+    assert.equal(teamRow(v).main, 'No live plan: riders get nothing');
+    // without a team start time the later race (no time of its own) is live with S null: nothing sent
+    const d = racesClub();
+    d.teams.rollers.start = null;
+    const later = teamView(d, 'rollers', {now: FRI}).races[1];
+    assert.deepEqual([later.date, later.S, later.live.id, later.live.sent, later.status.kind], ['2026-11-26', null, 'thu001', false, 'no-start']);
+    // the Sunday race keeps its own 18:00
+    assert.equal(teamView(d, 'rollers', {now: FRI}).S, T('2026-11-22T17:00:00Z'));
+    // nothing ahead: raceView of null
+    assert.deepEqual(raceView(c, 'rollers', null, {now: FRI}).when, {day: null, time: null, until: null, today: false});
+});
+
+
+// Team cockpit spec §5.6: the newer-version notice and the rider states of every plan of the race.
+test('newerNotLive: only the live plan\'s newest version, stored after the live one went live, and never live itself', () => {
+    const {club: c, ids, newId} = cockpitClub();                 // 'Rollers · fast' v3 live since 18:14Z; v2 was live
+    const up = (as, riders, hm) => uploadSheet(c, {slug: 'rollers', json: plan('Rollers', riders.map(id => [id, 60])), text: null,
+        base: c.teams.rollers.version, via: 'file', pinnedEventId: null, live: false, as}, {now: T(`2026-11-19T${hm}:00Z`), newId}).id;
+    const live = (id, hm) => makeLive(c, 'rollers', id, T(`2026-11-19T${hm}:00Z`), {version: c.teams.rollers.version});
+    assert.equal(newerNotLive(c, 'rollers', ids.f3), null);                                          // the newest is live
+    const f4 = up(ids.fast, ['1001', '1002'], '18:20');
+    assert.deepEqual(newerNotLive(c, 'rollers', ids.f3), {id: f4, n: 4, at: '2026-11-19T18:20:00.000Z'});
+    live(ids.f2, '18:22');                                                                           // a step back: v4 was there before v2 went live
+    assert.equal(newerNotLive(c, 'rollers', ids.f2), null);
+    const f5 = up(ids.fast, ['1001', '1003'], '18:25');
+    assert.equal(newerNotLive(c, 'rollers', ids.f2).id, f5);
+    live(f5, '18:26');
+    live(ids.f2, '18:27');                                                                           // v5 was live: quiet
+    assert.equal(newerNotLive(c, 'rollers', ids.f2), null);
+    up(ids.slow, ['1004'], '18:28');                                                                 // a variant kept as a backup never prompts
+    assert.equal(newerNotLive(c, 'rollers', ids.f2), null);
+    for (const s of Object.values(c.sheets)) {
+        delete s.liveAt;                                                                             // stored before this version
+    }
+    assert.equal(newerNotLive(c, 'rollers', ids.f2).id, f5);                                         // the live version's own `at` counts
+});
+
+
+test('rider states: a code of any version of any plan of the race', () => {
+    const {club: c, ids} = cockpitClub();
+    const has = id => ({at: '2026-11-19T18:10:00.000Z', sig: c.sheets[id].sig, mod: '0.3.4', sheet: id, inEvent: false, event: null});
+    const v = teamView(c, 'rollers', {now: NOW, seen: {'1001': has(ids.s1), '1002': has(ids.f2), '1003': {...has(ids.f2), sig: 'ZZZZZZ'}}});
+    const text = id => v.riders.find(r => r.id === id).state.text;
+    assert.deepEqual([text('1001'), text('1002'), text('1003')],
+        ['Has \'Rollers · slow\' v1, not the live one', 'Has v2, not the live v3', 'Has an older plan (code ZZZZZZ)']);
+    assert.equal(v.riders.find(r => r.id === '1001').state.kind, 'old-code');
 });

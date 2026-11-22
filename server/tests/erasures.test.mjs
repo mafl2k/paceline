@@ -805,9 +805,13 @@ test('schema 2: a schema-1 paceline.db gets recordings.mtime, its rows kept; the
     fs.mkdirSync(path.join(dir, 'logs', KF, 'rollers'), {recursive: true});
     const file = path.join(dir, 'logs', KF, 'rollers', name);
     fs.writeFileSync(file, recording('1001', ['1001']));
-    const db = openDb(dir);
+    const lines = [];
+    const db = openDb(dir, {log: line => lines.push(line)});
     t.after(() => db.close());
-    assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(db.sql.prepare('PRAGMA user_version').get().user_version, 4);
+    // the backup before schema 3 (no club to convert, so no count line)
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.match(lines[0], /^paceline-server: paceline\.db: backup before schema 3: dumps\/paceline-pre-races-\d{4}-\d{2}-\d{2}\.db \(\d+ bytes\)$/);
     assert.deepEqual(rows(db, 'SELECT bytes, stored_at, mtime FROM recordings'), [{bytes: 0, stored_at: T('2026-11-12T20:00:00Z'), mtime: null}]);
     const logs = makeLogStore(dir, {db, now: () => NOW, erasures: openErasures(null)});
     await capture('log', () => logs.reconcile());

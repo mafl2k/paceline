@@ -13,10 +13,13 @@
 // and another process could then open and write it. Only stat it, or go through SQL.
 //
 // Schema version in PRAGMA user_version; MIGRATIONS[i] takes version i to i + 1, all missing steps
-// in one transaction at start.
+// in one transaction at start (a step that changes data after a backup of the database: migrate).
 import fs from 'node:fs';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
+import {writeBackup} from './dump.mjs';
+import {racesStep} from './migrate-races.mjs';
+import {planTypesStep} from './migrate-plan-types.mjs';
 
 export const DB_FILE = 'paceline.db';
 
@@ -47,6 +50,15 @@ CREATE TABLE archive (cid TEXT NOT NULL, slug TEXT NOT NULL, id TEXT NOT NULL, p
     // the reconcile knows a restored older copy by its time as well as by its size. Rows from
     // before are filled in by the next reconcile.
     `ALTER TABLE recordings ADD COLUMN mtime INTEGER;`,
+    // 3 (races, 20 Nov 2026): every club in clubs and trash converted from the 0.3 shape (the team's
+    // live pointer and race starts, the event fields on the versions) to races (migrate-races.mjs),
+    // after a backup of the database (dumps/paceline-pre-races-<date>.db).
+    {backup: 'pre-races', run: racesStep},
+    // 4 (plan types, 21 Nov 2026): in every club in clubs and trash every version of a plan takes the
+    // type of the plan's highest version, and its label (migrate-plan-types.mjs), after a backup of
+    // the database (dumps/paceline-pre-plan-types-<date>.db; from schema 2, the pre-races backup
+    // covers both steps).
+    {backup: 'pre-plan-types', run: planTypesStep},
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -76,8 +88,13 @@ const isThenable = v => v !== null && (typeof v === 'object' || typeof v === 'fu
 
 
 // Runs the missing steps in one transaction; returns the new user_version. A database newer
-// than the steps stops the start.
-export function migrate(sql, steps = MIGRATIONS) {
+// than the steps stops the start. A step is an SQL string, or {backup, run(sql, {now, log})} for a
+// step that changes data: on a database that has data (version >= 1), `backup(step.backup)` (dump.mjs
+// writeBackup, {file, bytes}) runs first, before the transaction and only for the first such step;
+// a backup that throws, or none given, starts nothing. `run` goes in the transaction, after the
+// steps before it; a `run` that returns a promise is refused (rolled back). A new database needs no
+// backup.
+export function migrate(sql, steps = MIGRATIONS, {backup = null, now = Date.now, log = console.log} = {}) {
     const v = sql.prepare('PRAGMA user_version').get().user_version;
     if (v > steps.length) {
         throw new Error(`paceline.db has schema ${v}; this server knows up to ${steps.length}`);
@@ -85,10 +102,23 @@ export function migrate(sql, steps = MIGRATIONS) {
     if (v === steps.length) {
         return v;
     }
+    const first = v >= 1 ? steps.findIndex((step, i) => i >= v && typeof step === 'object' && step !== null && step.backup) : -1;
+    if (first !== -1) {
+        if (typeof backup !== 'function') {
+            throw new Error(`paceline.db: schema ${first + 1} needs a backup before it changes data`);
+        }
+        const {file, bytes} = backup(steps[first].backup);
+        log(`paceline-server: paceline.db: backup before schema ${first + 1}: dumps/${path.basename(file)} (${bytes} bytes)`);
+    }
     sql.exec('BEGIN IMMEDIATE');
     try {
         for (let i = v; i < steps.length; i++) {
-            sql.exec(steps[i]);
+            if (typeof steps[i] === 'string') {
+                sql.exec(steps[i]);
+            } else if (isThenable(steps[i].run(sql, {now: now(), log}))) {
+                // its writes would land after the COMMIT, outside the transaction
+                throw new TypeError(`paceline.db: schema ${i + 1}: run must be synchronous`);
+            }
             sql.exec(`PRAGMA user_version = ${i + 1}`);
         }
         sql.exec('COMMIT');
@@ -223,8 +253,10 @@ function makeDb(file, sql) {
 }
 
 
-// Opens DATA_DIR/paceline.db, migrated and locked. DbLocked when another connection holds it.
-export function openDb(dataDir, {now = Date.now} = {}) {
+// Opens DATA_DIR/paceline.db, migrated and locked. DbLocked when another connection holds it. A
+// step that changes data writes its backup first (dump.mjs writeBackup, dated by `now`); `log` gets
+// the migration's lines.
+export function openDb(dataDir, {now = Date.now, log = console.log} = {}) {
     fs.mkdirSync(dataDir, {recursive: true});
     const file = path.join(dataDir, DB_FILE);
     const sql = new DatabaseSync(file);
@@ -240,7 +272,7 @@ export function openDb(dataDir, {now = Date.now} = {}) {
         sql.exec('PRAGMA synchronous = FULL');
         sql.exec('PRAGMA foreign_keys = ON');
         sql.exec('PRAGMA secure_delete = ON');
-        migrate(sql);
+        migrate(sql, MIGRATIONS, {backup: name => writeBackup(sql, dataDir, name, now()), now, log});
         const db = makeDb(file, sql);
         db.setMeta('opened_at', new Date(now()).toISOString());
         // by path: chmod opens no descriptor on the files (see above)

@@ -2,16 +2,18 @@
 // window profile).
 // The key has no leading "/" on purpose: Sauce-global keys broadcast every write to all windows.
 import {importFiles, PlanError} from './engine/plan.mjs';
-import {normalizeLibrary, activeEntry} from './engine/library.mjs';
+import {normalizeLibrary, planEntry} from './engine/library.mjs';
 import {LEASE_STALE_MS} from './engine/recording.mjs';
 import {normalizePrefs} from './engine/prefs.mjs';
-import {normalizeLock, normalizePending} from './engine/planserver.mjs';
+import {normalizeLock, normalizePending, normalizeEventSeen} from './engine/planserver.mjs';
 
 export const PLANS_KEY = 'paceline:plans:v1';
 export const PREFS_KEY = 'paceline:prefs:v1';
 // The ride lock and the latest in-event answer (spec §7.4), written by the poll lease owner.
 export const LOCK_KEY = 'paceline:lock:v1';
 export const PENDING_KEY = 'paceline:pending:v1';
+// The event the poll owner last saw, {key, at} (W1): a window that did not see it end ends it.
+export const EVENT_SEEN_KEY = 'paceline:event-seen:v1';
 const FLUSH_EVERY_MS = 60000;
 
 let Common = null;    // Sauce common module, null when opened outside Sauce (standalone preview)
@@ -47,8 +49,9 @@ export function writeLibrary(lib) {
 
 
 // Re-imports the active entry from its raw files. A corrupt stored entry gives null, not a crash.
-export function activePlan() {
-    const entry = activeEntry(readLibrary());
+// An ended file plan (a 0.2 plan with the plan server on) gives null too (library.mjs planEntry).
+export function activePlan({now = Date.now(), serverOn = readPrefs().serverOn} = {}) {
+    const entry = planEntry(readLibrary(), {now, serverOn});
     if (!entry) {
         return null;
     }
@@ -188,6 +191,17 @@ export function writePending(p) {
 }
 
 
+// {key, at} of the event the poll owner last saw, or null; malformed: null (normalizeEventSeen).
+export function readEventSeen() {
+    return readKey(EVENT_SEEN_KEY, normalizeEventSeen);
+}
+
+
+export function writeEventSeen(seen) {
+    writeKey(EVENT_SEEN_KEY, normalizeEventSeen(seen));
+}
+
+
 // Fires when another window changed `key` (the storage event never fires in the writer).
 export function onKeyChange(key, cb) {
     addEventListener('storage', ev => {
@@ -204,6 +218,10 @@ export const LEASE_KEY = 'paceline:rec-owner';
 // lease, which needs my athlete id; the plan server is also polled before Zwift runs.
 export const POLL_LEASE_KEY = 'paceline:poll-owner';
 export const REC_STATE_KEY = 'paceline:rec-state';
+// Bumped ({sessionId, at}) whenever a recording's upload state is written (recdb.mjs markUpload), so
+// the settings window re-reads its list (final review, 21 Nov 2026, I-2: an overlay's automatic upload
+// writes IndexedDB only, and since W7 the lease heartbeat no longer re-reads the list).
+export const REC_MARK_KEY = 'paceline:rec-marked';
 
 
 // The session the overlay is recording right now, or null. A stale lease means a dead recorder.

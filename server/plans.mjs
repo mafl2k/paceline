@@ -3,6 +3,7 @@
 import {SHEET_RE} from './ids.mjs';
 import {localDate} from './time.mjs';
 import {plannedStart, usedUp} from './select.mjs';
+import {raceOf} from './races.mjs';
 
 export const SHARED_SHARE = 0.6;          // teamHint: this share of the upload's riders
 const TYPES_MAX = 10;                     // team.types keeps this many suggestions
@@ -19,9 +20,9 @@ export function isUsed(club, sheet, now) {
 const atMs = sheet => Date.parse(sheet.at) || 0;
 
 
-// The plans of team `slug`, one per distinct `sheet.plan`, in no particular order.
+// The plans of team `slug`, one per distinct `sheet.plan`, in no particular order. `live` is the
+// live id of the plan's race (races spec §1) when it is one of the plan's versions, else null.
 export function plansOf(club, slug) {
-    const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
     const byPlan = new Map();
     for (const entry of Object.entries(club.sheets)) {
         const [, sheet] = entry;
@@ -37,8 +38,8 @@ export function plansOf(club, slug) {
     for (const [id, versions] of byPlan) {
         versions.sort(([, a], [, b]) => a.n - b.n);
         const newest = versions[versions.length - 1];
-        const live = team && typeof team.live === 'string' && versions.some(([vid]) => vid === team.live)
-            ? team.live : null;
+        const raceLive = raceOf(club, slug, newest[1].date)?.live;
+        const live = typeof raceLive === 'string' && versions.some(([vid]) => vid === raceLive) ? raceLive : null;
         plans.push({
             id, team: slug, date: newest[1].date, type: newest[1].type ?? null, label: newest[1].label,
             versions, newest, live,
@@ -51,6 +52,61 @@ export function plansOf(club, slug) {
 // How a plan reads: the team's name, plus " · type" when it has one.
 export function planLabel(teamName, type) {
     return type === null ? teamName : `${teamName} · ${type}`;
+}
+
+
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const rank = v => Number.isFinite(v) ? v : -Infinity;
+
+// The version that decides a plan's type: the highest n; a tie, the later `at`, then the greater id.
+const atRank = s => rank(typeof s.at === 'string' ? Date.parse(s.at) : NaN);
+const decides = ([aid, a], [bid, b]) =>
+    rank(a.n) - rank(b.n) || atRank(a) - atRank(b) || (aid > bid ? 1 : aid < bid ? -1 : 0);
+
+
+// One type per plan (team cockpit spec §4.2; schema 4, and the store's load rule): every version
+// of a plan (the object-valued sheets of one team and string `sheet.plan`) takes the type of its
+// highest version (a string, else null) and the label planLabel gives it. A version that has the
+// type already is not touched, its label included. A plan whose team is gone, or has no string
+// name, is left alone, and so is a value that is not club-shaped. Returns whether anything changed.
+export function planTypes(club) {
+    if (!isObject(club) || !isObject(club.teams) || !isObject(club.sheets)) {
+        return false;
+    }
+    const plans = new Map();     // team -> plan -> [[id, sheet], …]
+    for (const entry of Object.entries(club.sheets)) {
+        const [, sheet] = entry;
+        if (!isObject(sheet) || typeof sheet.plan !== 'string' || typeof sheet.team !== 'string') {
+            continue;
+        }
+        if (!plans.has(sheet.team)) {
+            plans.set(sheet.team, new Map());
+        }
+        const byPlan = plans.get(sheet.team);
+        if (!byPlan.has(sheet.plan)) {
+            byPlan.set(sheet.plan, []);
+        }
+        byPlan.get(sheet.plan).push(entry);
+    }
+    let changed = false;
+    for (const [slug, byPlan] of plans) {
+        const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
+        if (!isObject(team) || typeof team.name !== 'string') {
+            continue;
+        }
+        for (const versions of byPlan.values()) {
+            const [, newest] = versions.reduce((best, v) => decides(v, best) > 0 ? v : best);
+            const type = typeof newest.type === 'string' ? newest.type : null;
+            for (const [, sheet] of versions) {
+                if ((sheet.type ?? null) !== type) {
+                    sheet.type = type;
+                    sheet.label = planLabel(team.name, type);
+                    changed = true;
+                }
+            }
+        }
+    }
+    return changed;
 }
 
 
@@ -72,7 +128,7 @@ export function rememberType(team, type) {
 }
 
 
-// The assign page's type suggestions.
+// The Store form's type suggestions (for a new plan).
 export function teamTypes(club, slug) {
     const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
     return team && Array.isArray(team.types) && team.types.every(t => typeof t === 'string') ? team.types : [];

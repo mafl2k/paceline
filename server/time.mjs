@@ -6,6 +6,10 @@ export const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const formatters = new Map();
 
 
+// A weekday 1-7 (Monday = 1, ISO), or false.
+export const isWeekday = d => Number.isInteger(d) && d >= 1 && d <= 7;
+
+
 export function isDate(s) {
     if (typeof s !== 'string' || !DATE_RE.test(s)) {
         return false;

@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import * as P from '../pages/src/engine/plan.mjs';
 import * as L from '../pages/src/engine/library.mjs';
 import * as V from '../pages/src/engine/planserver.mjs';
+import {EVENT_GRACE_MS} from '../pages/src/engine/recording.mjs';
 import {slugify} from '../server/server.mjs';
 
 const json = readFileSync(new URL('./fixtures/rollers.json', import.meta.url), 'utf8');
@@ -98,6 +99,60 @@ test('pollEvery: every 10 s in the event without a plan or after a failed check,
     assert.equal(V.pollDue(1000, 11000, V.POLL_FAST_MS), true);
 });
 
+
+test('W8: plan-server failures back off', () => {
+    // 20 Nov 2026 audit (W8, probes/poll.mjs): an HTTP 429/5xx in the event was asked again every 10 s, forever.
+    const ev = {inEvent: true, hasPlan: true, error: 'http'};
+    assert.deepEqual([1, 2, 3, 4, 9].map(fails => V.pollEvery({...ev, fails})), [10000, 20000, 40000, 60000, 60000]);
+    assert.equal(V.pollEvery({...ev, fails: 0}), V.POLL_FAST_MS);
+    assert.equal(V.pollEvery({...ev}), V.POLL_FAST_MS);
+    for (const error of ['offline', 'invalid']) {
+        assert.equal(V.pollEvery({inEvent: true, hasPlan: false, error, fails: 3}), 40000, error);
+    }
+    assert.equal(V.pollEvery({inEvent: true, hasPlan: true, error: 'notfound', fails: 5}), V.POLL_FAST_MS);
+    assert.equal(V.pollEvery({inEvent: true, hasPlan: false, error: null, fails: 5}), V.POLL_FAST_MS);
+    assert.equal(V.pollEvery({inEvent: false, hasPlan: false, error: 'http', fails: 5}), V.POLL_MS);
+});
+
+test('W8: retryAfterOf', () => {
+    assert.equal(V.RETRY_AFTER_MAX_MS, 3600000);
+    assert.equal(V.retryAfterOf('3600', 1000), 3601000);
+    assert.equal(V.retryAfterOf('0', 1000), 1000);
+    assert.equal(V.retryAfterOf(new Date(61000).toUTCString(), 1000), 61000);
+    assert.equal(V.retryAfterOf(new Date(0).toUTCString(), 1000), 1000);    // a date in the past: now
+    assert.equal(V.retryAfterOf('999999', 1000), 1000 + V.RETRY_AFTER_MAX_MS);
+    assert.equal(V.retryAfterOf(new Date(1e12).toUTCString(), 1000), 1000 + V.RETRY_AFTER_MAX_MS);
+    for (const bad of [null, undefined, '', 'soon', '1.5', '-5', 'Mon, xx GMT']) {
+        assert.equal(V.retryAfterOf(bad, 1000), null, String(bad));
+    }
+});
+
+test('M-7: the backoff starts over at a new event, a new server or other club codes', () => {
+    // Final review, 21 Nov 2026 (M-7): retryAt was reset only by an answer or the poll lease, so a
+    // readable Retry-After (up to an hour) would have silenced the check in the next race too, or
+    // after the rider fixed the server URL or a club code.
+    const scope = {url: 'https://plans.example.org', codes: ['AB12CD'], eventKey: '77:1000'};
+    const b0 = V.backoffStep(null, scope);
+    assert.deepEqual(b0, {fails: 0, retryAt: null, scope: V.backoffStep(null, scope).scope});
+    const failed = {...b0, fails: 3, retryAt: 9e12};
+    assert.equal(V.backoffStep(failed, {...scope}), failed, 'the same: kept');
+    assert.equal(V.backoffStep(failed, {...scope, codes: ['AB12CD']}), failed, 'the same codes: kept');
+    for (const change of [{eventKey: '78:2000'}, {url: 'https://other.example.org'}, {codes: ['AB12CD', 'EF34GH']},
+                          {codes: []}]) {
+        const b = V.backoffStep(failed, {...scope, ...change});
+        assert.deepEqual([b.fails, b.retryAt], [0, null], JSON.stringify(change));
+        assert.notEqual(b.scope, failed.scope);
+    }
+    // A backoff without a scope (the lease was lost) starts over too.
+    assert.deepEqual(V.backoffStep({fails: 2, retryAt: 5}, scope), b0);
+});
+
+test('W8: pollDue waits for retryAt', () => {
+    assert.equal(V.pollDue(null, 5000, V.POLL_FAST_MS, 9000), false);
+    assert.equal(V.pollDue(null, 9000, V.POLL_FAST_MS, 9000), true);
+    assert.equal(V.pollDue(1000, 11000, V.POLL_FAST_MS), true);
+    assert.equal(V.pollDue(1000, 11000, V.POLL_FAST_MS, null), true);
+});
 
 test('checkUrl: the v3 rider URL with joined clubs, event and sig', () => {
     const base = {url: 'https://ttt-beta.example.org/', selfId: '1001', mod: '0.3.0-beta.2'};
@@ -578,4 +633,180 @@ test('eventChange: another event while one is still set ends the old one first',
     assert.deepEqual(V.eventChange('a', ev('b')), {over: true, begin: true});    // quit mid-race, next pen
     assert.deepEqual(V.eventChange('a', null), {over: false, begin: false});      // the gate decides that
     assert.deepEqual(V.eventChange(null, null), {over: false, begin: false});
+});
+
+
+// Event summaries as eventOf keeps them: found (inEventOf key '<id>:<start>'), and a lookup that
+// found nothing (getEventSubgroup answered null or threw).
+const found = (eventId, start = 1000) => ({sgId: 4242, found: true, eventId, start, eventType: 'TEAM_TIME_TRIAL'});
+const NOT_FOUND = {sgId: 4242, found: false, eventId: null, start: null, eventType: null};
+
+
+test('W1: missedEventOver: an event nobody ended is over for a window that did not see it', () => {
+    const seen = {key: '77:1000', at: 50000};
+    const G = EVENT_GRACE_MS;
+    assert.equal(V.missedEventOver(seen, {ev: {key: '78:2000'}, now: 51000, goneAt: null}), true);
+    // The grace counts from this window's own first fresh step without the event (goneAt).
+    assert.equal(V.missedEventOver(seen, {ev: null, now: 50000 + G - 1, goneAt: 50000}), false);
+    assert.equal(V.missedEventOver(seen, {ev: null, now: 50000 + G, goneAt: 50000}), true);
+    // No grace begun yet (no fresh step without the event): not over, however old seen.at is.
+    assert.equal(V.missedEventOver(seen, {ev: null, now: 50000 + G, goneAt: null}), false);
+    // Review Focus 2: the same event is never over, however long ago it was seen.
+    assert.equal(V.missedEventOver(seen, {ev: {key: '77:1000'}, now: 9e12, goneAt: null}), false);
+    for (const bad of [null, {key: 7, at: 1}]) {
+        assert.equal(V.missedEventOver(bad, {ev: {key: '78:2000'}, now: 51000, goneAt: null}), false, JSON.stringify(bad));
+        assert.equal(V.missedEventOver(bad, {ev: null, now: 9e12, goneAt: 1}), false, JSON.stringify(bad));
+    }
+});
+
+
+test('W1: missedGoneAt: the first fresh step without the event, kept until the event is there again', () => {
+    assert.equal(V.missedGoneAt(null, {summary: null, ev: null, now: 90000}), 90000);
+    assert.equal(V.missedGoneAt(90000, {summary: null, ev: null, now: 95000}), 90000);
+    assert.equal(V.missedGoneAt(90000, {summary: found(77), ev: {key: '77:1000'}, now: 96000}), null);
+    assert.equal(V.missedGoneAt(null, {summary: found(78, 2000), ev: {key: '78:2000'}, now: 97000}), null);
+    // No data of mine (undefined): goneAt as it was.
+    assert.equal(V.missedGoneAt(null, {summary: undefined, ev: null, now: 98000}), null);
+    assert.equal(V.missedGoneAt(90000, {summary: undefined, ev: null, now: 98000}), 90000);
+    // A lookup that found nothing yet: I still have a subgroup, so the grace starts over.
+    assert.equal(V.missedGoneAt(null, {summary: NOT_FOUND, ev: null, now: 98000}), null);
+    assert.equal(V.missedGoneAt(90000, {summary: NOT_FOUND, ev: null, now: 98000}), null);
+});
+
+
+test('W1 (P3): a reload of 30 s or more mid-race, then a subgroup blip, keeps the race', () => {
+    // The poll owner last saw the race at 50000; the window reloads (or Sauce restarts) for 40 s.
+    // Its first fresh step is a blip without my subgroup (gateStep would tolerate it), then the
+    // race is back. Counting the grace from seen.at would end the race (and the file plan) here.
+    const seen = {key: '77:1000', at: 50000};
+    let goneAt = null;
+    const steps = [[90000, null], [91000, null], [92000, {key: '77:1000'}], [93000, {key: '77:1000'}]];
+    for (const [now, ev] of steps) {
+        goneAt = V.missedGoneAt(goneAt, {summary: ev ? found(77) : null, ev, now});
+        assert.equal(V.missedEventOver(seen, {ev, now, goneAt}), false, String(now));
+    }
+    // A later blip starts its own grace: still not over within it.
+    goneAt = V.missedGoneAt(goneAt, {summary: null, ev: null, now: 200000});
+    assert.equal(V.missedEventOver(seen, {ev: null, now: 200000 + EVENT_GRACE_MS - 1, goneAt}), false);
+});
+
+
+test('normalizeEventSeen: a non-empty string key and a finite time, else null', () => {
+    assert.deepEqual(V.normalizeEventSeen({key: '77:1000', at: 5}), {key: '77:1000', at: 5});
+    assert.deepEqual(V.normalizeEventSeen({key: '77:1000', at: 5, x: 1}), {key: '77:1000', at: 5});
+    for (const bad of [{key: '', at: 5}, {key: 'k'}, {key: 'k', at: 'x'}, {key: 'k', at: Infinity}, null,
+                       undefined, 'k', [], {key: 7, at: 1}]) {
+        assert.equal(V.normalizeEventSeen(bad), null, JSON.stringify(bad));
+    }
+});
+
+
+test('W1: another event after a restart is a missed end, and the race\'s file plan is one eventOver ends (wiring: harness s8)', () => {
+    // Probe s8-fileplan: the poll owner closed within EVENT_GRACE_MS of race 1's finish, so its
+    // eventOver never ran; the fresh start in race 2 sees another event key.
+    const lib = L.addPlan(L.normalizeLibrary(null), {sig: 'S91T6D', json: '{}', text: null, loadedAt: 1000, source: 'file'});
+    const seen = {key: '77:1000', at: 50000};
+    assert.equal(V.missedEventOver(seen, {ev: {key: '78:2000'}, now: 60000, goneAt: null}), true);
+    assert.equal(L.endsAtGateClose(L.activeEntry(lib), seen.at), true);
+    assert.equal(L.endFilePlan(lib, 60000).active, null);
+});
+
+
+test('W1: a failed event lookup after a restart mid-race never ends the race', () => {
+    // Review fix round 1 (s8e/s8f): after a restart Sauce's getEventSubgroup answered null, eventOf
+    // kept found: false and asked again only after EVENT_RETRY_MS (30 s); the old rule counted those
+    // steps as "no event" and ended race 77 (file plan, lock, pending answer) about 30 s later.
+    const seen = {key: '77:1000', at: 50000};
+    const run = (goneAt, summary, now) => V.missedStep(goneAt, {seen, summary, ev: V.inEventOf(summary), evKey: null, now});
+    let goneAt = null;
+    for (let i = 0; i <= 31; i++) {
+        const r = run(goneAt, NOT_FOUND, 90000 + i * 1000);
+        assert.equal(r.over, false, `not found, step ${i}`);
+        goneAt = r.goneAt;
+    }
+    const back = run(goneAt, found(77), 122000);
+    assert.equal(back.over, false);
+    assert.equal(back.goneAt, null);
+    // A blip first, then the failed lookups: the not-found steps neither end the race nor count.
+    goneAt = run(null, null, 90000).goneAt;
+    assert.equal(goneAt, 90000);
+    for (let i = 1; i <= 31; i++) {
+        const r = run(goneAt, NOT_FOUND, 90000 + i * 1000);
+        assert.equal(r.over, false, `blip, then not found, step ${i}`);
+        goneAt = r.goneAt;
+    }
+    assert.equal(run(goneAt, found(77), 122000).over, false);
+});
+
+
+test('W1: missedStep still counts a step without a subgroup and a found event that is not mine to count', () => {
+    const seen = {key: '77:1000', at: 50000};
+    // No subgroup (null summary, P3's blip and the rider gone after the finish): over after the grace.
+    let r = V.missedStep(null, {seen, summary: null, ev: null, evKey: null, now: 90000});
+    assert.deepEqual(r, {goneAt: 90000, over: false});
+    assert.equal(V.missedStep(90000, {seen, summary: null, ev: null, evKey: null, now: 90000 + EVENT_GRACE_MS - 1}).over, false);
+    assert.equal(V.missedStep(90000, {seen, summary: null, ev: null, evKey: null, now: 90000 + EVENT_GRACE_MS}).over, true);
+    // A found event inEventOf rejects (a group ride under tttOnly): counts like no event.
+    const ride = {...found(88), eventType: 'GROUP_RIDE'};
+    const ev = V.inEventOf(ride, {tttOnly: true});
+    assert.equal(ev, null);
+    r = V.missedStep(null, {seen, summary: ride, ev, evKey: null, now: 90000});
+    assert.equal(r.goneAt, 90000);
+    assert.equal(V.missedStep(90000, {seen, summary: ride, ev, evKey: null, now: 90000 + EVENT_GRACE_MS}).over, true);
+    // Another event: over at once. The same: never. No data of mine (undefined): nothing, goneAt kept.
+    assert.equal(V.missedStep(null, {seen, summary: found(78, 2000), ev: {key: '78:2000'}, evKey: null, now: 51000}).over, true);
+    assert.equal(V.missedStep(null, {seen, summary: found(77), ev: {key: '77:1000'}, evKey: null, now: 9e12}).over, false);
+    assert.deepEqual(V.missedStep(90000, {seen, summary: undefined, ev: null, evKey: null, now: 9e12}), {goneAt: 90000, over: false});
+    // This window saw the event itself (evKey): its gate decides. Nothing kept: nothing to end.
+    assert.equal(V.missedStep(90000, {seen, summary: null, ev: null, evKey: '77:1000', now: 9e12}).over, false);
+    assert.equal(V.missedStep(90000, {seen: null, summary: null, ev: null, evKey: null, now: 9e12}).over, false);
+});
+
+
+test('M-2: a summary of the same race that is no TTT here never ends it', () => {
+    // Final review, 21 Nov 2026 (M-2, probe w1): "Only during TTT events" on, a private TTT that is one
+    // only by its event's name; window A got the event, window B's getEvent failed, so its summary is
+    // found but no TTT (inEventOf null under tttOnly). B took the poll lease at 60 s: missed eventOver
+    // 30 s later, mid-race. The stored key is the same as B's summary's: still in that race.
+    const seen = {key: '77:1000', at: 50000};
+    const noTtt = {...found(77), eventType: 'GROUP_RIDE'};
+    const ev = V.inEventOf(noTtt, {tttOnly: true});
+    assert.equal(ev, null);
+    let goneAt = null;
+    for (let now = 60000; now <= 60000 + 3 * EVENT_GRACE_MS; now += 1000) {
+        const r = V.missedStep(goneAt, {seen, summary: noTtt, ev, evKey: null, now});
+        assert.equal(r.over, false, `+${now - 60000} ms`);
+        assert.equal(r.goneAt, null, `+${now - 60000} ms`);
+        goneAt = r.goneAt;
+    }
+    // After a blip it restarts the grace like the event itself.
+    assert.equal(V.missedStep(90000, {seen, summary: noTtt, ev, evKey: null, now: 90000 + EVENT_GRACE_MS}).goneAt, null);
+    // Another race that is no TTT here still counts as no event (the W1 test above).
+    const other = {...found(77, 2000), eventType: 'GROUP_RIDE'};
+    assert.equal(V.missedStep(90000, {seen, summary: other, ev: null, evKey: null, now: 90000 + EVENT_GRACE_MS}).over, true);
+});
+
+
+test('W1: a not-found lookup restarts the grace: blip, failed lookups, blip never ends the race at once', () => {
+    // Controller ruling, fix round 2: a not-found step means I still have a subgroup (the race may
+    // well run), so it resets goneAt like a step that sees the event.
+    const seen = {key: '77:1000', at: 50000};
+    const run = (goneAt, summary, now) => V.missedStep(goneAt, {seen, summary, ev: V.inEventOf(summary), evKey: null, now});
+    let r = run(null, null, 90000);                       // the first blip
+    assert.equal(r.over, false);
+    let goneAt = r.goneAt;
+    for (let i = 1; i <= 35; i++) {                       // 35 s of failed lookups
+        r = run(goneAt, NOT_FOUND, 90000 + i * 1000);
+        assert.equal(r.over, false, `not found, step ${i}`);
+        goneAt = r.goneAt;
+    }
+    const blip2 = 126000;                                  // the second blip
+    for (let now = blip2; now < blip2 + EVENT_GRACE_MS; now += 1000) {
+        r = run(goneAt, null, now);
+        assert.equal(r.over, false, `second blip, +${now - blip2} ms`);
+        goneAt = r.goneAt;
+    }
+    assert.equal(goneAt, blip2);
+    // A full grace without any subgroup: over.
+    assert.equal(run(goneAt, null, blip2 + EVENT_GRACE_MS).over, true);
 });

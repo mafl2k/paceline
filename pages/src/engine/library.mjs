@@ -102,6 +102,15 @@ export function fileActive(lib, {now, serverOn}) {
 }
 
 
+// The entry the windows ride: the active one, unless it is a file plan that has ended (a 0.2
+// plan, e.g. the server's "Update Paceline" notice, is one with the plan server on). The library
+// keeps it active until the next server check drops it; until then the windows have no plan.
+export function planEntry(lib, {now, serverOn}) {
+    const e = activeEntry(lib);
+    return e && !fileEnded(e, {now, serverOn}) ? e : null;
+}
+
+
 // Mark the active file plan ended and deactivate it. Anything else comes back unchanged.
 export function endFilePlan(lib, now) {
     const e = activeEntry(lib);

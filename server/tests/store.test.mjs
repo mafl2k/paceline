@@ -9,13 +9,20 @@ import {ClubError, MAX_CLUB_BYTES, newClub, addTeam, uploadSheet, makeLive, setR
 import {makeLogStore} from '../logs.mjs';
 import {plannedStart, servable} from '../select.mjs';
 import {riderCodeHash} from '../ids.mjs';
-import {club, sheet, planJson, T, CODE_SECRET, rows, clubJson, changes, refuseWrites} from './helpers.mjs';
+import {club, sheet, planJson, T, CODE_SECRET, rows, clubJson, changes, refuseWrites, liveId, race, assertRaceShape} from './helpers.mjs';
+import {PRE_RACES, rawClub} from './pre-races.mjs';
+import {mixedTypes, typesOf, ONE_TYPE} from './cockpit-fixture.mjs';
+import {convertClub} from '../club.mjs';
+import {tidyRaces} from '../races.mjs';
 
 
 const DAY = 86400000;
 const CID = 'k7f3q9x2m4';
 const CID2 = 's9pk2m4q7d';
 const iso = ms => new Date(ms).toISOString();
+const NO_RACE = {start: null, pinnedEventId: null, eventId: null, boundAt: null, live: null};
+// a version as the races shape stores it: no event fields (they are the race's)
+const bare = v => Object.fromEntries(Object.entries(v).filter(([k]) => !['pinnedEventId', 'eventId', 'boundAt'].includes(k)));
 
 function tempDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'paceline-store-'));
@@ -162,7 +169,8 @@ test('load: an undo snapshot is dropped', () => {
     const t = setup();
     try {
         const kept = sheet({team: 'rollers', label: 'Rollers', date: '2026-11-19', riders: ['1002'], uploadedAt: '2026-11-19T11:00:00.000Z', plan: 'nw0001'});
-        const data = club({
+        // a row as 0.3 stored it (team.live, the event fields on the version)
+        const data = rawClub({
             teams: {
                 rollers: {
                     name: 'Rollers', start: '19:30', live: 'nw0001', version: 2, changedAt: '2026-11-19T11:00:00.000Z',
@@ -176,8 +184,8 @@ test('load: an undo snapshot is dropped', () => {
         const {result: store, warned} = captureWarn(() => t.open());
         const c = store.get(CID);
         assert.equal(c.teams.rollers.undo, undefined);
-        assert.equal(c.teams.rollers.live, 'nw0001');
-        assert.deepEqual(c.sheets, {nw0001: kept});
+        assert.equal(liveId(c, 'rollers'), 'nw0001');
+        assert.deepEqual(c.sheets, {nw0001: bare(kept)});
         assert.deepEqual(warned, [], 'no sheet dropped, nothing logged');
         assert.equal(clubJson(t.db, CID), json, 'nothing written at load');
         store.change(CID, () => {});
@@ -205,20 +213,22 @@ test('load: sheets in the old format are dropped, the club stays', () => {
                 undo: {what: 'upload', label: 'Sprockets v1', at: '2026-11-19T11:00:00.000Z', live: null, sheets: {nw0001: null}},
             },
         };
-        const data = club({teams: structuredClone(teams)});
+        // a row as 0.3 stored it (team.live, the event fields on the versions)
+        const data = rawClub({teams: structuredClone(teams)});
         data.sheets = {ol0001: old, nw0001: kept};
         plant(t, CID, data);
         const json = clubJson(t.db, CID);
         const {result: store, warned} = captureWarn(() => t.open());
         const c = store.get(CID);
         assert.deepEqual(Object.keys(c.sheets), ['nw0001']);
-        assert.deepEqual(c.sheets.nw0001, kept);
-        assert.equal(c.teams.rollers.live, null);
+        assert.deepEqual(c.sheets.nw0001, bare(kept));
+        assert.equal(liveId(c, 'rollers'), null);
         assert.equal(c.teams.rollers.undo, undefined);
         const {live, undo, ...rest} = teams.rollers;
-        assert.deepEqual(c.teams.rollers, {...rest, live: null});
-        const {undo: dropped, ...sprockets} = teams.sprockets;
-        assert.deepEqual(c.teams.sprockets, sprockets);
+        // no kind (older than the race rhythm): weekly, so it gets the race day it followed, Thursday
+        assert.deepEqual(c.teams.rollers, {...rest, races: {'2026-11-19': NO_RACE}, weekday: 4});
+        const {undo: dropped, live: none, ...sprockets} = teams.sprockets;
+        assert.deepEqual(c.teams.sprockets, {...sprockets, races: {}, weekday: 4});
         assert.equal(Object.hasOwn(c.teams.sprockets, 'undo'), false);
         assert.equal(warned.length, 1);
         assert.match(warned[0], /club k7f3q9x2m4: 1 plans in the old format dropped/);
@@ -242,15 +252,17 @@ test('load: a club stored by 0.3.0 (a special team, plans without a start time) 
         const cogs = {name: 'Cogs', start: '19:00', live: 'cg0001', version: 3, changedAt: '2026-11-18T10:00:00.000Z', kind: 'special', weekday: null};
         const old = sheet({team: 'cogs', label: 'Cogs', date: '2026-11-21', riders: ['1001'], uploadedAt: '2026-11-18T10:00:00.000Z', plan: 'cg0001'});
         const later = sheet({team: 'cogs', label: 'Cogs · b', date: '2026-11-28', riders: ['1002'], uploadedAt: '2026-11-19T10:00:00.000Z', plan: 'cg0002', type: 'b'});
-        const data = {...club({teams: {cogs: structuredClone(cogs)}}), weekday: 4};
+        const data = rawClub({teams: {cogs: structuredClone(cogs)}, weekday: 4});
         data.sheets = {cg0001: structuredClone(old), cg0002: structuredClone(later)};
         plant(t, CID, data);
         const json = clubJson(t.db, CID);
         const {result: store, warned} = captureWarn(() => t.open());
         assert.deepEqual(warned, []);
         const c = store.get(CID);
-        assert.deepEqual(c.teams.cogs, cogs);
-        assert.deepEqual(c.sheets.cg0001, old);
+        // converted to races: no start of their own, so the team's
+        const {live, ...kept} = cogs;
+        assert.deepEqual(c.teams.cogs, {...kept, races: {'2026-11-21': {...NO_RACE, live: 'cg0001'}, '2026-11-28': NO_RACE}});
+        assert.deepEqual(c.sheets.cg0001, bare(old));
         // the same S as 0.3.0 gave: the date at the team's 19:00 (Berlin, UTC+1)
         assert.equal(plannedStart(c, c.sheets.cg0001), T('2026-11-21T18:00:00Z'));
         assert.equal(plannedStart(c, c.sheets.cg0002), T('2026-11-28T18:00:00Z'));
@@ -258,9 +270,9 @@ test('load: a club stored by 0.3.0 (a special team, plans without a start time) 
         assert.equal(clubJson(t.db, CID), json, 'nothing written at load');
         // a race start stored since: written with the row, read back after a restart
         store.change(CID, cl => {
-            cl.teams.cogs.raceStarts = {'2026-11-28': '20:15'};
+            race(cl, 'cogs', '2026-11-28').start = '20:15';
         });
-        assert.deepEqual(JSON.parse(clubJson(t.db, CID)).teams.cogs.raceStarts, {'2026-11-28': '20:15'});
+        assert.equal(JSON.parse(clubJson(t.db, CID)).teams.cogs.races['2026-11-28'].start, '20:15');
         const back = t.open().get(CID);
         assert.equal(plannedStart(back, back.sheets.cg0002), T('2026-11-28T19:15:00Z'));
         assert.equal(plannedStart(back, back.sheets.cg0001), T('2026-11-21T18:00:00Z'));
@@ -623,6 +635,7 @@ test('index: listedIn follows the live pointer', () => {
         const pending = newClub({id: CID2, name: 'Spokesmen CC', email: 'captain@example.org', tz: 'Europe/Berlin', now: t.now()});
         pending.teams.spokes = {name: 'Spokes', start: '19:30', live: 'h99999', version: 1, undo: null, changedAt: null};
         pending.sheets.h99999 = sheet({team: 'spokes', label: 'Spokes', date: '2026-11-19', riders: ['1005'], uploadedAt: '2026-11-19T11:00:00.000Z', plan: 'h99999'});
+        convertClub(pending, t.now());
         t.store.create(pending);
         assert.deepEqual(t.store.listedIn('1005'), []);
         assert.equal(t.store.get(CID2), null);
@@ -658,6 +671,7 @@ test('slugs, names and tokens', () => {
         // A pending club's slugs are taken, but it owns no slug and its name is free.
         const pending = newClub({id: CID2, name: 'Spokesmen CC', email: 'captain@example.org', tz: 'Europe/Berlin', now: t.now()});
         pending.teams.spokes = {name: 'Spokes', start: null, live: null, version: 1, undo: null, changedAt: null};
+        convertClub(pending, t.now());
         pending.tokens.push({hash: 'b'.repeat(64), kind: 'link', state: 'pending', expiresAt: null});
         t.store.create(pending);
         assert.equal(t.store.slugTaken('spokes'), true);
@@ -1183,7 +1197,7 @@ test('seen: only riders the club lists, every field checked', () => {
 
         // A rider only on a stored sheet that is not live counts.
         upload(t, CID, slug, planJson('Rollers fast', ['1005']), {as: 'new', type: 'fast', live: false}, counter());
-        assert.equal(t.store.get(CID).teams[slug].live, id);
+        assert.equal(liveId(t.store.get(CID), slug), id);
         assert.equal(t.store.see(CID, '1005', fine), true);
 
         // Bad fields become null/false; nothing else is kept.
@@ -1286,6 +1300,7 @@ test('sweep: only clubs with something to delete are written', () => {
             for (const [i, date] of ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04'].entries()) {
                 c.sheets[`h0000${i}`] = sheet({team: 'rollers', label: 'Rollers', date, riders: ['1001'], uploadedAt: `${date}T10:00:00.000Z`, plan: `h0000${i}`});
             }
+            tidyRaces(c);
         });
         const json2 = clubJson(t.db, CID2);
         let n = changes(t.db);
@@ -1497,6 +1512,7 @@ test('sweep: whole plans; the used versions are archived, the rest not', () => {
         store.change(CID, c => {
             c.sheets.h00001 = v1;
             c.sheets.h00002 = v2;
+            tidyRaces(c);
         });
         recording(t, logs, 'rollers', ['AAAAAA'], T('2026-11-04T18:00Z'));
         // an inbox entry over 24 h and an expired confirmation: they go even while the archive fails
@@ -1563,6 +1579,105 @@ test('delete team archives its used versions; trash, restore and purge carry the
         assert.deepEqual(rows(t.db, 'SELECT * FROM recordings'), []);
         assert.deepEqual(rows(t.db, 'SELECT * FROM recording_sigs'), []);
         assert.ok(!fs.existsSync(path.join(dataDir, 'logs', CID)));
+    } finally {
+        cleanup(t);
+    }
+});
+
+
+// ---- races (races spec §1, §5) ----
+
+const preRaces = name => PRE_RACES.find(([n]) => n === name)[1]();
+
+
+test('load: a club in the 0.3 shape is converted in memory, and written at its next change', () => {
+    const t = setup();
+    try {
+        // Rollers: the live plan with a link and a learned event, another plan of its date with another link
+        plant(t, CID, preRaces('pinned'));
+        const json = clubJson(t.db, CID);
+        const store = t.open();
+        const c = store.get(CID);
+        assertRaceShape(c);
+        assert.equal(liveId(c, 'rollers'), 'ra0001');
+        assert.deepEqual(race(c, 'rollers', '2026-11-19'), {start: null, pinnedEventId: 4567890, eventId: 4567891, boundAt: null, live: 'ra0001'});
+        assert.deepEqual(c.log.map(e => [e.what, e.team, e.label]), [['race-link-dropped', 'rollers', '4567999 (Thu 19 Nov)']]);
+        assert.deepEqual(store.listedIn('1001'), [{cid: CID, slug: 'rollers', id: 'ra0001'}]);
+        assert.equal(clubJson(t.db, CID), json, 'nothing written at load');
+        store.change(CID, () => {});
+        const written = JSON.parse(clubJson(t.db, CID));
+        assertRaceShape(written);
+        assert.deepEqual(written.teams.rollers.races, c.teams.rollers.races);
+        // read back after a restart: the same, nothing converted again
+        const back = t.open().get(CID);
+        assert.deepEqual(back, written);
+    } finally {
+        cleanup(t);
+    }
+});
+
+
+test('load: a club whose versions carry different types gets one type per plan in memory, and its row is written at its next change', () => {
+    const t = setup();
+    try {
+        plant(t, CID, mixedTypes());
+        const json = clubJson(t.db, CID);
+        const store = t.open();
+        assert.deepEqual(typesOf(store.get(CID)), ONE_TYPE);
+        assert.equal(clubJson(t.db, CID), json, 'nothing written at load');
+        store.change(CID, () => {});
+        assert.deepEqual(typesOf(JSON.parse(clubJson(t.db, CID))), ONE_TYPE);
+    } finally {
+        cleanup(t);
+    }
+});
+
+
+test('restore: a trashed 0.3 club comes back with races', () => {
+    const t = setup();
+    try {
+        withTeam(t);
+        t.store.trash(CID);
+        // the trash row as 0.3 stored it
+        t.db.sql.prepare('UPDATE trash SET json = ? WHERE cid = ?').run(JSON.stringify(preRaces('staggered')), CID);
+        const c = t.store.restore(CID);
+        assertRaceShape(c);
+        assert.equal(liveId(c, 'rollers'), 'ra0001');
+        assert.equal(liveId(c, 'sprockets'), 'sa0001');
+        const written = JSON.parse(clubJson(t.db, CID));
+        assertRaceShape(written);
+        assert.deepEqual(written.teams, c.teams);
+        assert.deepEqual(t.store.listedIn('1001').map(x => x.slug).sort(), ['rollers', 'sprockets']);
+    } finally {
+        cleanup(t);
+    }
+});
+
+
+test('damage: a team without races, a race.live outside its race, a version without its race', () => {
+    const t = setup();
+    try {
+        t.store.create(club({
+            teams: {rollers: {name: 'Rollers', start: '19:30', live: 'ra0001', version: 1, changedAt: null, kind: 'weekly', weekday: null}},
+            sheets: {ra0001: sheet({team: 'rollers', label: 'Rollers', date: '2026-11-19', riders: ['1001'], uploadedAt: '2026-11-18T10:00:00.000Z'})},
+        }));
+        const before = structuredClone(t.store.get(CID));
+        assertRaceShape(before);
+        const cases = [
+            [c => delete c.teams.rollers.races, 'team "rollers" has no races'],
+            [c => { c.teams.rollers.races['2026-11-19'].live = 'zzzzzz'; }, 'race "rollers" 2026-11-19: live "zzzzzz" is not a version of that race'],
+            [c => delete c.teams.rollers.races['2026-11-19'], 'sheet "ra0001" has no race'],
+        ];
+        for (const [fn, message] of cases) {
+            assert.throws(() => t.store.change(CID, fn), e => e.message === `store.change broke club ${CID}: ${message}`, message);
+            assert.deepEqual(t.store.get(CID), before);
+        }
+        // a live version of another date of the team is outside its race too
+        assert.throws(() => t.store.change(CID, c => {
+            c.sheets.ra0002 = {...c.sheets.ra0001, date: '2026-11-26', plan: 'ra0002'};
+            c.teams.rollers.races['2026-11-26'] = {start: null, pinnedEventId: null, eventId: null, boundAt: null, live: null};
+            c.teams.rollers.races['2026-11-19'].live = 'ra0002';
+        }), /race "rollers" 2026-11-19: live "ra0002" is not a version of that race/);
     } finally {
         cleanup(t);
     }

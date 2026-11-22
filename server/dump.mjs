@@ -18,10 +18,19 @@ import {localDate, localHHMM} from './time.mjs';
 import {syncDir} from './logs.mjs';
 
 export const DUMP_KEEP = 7;
+// A backup before a schema step that changes data (db.mjs migrate): dumps/paceline-pre-<words>-<UTC
+// date>.db (one or more lower-case words joined by '-'), not one of the DUMP_KEEP. pruneDumps
+// deletes it from 00:00 UTC PRE_KEEP_DAYS after its date on, at most 7 days after it was written
+// (privacy: "Database dumps: 7 days"); it runs after each nightly dump, so the file goes with the
+// first of those from then on.
+export const PRE_KEEP_DAYS = 7;
 const DUE_FROM = '03:00';
 const OVERDUE_FROM = '06:00';          // no dump yet by then: say so once that day
 const DUMP_RE = /^paceline-(\d{4}-\d{2}-\d{2})\.db$/;
-const TMP_RE = /^\.paceline-\d{4}-\d{2}-\d{2}\.db\.tmp(-journal)?$/;   // VACUUM INTO writes <tmp>-journal beside it
+const PRE_NAME_RE = /^pre-[a-z]+(?:-[a-z]+)*$/;
+const PRE_RE = /^paceline-pre-[a-z]+(?:-[a-z]+)*-(\d{4}-\d{2}-\d{2})\.db$/;
+// VACUUM INTO writes <tmp>-journal beside it
+const TMP_RE = /^\.paceline-(?:pre-[a-z]+(?:-[a-z]+)*-)?\d{4}-\d{2}-\d{2}\.db\.tmp(-journal)?$/;
 const STALE_TMP_MS = 864e5;
 const RETRY_AFTER_FAILURE_MS = 3600 * 1000;
 
@@ -32,15 +41,32 @@ const dumpName = (now, tz) => `paceline-${localDate(now, tz)}.db`;
 // removed first; a dump of the same day is replaced). Returns {file (absolute), bytes}. Throws on
 // failure, with the temp file removed.
 export function writeDump(db, dataDir, {now, tz}) {
+    return vacuumInto(db.sql, dataDir, dumpName(now, tz));
+}
+
+
+// Writes dumps/paceline-<name>-<UTC date of now>.db (name 'pre-<words>', e.g. 'pre-races' or
+// 'pre-plan-types') as writeDump writes a dump, on the connection `sql` outside a transaction: the
+// backup before a schema step that changes data. A backup of the same day is replaced. Returns
+// {file (absolute), bytes}. Throws on failure, with the temp file removed.
+export function writeBackup(sql, dataDir, name, now) {
+    if (typeof name !== 'string' || !PRE_NAME_RE.test(name)) {
+        throw new TypeError(`bad backup name ${JSON.stringify(name)}`);
+    }
+    return vacuumInto(sql, dataDir, `paceline-${name}-${new Date(now).toISOString().slice(0, 10)}.db`);
+}
+
+
+// VACUUM INTO dumps/.<name>.tmp, chmod 0640, fsync, renamed to dumps/<name>.
+function vacuumInto(sql, dataDir, name) {
     const dir = path.join(dataDir, 'dumps');
     fs.mkdirSync(dir, {recursive: true, mode: 0o750});
-    const name = dumpName(now, tz);
     const file = path.join(dir, name);
     const tmp = path.join(dir, `.${name}.tmp`);
     fs.rmSync(tmp, {force: true});       // VACUUM INTO refuses a file that exists
     fs.rmSync(tmp + '-journal', {force: true});   // and the journal VACUUM INTO writes beside it, if a crash left one
     try {
-        db.sql.prepare('VACUUM INTO ?').run(tmp);
+        sql.prepare('VACUUM INTO ?').run(tmp);
         fs.chmodSync(tmp, 0o640);
         const fd = fs.openSync(tmp, 'r');
         try {
@@ -58,8 +84,10 @@ export function writeDump(db, dataDir, {now, tz}) {
 }
 
 
-// Deletes the dumps beyond the newest `keep` (by the date in the name) and temp files (and their
-// -journal) a day after their last write. Returns how many dumps it deleted; 0 without a dumps folder.
+// Deletes the dumps beyond the newest `keep` (by the date in the name), a backup before a schema step
+// (paceline-pre-<words>-<date>.db, not one of them) PRE_KEEP_DAYS after its date, and temp files (and
+// their -journal) a day after their last write. Returns how many dumps it deleted (backups not
+// counted); 0 without a dumps folder.
 export function pruneDumps(dataDir, now, keep = DUMP_KEEP) {
     const dir = path.join(dataDir, 'dumps');
     let names;
@@ -76,6 +104,12 @@ export function pruneDumps(dataDir, now, keep = DUMP_KEEP) {
     for (const name of dated.slice(keep)) {
         fs.rmSync(path.join(dir, name), {force: true});
         deleted++;
+    }
+    for (const name of names) {
+        const m = PRE_RE.exec(name);
+        if (m && Date.parse(m[1] + 'T00:00:00Z') + PRE_KEEP_DAYS * 864e5 <= now) {
+            fs.rmSync(path.join(dir, name), {force: true});
+        }
     }
     for (const name of names.filter(n => TMP_RE.test(n))) {
         const file = path.join(dir, name);

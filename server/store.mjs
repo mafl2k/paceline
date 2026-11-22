@@ -8,9 +8,11 @@
 // data goes through a Map, a Set or Object.hasOwn.
 import {CID_RE, ZWIFT_RE, SIG_RE, MOD_RE, SHEET_RE, nameKey, isSlug, isEventId} from './ids.mjs';
 import {TxAborted} from './db.mjs';
-import {isZone} from './time.mjs';
+import {isZone, isDate} from './time.mjs';
 import {roleIn} from './select.mjs';
-import {ClubError, MAX_CLUB_BYTES, sweepClub, sweptSheets, staleEntries, sweepInbox, clubLists} from './club.mjs';
+import {ClubError, MAX_CLUB_BYTES, sweepClub, sweptSheets, staleEntries, sweepInbox, clubLists, convertClub} from './club.mjs';
+import {raceOf, racesOf} from './races.mjs';
+import {planTypes} from './plans.mjs';
 import {hasExpired, dropExpired} from './tokens.mjs';
 
 const HOUR = 3600000;
@@ -80,6 +82,29 @@ export function damage(c, cid) {
             return `sheet ${JSON.stringify(id)} has no plan version`;
         }
     }
+    // the races (races spec §1) and their two invariants, as far as the selection relies on them: a
+    // race's live pointer names a version of that team and date, and every dated version of a team
+    // has its race
+    for (const [slug, team] of Object.entries(c.teams)) {
+        if (!isObject(team.races)) {
+            return `team ${JSON.stringify(slug)} has no races`;
+        }
+        for (const [date, race] of Object.entries(team.races)) {
+            if (!isObject(race)) {
+                return `race ${JSON.stringify(slug)} ${date} is not an object`;
+            }
+            const live = race.live;
+            if (live != null && !(typeof live === 'string' && Object.hasOwn(c.sheets, live) && c.sheets[live].team === slug
+                && c.sheets[live].date === date)) {
+                return `race ${JSON.stringify(slug)} ${date}: live ${JSON.stringify(live)} is not a version of that race`;
+            }
+        }
+    }
+    for (const [id, sheet] of Object.entries(c.sheets)) {
+        if (typeof sheet.team === 'string' && Object.hasOwn(c.teams, sheet.team) && isDate(sheet.date) && raceOf(c, sheet.team, sheet.date) === null) {
+            return `sheet ${JSON.stringify(id)} has no race`;
+        }
+    }
     if (!Array.isArray(c.inbox)) {
         return 'missing inbox';
     }
@@ -103,12 +128,17 @@ export function damage(c, cid) {
 
 
 // The load rule for clubs stored before plan versions (plan versions spec §12, no migration):
-// drops every sheet without a `plan` (the old format, or written by a rolled-back image), clears a
-// live pointer to one, drops every team's Undo snapshot (there is no Undo any more, plan versions
-// §8) and gives a club without an inbox an empty one. Leaves alone a value that is not club-shaped
-// (damage reports it). Changes only the object; the next change writes the new shape. Returns how
-// many sheets went.
-export function normalizeLoaded(c) {
+// drops every sheet without a `plan` (the old format, or written by a rolled-back image), drops
+// every team's Undo snapshot (there is no Undo any more, plan versions §8) and gives a club without
+// an inbox an empty one; then converts a club in the 0.3 shape to races (club.mjs convertClub: a
+// live pointer to a dropped sheet goes there; schema 3 converted the stored rows already, and an
+// older image refuses schema 3, so this covers a club in the 0.3 shape that comes in another way:
+// an import, a restore, and the tests) and restores the race invariants of one that has races
+// (tidyRaces); then gives every plan one type, that of its highest version, and its label
+// (plans.mjs planTypes: schema 4 did so for the stored rows; the same reasons as above). Leaves
+// alone a value that is not club-shaped (damage reports it). Changes only the object; the next
+// change writes the new shape. Returns how many sheets went.
+export function normalizeLoaded(c, now = Date.now()) {
     if (!isObject(c) || !isObject(c.teams) || !isObject(c.sheets)) {
         return 0;
     }
@@ -122,17 +152,15 @@ export function normalizeLoaded(c) {
         }
     }
     for (const team of Object.values(c.teams)) {
-        if (!isObject(team)) {
-            continue;
+        if (isObject(team)) {
+            delete team.undo;
         }
-        if (typeof team.live === 'string' && gone.has(team.live)) {
-            team.live = null;
-        }
-        delete team.undo;
     }
     if (c.inbox === undefined) {
         c.inbox = [];
     }
+    convertClub(c, now);
+    planTypes(c);
     return gone.size;
 }
 
@@ -234,8 +262,7 @@ export function openStore({db, now, archive = null}) {
                 codeIndex.set(c.riderCode.hash, cid);
                 entry.code = c.riderCode.hash;
             }
-            for (const [slug, team] of Object.entries(c.teams)) {
-                const id = team?.live;
+            for (const [slug, id] of Object.keys(c.teams).flatMap(s => racesOf(c, s).map(([, race]) => [s, race.live]))) {
                 if (typeof id !== 'string' || !Object.hasOwn(c.sheets, id)) {
                     continue;
                 }
@@ -301,7 +328,7 @@ export function openStore({db, now, archive = null}) {
         } catch (e) {
             throw new Error(`${prefix}: ${e.message}`);
         }
-        const dropped = normalizeLoaded(c);
+        const dropped = normalizeLoaded(c, now());
         const why = damage(c, cid);
         if (why) {
             throw new Error(`${prefix}: ${why}`);

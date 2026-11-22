@@ -1,51 +1,44 @@
-// The inbox routes (plan versions spec §6): GET /manage/inbox/<id> (the assign page with the dry run
-// of Store), POST /manage/inbox/<id> (Store) and POST /manage/inbox/<id>/discard. Routed from
-// manage.mjs after clubGate; the POSTs read the form like the other forms and check the principal
-// again. The GET changes nothing (its dry run counts against the club's parse budget, Ruling 7).
+// The inbox routes (plan versions spec §6, team cockpit spec §5.4, §8): GET /manage/inbox/<id> (a
+// link from before the team cockpit: to the team page with the entry picked), POST /manage/inbox/<id>
+// (Store, from the team page's form) and POST /manage/inbox/<id>/discard. Routed from manage.mjs
+// after clubGate; the POSTs read the form like the other forms and check the principal again. The
+// GET changes nothing.
 import {readBody, BODY_MS, html, parseForm} from './http.mjs';
 import {t} from './pages.mjs';
-import {methodNotAllowed, FORM_BYTES} from './web.mjs';
+import {methodNotAllowed, redirect, FORM_BYTES} from './web.mjs';
 import {ClubError, entryOf, storeEntry, discardEntry, teamHint} from './club.mjs';
-import {effects, nextRaceDate, raceStart} from './select.mjs';
+import {effects, nextRaceDate} from './select.mjs';
 import {SHEET_RE, isSlug, parseEventUrl, randomId} from './ids.mjs';
-import {planOfId} from './plans.mjs';
-import {assignChoices} from './preselect.mjs';
-import {assignPage, assignPreview, entryGonePage, entryBack} from './assign-page.mjs';
-import {uploadResultPage} from './upload-page.mjs';
+import {assignChoices, chosenDate, drawnStart} from './preselect.mjs';
+import {storeResult, entryGonePage} from './store-form.mjs';
 import {ridersLine} from './team-view.mjs';
 import {clubErrorText, field, postedClub, frameOf} from './manage-page.mjs';
 import {redirectWithFlash} from './flash.mjs';
 import {confirmPage} from './ui.mjs';
+import {cockpitPath} from './team-page.mjs';
+import {raceOf} from './races.mjs';
+import {renderCockpit, previewOf, storeInput, RACE_CODES} from './manage-cockpit.mjs';
 
-const PARSE_RETRY_S = 600;
-
-
-// What Store gets from the choices (uploadSheet's input without the content): the event link as
-// its id, null when it does not parse (the callers check parseEventUrl(...).ok first).
-export function storeInput(choices, base) {
-    const event = parseEventUrl(choices.event ?? '');
-    return {
-        slug: choices.team, as: choices.as, live: choices.live, date: choices.date, start: choices.start ?? null, type: choices.type,
-        pinnedEventId: event.ok ? event.id : null, base,
-    };
-}
+// The Store input and the dry run live in manage-cockpit.mjs (the cockpit's form draws it too).
+export {storeInput, previewOf};
 
 
 // The choices of a Store POST, straight from the form: never preselected. A blank `as` is no plan;
-// a missing `type` keeps a version's type (a blank one is none); a missing `date` is the team's next
-// race (the page always sends it for a new plan); `start` is a special team's new plan's start time
-// (uploadSheet ignores it for anything else).
+// a missing `type` keeps a version's type (a blank one is none); the date is the one the form means
+// (chosenDate: a typed date, else the race radio, else the date field), none sent is the team's next
+// race (the page always sends one for a new plan); `start` is the race's start time as posted
+// (uploadSheet stores it for every kind of team: a blank keeps the race's).
 function formChoices(form) {
     const has = k => form.get(k) !== null;
     return {
         team: field(form, 'team'), as: field(form, 'as') || null, live: field(form, 'live') === 'on',
-        date: has('date') ? field(form, 'date') : null, start: field(form, 'start'),
+        date: chosenDate(form), start: field(form, 'start'),
         type: has('type') ? field(form, 'type') : undefined, event: field(form, 'event'),
     };
 }
 
 
-// The assign page's choices for a refused Store: the form read as a redraw (assignChoices with the
+// The Store form's choices for a refused Store: the form read as a redraw (assignChoices with the
 // posted `drawn`), except that a blank `as` stays no choice.
 function refusedChoices(club, entry, form, now) {
     const choices = assignChoices(club, entry, form, now);
@@ -56,103 +49,84 @@ function refusedChoices(club, entry, form, now) {
 }
 
 
-// True when a special team's Store posts a start time drawn for another date (`startFor`, the date
-// changed without a redraw) and the posted date's race has a time of its own that differs: storing
-// would move that race to a time nobody chose for it (the coordinator, 19 Nov 2026).
-function staleStart(club, choices, startFor) {
-    const team = isSlug(choices.team) && Object.hasOwn(club.teams, choices.team) ? club.teams[choices.team] : null;
-    if (team?.kind !== 'special' || startFor === null || choices.date === null || startFor === choices.date) {
-        return false;
-    }
-    const raced = Object.values(club.sheets).some(sh => sh.team === choices.team && sh.date === choices.date);
-    const current = raceStart(club, choices.team, choices.date);
-    return raced && current !== null && choices.start !== '' && current !== choices.start;
-}
-
-
-// GET /manage/inbox/<id>: the assign page. Over the parse budget, 429 with the page and no preview.
+// GET /manage/inbox/<id> (the assign page's URL before the team cockpit, team cockpit spec §8): 303
+// to the team page of the entry's team with the entry picked (?e=<id>#panel). An entry that is gone,
+// or one of no team of the club (none can be made, ruling F12), answers 404 with the entry-gone page.
 function inboxGet(req, res, ctx, cid, id) {
-    const {store, now} = ctx;
-    const club = store.get(cid);
-    const entry = entryOf(club, id, now);
-    if (entry === null) {
+    const club = ctx.store.get(cid);
+    const entry = entryOf(club, id, ctx.now);
+    if (entry === null || typeof entry.team !== 'string' || !Object.hasOwn(club.teams, entry.team)) {
         html(res, 404, entryGonePage(club, frameOf(ctx, cid)));
         return;
     }
-    const params = new URL(req.url, 'http://localhost').searchParams;
-    const choices = assignChoices(club, entry, params, now);
-    if (!ctx.web.sheetParses.allow(cid, now)) {
-        res.setHeader('Retry-After', String(PARSE_RETRY_S));
-        html(res, 429, assignPage(club, entry, {...frameOf(ctx, cid), choices, preview: null, flash: {kind: 'err', text: t('upload-budget')}}));
-        return;
-    }
-    html(res, 200, assignPage(club, entry, {...frameOf(ctx, cid), choices, preview: previewOf(ctx, cid, club, entry, choices)}));
+    redirect(res, `${cockpitPath(entry.team)}?e=${id}#panel`);
 }
 
 
-// The dry run of Store for `choices` (spec §6.6): assignPreview's answer, {error} for a refusal or an
-// event link that does not parse, {note} while the date or a special team's start time is empty,
-// null without a team. Counts nothing: the caller does.
-function previewOf(ctx, cid, club, entry, choices) {
-    const {store, now} = ctx;
-    if (choices.team === null) {
-        return null;
-    }
-    if (!parseEventUrl(choices.event).ok) {
-        return {error: t('upload-bad-event')};
-    }
-    // nothing typed yet is no error (the coordinator, 19 Nov 2026): a neutral line until the date
-    // (and a special team's start time) is there; a value that is there but wrong is an error
-    if (choices.date === '' || (choices.special && choices.start === '')) {
-        const key = choices.date !== '' ? 'as-pv-choose-time' : choices.special && choices.start === '' ? 'as-pv-choose' : 'as-pv-choose-date';
-        return {note: t(key)};
-    }
-    const base = club.teams[choices.team].version;
-    try {
-        const run = store.dryRun(cid, c => storeEntry(c, entry.id, storeInput(choices, base), {now, newId: () => randomId(6)}));
-        return assignPreview(club, run.club, entry, {result: run.result, live: choices.live, now});
-    } catch (e) {
-        if (!(e instanceof ClubError)) {
-            throw e;
-        }
-        return {error: clubErrorText(e)};
-    }
-}
-
-
-// POST /manage/inbox/<id> (team, as, live, type, date, start, startFor, event, base, drawn, touched):
-// Store. A special team's start time drawn for another date than the posted one, when that date's
-// race has another time, stores nothing either: the page is redrawn for it (staleStart). A team or
-// plan choice the page was not drawn for (`drawn` is not `<team>:<as>`: the captain changed it and
-// stored without a redraw) stores nothing: 400 with the page redrawn for the new choice (its
-// defaults, its preview; not counted, Ruling 7) and a note to check it. A refusal answers 400 with
-// the assign page and the text on top, and keeps the entry; an entry that is gone answers 400 with
-// its page; success the result page (circles §5.4: a direct answer).
+// POST /manage/inbox/<id> (team, as, live, type, race, date, start, startFor, startWas, event, base, drawn,
+// touched, raceOpen): Store. A team or plan choice the form was not drawn for (`drawn` is not `<team>:<as>`:
+// the captain changed it and stored without a redraw) stores nothing: 400 with the form redrawn for
+// the new choice (its defaults, its preview; not counted, Ruling 7) and a note to check it. So does a
+// race the form was not drawn for (the date the form means, chosenDate, is not `startFor`: the race
+// radio or the date changed without a redraw; Review Focus 5): the form is redrawn for that race, so
+// a start time drawn for another date never moves its race. And so does a race whose start is no
+// longer `startWas`, the one the form was drawn with (someone changed it since: final review I-2),
+// redrawn with the race's start as it is now. A refusal answers 400 with the form and the text on
+// top, and keeps the entry. Every one of these answers is the team page of the entry's team with the
+// entry picked (?e=, not reloading itself) and its form as posted. An entry that is gone answers 400
+// with the team page of the posted team, whose panel says so (the entry-gone page without such a
+// team); so does an entry of no team of the club. Success is 303 to the team page of the stored
+// version's team (a Store for another team: that team's) with the version picked (?r=<race date>, the
+// race's live pointer, when it is live now; else ?v=<id>) and the Store flash (storeResult) in the
+// panel's head. A `from` of a page from before the team cockpit is ignored.
 function inboxStore(req, res, ctx, cid, form, id) {
     const {store, now} = ctx;
     const before = store.get(cid);
     const entry = entryOf(before, id, now);
-    if (entry === null) {
-        html(res, 400, entryGonePage(before, frameOf(ctx, cid)));
+    const teamOf = slug => (isSlug(slug) && Object.hasOwn(store.get(cid).teams, slug) ? slug : null);
+    const gone = slug => {
+        html(res, 400, teamOf(slug) !== null ? renderCockpit(ctx, cid, slug, {e: id, refresh: false})
+            : entryGonePage(store.get(cid), frameOf(ctx, cid)));
+    };
+    const home = entry === null ? null : teamOf(entry.team);
+    if (home === null) {
+        gone(field(form, 'team'));
         return;
     }
-    const refused = text => {
+    // the form again with `choices` and `preview`, and the text on top
+    const again = (choices, preview, text) => renderCockpit(ctx, cid, home, {e: id, flash: {kind: 'err', text}, refresh: false, choices, preview});
+    // `race`: the refusal concerns the race date, the start time or the event link, so the form's
+    // race fold is drawn open (store-form.mjs raceOpen)
+    const refused = (text, race = false) => {
         const club = store.get(cid);
-        html(res, 400, assignPage(club, entry, {...frameOf(ctx, cid), choices: refusedChoices(club, entry, form, now), preview: null, flash: {kind: 'err', text}}));
+        const choices = refusedChoices(club, entry, form, now);
+        html(res, 400, again(race ? {...choices, raceOpen: true} : choices, null, text));
     };
     const choices = formChoices(form);
-    const redraw = key => {
+    // (also open when the redraw drew another date than the one typed: a team or plan changed without
+    // a redraw puts the form back on its default race, and the captain must see the typed date went)
+    const redraw = (key, race = false) => {
         const redrawn = assignChoices(before, entry, form, now);
-        html(res, 400, assignPage(before, entry, {
-            ...frameOf(ctx, cid), choices: redrawn, preview: previewOf(ctx, cid, before, entry, redrawn), flash: {kind: 'err', text: t(key)},
-        }));
+        const typed = chosenDate(form);
+        const open = race || (typed !== null && typed !== '' && typed !== redrawn.date);
+        html(res, 400, again(open ? {...redrawn, raceOpen: true} : redrawn, previewOf(ctx, cid, before, entry, redrawn), t(key)));
     };
     if (form.get('drawn') !== `${choices.team}:${choices.as ?? ''}`) {
         redraw('as-redrawn');
         return;
     }
-    if (staleStart(before, choices, form.get('startFor'))) {
-        redraw('as-redrawn-time');
+    const startFor = form.get('startFor');
+    // (an emptied date names no race: uploadSheet asks for one, bad-date)
+    if (startFor !== null && choices.date !== null && choices.date !== '' && choices.date !== startFor) {
+        redraw('as-redrawn-race', true);
+        return;
+    }
+    // the race's start was changed since the page was drawn (another captain, another tab): the
+    // field echoes the old one, so storing it would put the race back without asking (final review
+    // I-2); redrawn with the race's start as it is now
+    const startWas = form.get('startWas');
+    if (startWas !== null && startFor !== null && Object.hasOwn(before.teams, choices.team) && startWas !== drawnStart(before, choices.team, startFor)) {
+        redraw('as-redrawn-start', true);
         return;
     }
     if (choices.team === '') {
@@ -160,7 +134,7 @@ function inboxStore(req, res, ctx, cid, form, id) {
         return;
     }
     if (!parseEventUrl(choices.event).ok) {
-        refused(t('upload-bad-event'));
+        refused(t('upload-bad-event'), true);
         return;
     }
     const input = storeInput(choices, field(form, 'base'));
@@ -176,9 +150,9 @@ function inboxStore(req, res, ctx, cid, form, id) {
             throw e;
         }
         if (e.code === 'entry-gone') {
-            html(res, 400, entryGonePage(store.get(cid), frameOf(ctx, cid)));
+            gone(entry.team);
         } else {
-            refused(clubErrorText(e));
+            refused(clubErrorText(e), RACE_CODES.has(e.code));
         }
         return;
     }
@@ -186,23 +160,22 @@ function inboxStore(req, res, ctx, cid, form, id) {
     const slug = after.sheets[result.id].team;
     // moves and holes for the stored version's date: the plan's for a version (controller ruling 15)
     const {moves, holes} = effects(before, after, after.sheets[result.id].date, now);
-    const hint = teamHint(before, slug, entry.json, result.plan.riders.map(r => r.id));
-    // from a plan's New version, the result goes back to that plan, as the assign page did
-    const back = entry.fromPlan === true && entry.team === slug ? entryBack(after, entry) : null;
-    html(res, 200, uploadResultPage(after, slug, {
-        ...frameOf(ctx, cid), before, result, moves, holes, hint, importWarnings: entry.warnings ?? [], importMore: entry.warningsMore ?? 0, back,
-    }));
+    const hint = teamHint(before, slug, entry.json, result.plan.riders.map(r => r.id), now);
+    const importWarnings = entry.warnings ?? [];
+    const importMore = entry.warningsMore ?? 0;
+    // the stored version live now: its race's live pointer (a reload follows live); else the version
+    const stored = after.sheets[result.id];
+    const isLive = raceOf(after, slug, stored.date)?.live === result.id;
+    redirectWithFlash(res, ctx, cid, cockpitPath(slug), storeResult(before, after, slug, {result, moves, holes, hint, importWarnings, importMore, now}),
+        {query: isLive ? `?r=${stored.date}` : `?v=${result.id}`, hash: 'panel'});
 }
 
 
-// Where Discard goes back to: /manage, a team page of a team that exists, or a plan page of a plan of
-// that team that exists (the New version of a plan page); anything else /manage.
+// Where Discard goes back to: /manage, or the team page of a team that exists; anything else (a
+// plan page's or the build's own route, from before the team cockpit, too) /manage.
 function backOf(club, back) {
-    const m = /^\/manage\/team\/([^/?#]+)(?:\/plan\/([^/?#]+))?$/.exec(back);
-    if (!m || !isSlug(m[1]) || !Object.hasOwn(club.teams, m[1])) {
-        return '/manage';
-    }
-    return m[2] === undefined || (SHEET_RE.test(m[2]) && planOfId(club, m[1], m[2]) !== null) ? back : '/manage';
+    const m = /^\/manage\/team\/([^/?#]+)$/.exec(back);
+    return m && isSlug(m[1]) && Object.hasOwn(club.teams, m[1]) ? back : '/manage';
 }
 
 
@@ -218,10 +191,8 @@ function inboxDiscard(req, res, ctx, cid, form, id) {
     if (waiting !== null && field(form, 'confirm') !== '1') {
         const riders = ridersLine(waiting);
         const team = /^\/manage\/team\/([^/]+)/.exec(to)?.[1] ?? null;
-        // the crumbs end where the way back goes (backOf: the overview, a team page or a plan page)
-        const plan = /\/plan\/([^/]+)$/.exec(to)?.[1] ?? null;
-        const trail = team === null ? [] : [{href: `/manage/team/${team}`, label: club.teams[team].name},
-            ...(plan === null ? [] : [{href: to, label: planOfId(club, team, plan).label}])];
+        // the crumbs end where the way back goes (backOf: the overview or a team page)
+        const trail = team === null ? [] : [{href: to, label: club.teams[team].name}];
         html(res, 200, confirmPage(club, {...frameOf(ctx, cid), here: team === null ? '/manage' : `/manage/team/${team}`,
             kicker: club.name, trail, heading: t('ask-discard'), words: t('discard-confirm', {riders}), action: `/manage/inbox/${id}/discard`,
             fields: {back: to}, button: t('discard-yes'), back: {href: to, label: team === null ? t('tp-all-teams') : t('result-back', {team: club.teams[team].name})}}));

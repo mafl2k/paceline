@@ -17,6 +17,7 @@ import {mailContent, operatorAddress} from './mail-content.mjs';
 import {clientIp, makeLimiter, makeSlots, SHEET_UPLOADS_MAX} from './limits.mjs';
 import {readBody, BODY_MS, send, html, sameOrigin, parseForm, parseCookies} from './http.mjs';
 import {esc, t, maskAddress, retentionText, monthsText} from './pages.mjs';
+import {logoHref} from './static.mjs';
 import {addLink, openLink, usableLink, addConfirm, addEmailToken, liveToken, takeToken} from './tokens.mjs';
 import {makeFlashes} from './flash.mjs';
 import {signedOutPage, publicPage, flashBlock, postForm, sevLine, th, backBar} from './ui.mjs';
@@ -386,11 +387,12 @@ const PLANNER_URL = 'https://zwiftgopher.com/TTT/';
 
 
 // The start page, for a browser without a club open (GET / sends one with a club to /manage):
-// Register a club and Lost link.
+// the Paceline logo (only here; user, 22 Nov 2026), Register a club and Lost link.
 function homePage() {
     const ext = (href, key) => `<a href="${href}" rel="noopener noreferrer">${esc(t(key))}</a>`;
     const intro = th('home-intro', {paceline: ext(PACELINE_URL, 'home-paceline'), planner: ext(PLANNER_URL, 'home-planner')});
-    return publicPage(card(t('home-title'), `<p class="prose">${intro}</p>
+    const logo = `<img class="home-logo" src="${logoHref}" alt="Paceline" width="512" height="512">`;
+    return publicPage(logo + card(t('home-title'), `<p class="prose">${intro}</p>
     <div class="btnrow">
       <a class="btn primary block" href="/register">${ic('plus')}${esc(t('home-register'))}</a>
       <a class="btn secondary block" href="/lost">${ic('mail')}${esc(t('home-lost'))}</a>

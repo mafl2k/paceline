@@ -1,7 +1,8 @@
 // The one selection function (spec §3): which of a club's sheets a rider gets, in and outside a
 // Zwift event, and what a change does to the other riders. Pure: the clock is always passed in.
-import {zonedToUtc, isDate, HHMM_RE, localDate, addDays} from './time.mjs';
+import {zonedToUtc, isDate, isWeekday, HHMM_RE, localDate, addDays} from './time.mjs';
 import {decodeEntities} from '../pages/src/engine/plan.mjs';
+import {raceOf, racesOf} from './races.mjs';
 
 export const MATCH_BEFORE_MS = 30 * 60000;   // S may lie this much before E
 export const MATCH_AFTER_MS = 60 * 60000;    // and this much after it
@@ -18,29 +19,24 @@ export const STILL_TO_RACE_MS = 2 * 3600000;
 const validStart = v => typeof v === 'string' && HHMM_RE.test(v);
 
 
-// A special team's race start on `date` ('HH:MM'), from team.raceStarts, or null. The newest Store
-// for a date sets it (user, 19 Nov 2026: the time belongs to the race, team and date, and the
-// newest upload wins).
-export function storedRaceStart(team, date) {
-    const starts = team?.raceStarts;
-    if (starts === null || typeof starts !== 'object' || typeof date !== 'string' || !Object.hasOwn(starts, date)) {
-        return null;
-    }
-    return validStart(starts[date]) ? starts[date] : null;
+// The time a race of `team` starts at with stored start `own` (race.start): `own` when it is a
+// valid 'HH:MM', else the team's start time (a weekly team's rhythm; a special team's race stored by
+// 0.3.0 without one), else null. The one place of this rule (startOf, club.mjs).
+export function raceTime(team, own) {
+    return validStart(own) ? own : validStart(team?.start) ? team.start : null;
 }
 
 
-// The local start time 'HH:MM' of a sheet (a stored version, or {team, date}): a special team races
-// at the start stored for the sheet's date (team.raceStarts, "special has no fixed times at all"),
-// else at the team's start time (plans stored by 0.3.0); a weekly team (any kind but 'special')
-// always at the team's. Null without a team or a time.
+// The local start time 'HH:MM' of a sheet (a stored version, or {team, date}): the start of its
+// race (races spec §1: team.races[date].start, a valid 'HH:MM'), else the team's start time (a weekly
+// team's rhythm, a special team's race stored by 0.3.0 without one), for every kind. Null without a
+// team or a time.
 export function startOf(club, sheet) {
     const team = Object.hasOwn(club.teams, sheet.team) ? club.teams[sheet.team] : null;
     if (!team) {
         return null;
     }
-    const own = team.kind === 'special' ? storedRaceStart(team, sheet.date) : null;
-    return own ?? (validStart(team.start) ? team.start : null);
+    return raceTime(team, raceOf(club, sheet.team, sheet.date)?.start ?? null);
 }
 
 
@@ -68,21 +64,16 @@ export function raceStartAt(club, slug, date) {
 }
 
 
-// A weekday 1-7 (Monday = 1, ISO), or false.
-const isWeekday = d => Number.isInteger(d) && d >= 1 && d <= 7;
-
 // The ISO weekday of a 'YYYY-MM-DD' (Monday = 1 … Sunday = 7).
 const weekdayOf = date => new Date(`${date}T12:00:00Z`).getUTCDay() || 7;
 
 
 // The weekday a weekly team races on (plan versions spec §4.1, user 17 Nov 2026): the team's own,
-// else the club's, else Thursday (4). Only 1-7 counts; an unknown team has the club's.
+// else Thursday (4). Only 1-7 counts; an unknown team has Thursday. There is no club's race day any
+// more (races spec §4c: the conversion wrote it into the teams that followed it).
 export function teamWeekday(club, slug) {
     const team = typeof slug === 'string' && Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
-    if (team !== null && isWeekday(team.weekday)) {
-        return team.weekday;
-    }
-    return isWeekday(club.weekday) ? club.weekday : 4;
+    return team !== null && isWeekday(team?.weekday) ? team.weekday : 4;
 }
 
 
@@ -94,42 +85,44 @@ export function stillToRace(club, slug, date, now) {
 }
 
 
-// The team's next race day, 'YYYY-MM-DD' in the club's zone, or null (plan versions spec §6.5,
-// decision 11): the default date of an upload. A date is still to race until its
-// S + STILL_TO_RACE_MS; for a team without a start time, today and later dates are. The first that
-// applies:
-// 1. the date of the team's live plan, if still to race (every kind; a correction sent mid-race
-//    lands on today's race, one sent on Monday for a Saturday race on Saturday);
-// 2. a weekly team (any kind but 'special', and an unknown team): the first date from yesterday on
-//    with its weekday (teamWeekday) that is still to race; yesterday covers a late start that is
-//    still racing after midnight;
-// 3. a special team: the newest date of its stored plans that is still to race;
-// 4. null. Past dates are never read.
-export function nextRaceDate(club, slug, now) {
-    const today = localDate(now, club.tz);
+// True once team `slug`'s race on `date` is over (races spec §2): from its S + STILL_TO_RACE_MS;
+// without a start time, once `date` has passed in the club's zone. The opposite of stillToRace.
+export function raceOver(club, slug, date, now) {
+    return !stillToRace(club, slug, date, now);
+}
+
+
+// A weekly team's next race day by its weekday (teamWeekday), 'YYYY-MM-DD' in the club's zone: the
+// first date from yesterday on with that weekday that is still to race (yesterday covers a late
+// start still racing after midnight). Any kind but 'special' races weekly, and so does an unknown
+// team; a special team has no rhythm: null. Past dates are never read.
+export function rhythmDate(club, slug, now) {
     const team = typeof slug === 'string' && Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
-    const ahead = date => stillToRace(club, slug, date, now);
-    const live = team?.live;
-    if (typeof live === 'string' && Object.hasOwn(club.sheets, live) && isDate(club.sheets[live].date)
-        && ahead(club.sheets[live].date)) {
-        return club.sheets[live].date;
+    if (team !== null && team.kind === 'special') {
+        return null;
     }
-    if (team === null || team.kind !== 'special') {
-        const from = addDays(today, -1);
-        let date = addDays(from, (teamWeekday(club, slug) - weekdayOf(from) + 7) % 7);
-        // yesterday or today after its S + 2 h: a week on (a later date is always still to race)
-        for (let i = 0; i < 2 && !ahead(date); i++) {
-            date = addDays(date, 7);
-        }
-        return date;
+    const from = addDays(localDate(now, club.tz), -1);
+    let date = addDays(from, (teamWeekday(club, slug) - weekdayOf(from) + 7) % 7);
+    // yesterday or today after its S + 2 h: a week on (a later date is always still to race)
+    for (let i = 0; i < 2 && !stillToRace(club, slug, date, now); i++) {
+        date = addDays(date, 7);
     }
-    let newest = null;
-    for (const sheet of Object.values(club.sheets)) {
-        if (sheet.team === slug && isDate(sheet.date) && (newest === null || sheet.date > newest) && ahead(sheet.date)) {
-            newest = sheet.date;
-        }
+    return date;
+}
+
+
+// The team's nearest race still to race, existing or by its rhythm (races spec §4: the default race
+// of a new plan, the race the team's view is about), 'YYYY-MM-DD' in the club's zone: the earlier of
+// its earliest race still to race (racesOf) and rhythmDate. Either may be missing; null without
+// both (a special team with no race ahead).
+export function nextRaceDate(club, slug, now) {
+    const team = typeof slug === 'string' && Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
+    const race = team === null ? null : racesOf(club, slug).map(([date]) => date).find(date => isDate(date) && stillToRace(club, slug, date, now)) ?? null;
+    const rhythm = rhythmDate(club, slug, now);
+    if (race === null || rhythm === null) {
+        return race ?? rhythm;
     }
-    return newest;
+    return race < rhythm ? race : rhythm;
 }
 
 
@@ -156,28 +149,32 @@ export function roleIn(sheet, athleteId) {
 }
 
 
-// A pinned event id matches only itself. Otherwise a learned id within ±4 h, or the window.
-export function matchesEvent(sheet, S, {E, eventId}) {
-    if (sheet.pinnedEventId != null) {
-        return eventId === sheet.pinnedEventId;
+// A race's pinned event id (its event link) matches only itself. Otherwise its learned id within
+// ±4 h, or the window.
+export function matchesEvent(race, S, {E, eventId}) {
+    if (race.pinnedEventId != null) {
+        return eventId === race.pinnedEventId;
     }
-    return (sheet.eventId != null && sheet.eventId === eventId && Math.abs(S - E) <= LEARNED_MS) ||
+    return (race.eventId != null && race.eventId === eventId && Math.abs(S - E) <= LEARNED_MS) ||
         (E - MATCH_BEFORE_MS <= S && S <= E + MATCH_AFTER_MS);
 }
 
 
-// Each team's live sheet that has a planned start and is not used up.
+// Every race's live version that has a planned start and is not used up (races spec §3), team by
+// team, each team's races by date: [{slug, id, sheet, S, race}].
 export function servable(club, now) {
     const out = [];
-    for (const [slug, team] of Object.entries(club.teams)) {
-        const id = team.live;
-        if (typeof id !== 'string' || !Object.hasOwn(club.sheets, id)) {
-            continue;
-        }
-        const sheet = club.sheets[id];
-        const S = plannedStart(club, sheet);
-        if (S !== null && !usedUp(S, now)) {
-            out.push({slug, id, sheet, S});
+    for (const slug of Object.keys(club.teams)) {
+        for (const [, race] of racesOf(club, slug)) {
+            const id = race.live;
+            if (typeof id !== 'string' || !Object.hasOwn(club.sheets, id)) {
+                continue;
+            }
+            const sheet = club.sheets[id];
+            const S = plannedStart(club, sheet);
+            if (S !== null && !usedUp(S, now)) {
+                out.push({slug, id, sheet, S, race});
+            }
         }
     }
     return out;
@@ -232,7 +229,7 @@ function winner(listings) {
 
 
 // The one sheet a rider gets from this club, or null: the date first, then precedence, then
-// (in an event) the winner must match the event.
+// (in an event) the winner's race must match the event. {slug, id, sheet, S, role, race}.
 export function pickForRider(club, athleteId, {now, E = null, eventId = null}) {
     const listings = [];
     for (const c of servable(club, now)) {
@@ -243,16 +240,16 @@ export function pickForRider(club, athleteId, {now, E = null, eventId = null}) {
     }
     const inEvent = E !== null;
     const date = inEvent ?
-        closestDate(listings.filter(c => matchesEvent(c.sheet, c.S, {E, eventId})), E) :
+        closestDate(listings.filter(c => matchesEvent(c.race, c.S, {E, eventId})), E) :
         earliestDate(listings);
     if (date === null) {
         return null;
     }
     const w = winner(listings.filter(c => c.sheet.date === date));
-    if (inEvent && !matchesEvent(w.sheet, w.S, {E, eventId})) {
+    if (inEvent && !matchesEvent(w.race, w.S, {E, eventId})) {
         return null;
     }
-    return {slug: w.slug, id: w.id, sheet: w.sheet, S: w.S, role: w.role};
+    return {slug: w.slug, id: w.id, sheet: w.sheet, S: w.S, role: w.role, race: w.race};
 }
 
 
@@ -320,15 +317,14 @@ export function effects(before, after, date, now) {
 }
 
 
-// The newest version of each of the team's plans, unless the live pointer names it, when it lists a
-// rider whose pick on that version's date is another team. Only versions with at least one such
-// rider are in the map. (Written out here: plans.mjs imports this module.)
+// The newest version of each of the team's plans, unless its race's live pointer names it, when it
+// lists a rider whose pick on that version's date is another team. Only versions with at least one
+// such rider are in the map. (Written out here: plans.mjs imports this module.)
 export function outdated(club, slug, now) {
     const out = new Map();
     if (!Object.hasOwn(club.teams, slug)) {
         return out;
     }
-    const live = club.teams[slug].live;
     const newest = new Map();
     for (const [id, sheet] of Object.entries(club.sheets)) {
         if (sheet.team !== slug) {
@@ -341,7 +337,7 @@ export function outdated(club, slug, now) {
     }
     const byDate = new Map();
     for (const [id, sheet] of newest.values()) {
-        if (id === live) {
+        if (id === raceOf(club, slug, sheet.date)?.live) {
             continue;
         }
         if (!byDate.has(sheet.date)) {

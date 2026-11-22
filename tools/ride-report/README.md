@@ -67,14 +67,37 @@ left out of checks 2, 3 and 4. The gap check needs no such rule: finish mode tur
    differs from the live one, the recording lacks riders the live engine saw, except with
    `--plan-all` where another plan was live: there the replay runs a different plan and is not
    comparable with live (the report says so). A run of ticks naming a puller ends at a hole of more
-   than 3 s between ticks.
+   than 3 s between ticks. Chaos phases (since 0.3.4: the team does not ride the plan's order and
+   the countdown goes silent): live from `det.order.chaos` (or `det.reason` `chaos`; `det.view`
+   still says `rest`/`next` there), in the replay from the engine's order state; each with its
+   start, end and what ended it (3 changes in plan order, a new plan, finish mode, the end of the
+   race). A climb in chaos does not end a phase. The seconds in chaos are judged like normal running
+   (the info window shows the real puller) and counted apart. Recordings before 0.3.4 have no live
+   phases; the replay still finds them.
 4. **Countdown to my pull** (`shown.act`): jumps ≥ 3 s per step, my recovery phases (my pull's end
-   to my next start) against the plan's sum as the engine counts it (the others' pulls plus 10 s for
-   each of them but the rider directly before me; riders > 100 m away left out, by their last row
+   to my next start) against the plan's sum by the fixed rule up to 0.3.4-beta.4 (since beta.5 the
+   engine counts the team's learned turn time instead; the fixed rule: the others' pulls plus 10 s for
+   each of them with a plan up to 40 s, 5 s above, the rider directly before me at plan only; riders > 100 m away left out, by their last row
    when they have none then; a rider never recorded counts) and the clock 3 s after
    my pull ended, the prediction error 240/120/60/30/10 s before my real start, READY lead, and
    when "pull" showed (the start of the "pull" display running at my real start, no limit
-   backwards; else the first one within a minute after it).
+   backwards; else the first one within a minute after it). In chaos the windows show the dim "≠"
+   instead of a countdown: silent, no error. The same numbers once more with the seconds the current
+   engine is silent in (the replay's chaos) counted as silent, for recordings that still showed a
+   countdown there: jumps and the median absolute error over all looks, as shown → with chaos silent.
+   **Against T0** (the countdown's 0 since 0.3.4-beta.5: the moment the rider before me eases off,
+   not my own start; user, 21 Nov 2026): T0 = the ease-off of the rider who pulled right before my
+   turn by the engine's 85 % rule (`easeOffAt`: the last second whose median of 3 of his fresh power
+   is at least 85 % of his average from 5 s into the stint, plus 1 s), else his stint's end; only
+   when that stint ended at most 15 s before my start. My first turn has no row. The error at
+   240/120/60/30/10 s before T0 (a look at or before my previous turn's end has no value), the
+   READY lead before T0, and from 5 min after the roll-off the summary: median per look, signed and
+   absolute median over all looks, the share late by more than 3 s at 10 s, the READY median. The
+   **shadow** (`det.cdOld`, recorded since beta.5) is the fixed rule's countdown recorded beside the
+   shown one; the report runs it through the windows' clock smoothing (`clock.mjs`, READY at 10 s or
+   less) wherever the window showed a countdown (not in chaos) and gives the same numbers, so the
+   learned and the fixed countdown can be compared on one ride. A recording without `det.cdOld`
+   has no shadow. The same measurement as the validation of 21 Nov 2026, on the recorder's view.
 5. **Gaps**: real gaps (smoothed ≥ 10 m, 15 m on a hill, for ≥ 5 s); warnings as shown
    (`det.gap`) and as the current engine gives them (replay), timed against the raw gap's 8 m,
    judged by what followed (important: the raw gap reached 10 m within 15 s; stable: it moved no
@@ -93,15 +116,19 @@ left out of checks 2, 3 and 4. The gap check needs no such rule: finish mode tur
 8. **Countdown from every rider's view** (simulation): every plan rider with at least 5 pulls as
    "me", on the pulls of check 2 (a swap turn of mine is one pull), the clock computed each second
    with the old countdown model (to 0.3.0-beta.3: plan + 10 s for each rider between the puller and
-   me, the puller at plan) and the engine's (`expectedPullS`: every rider plan + 10 s, the puller
-   too, the rider directly before me at plan). Present are the riders who pulled between my last two
-   pulls (before that the whole plan), as the live chain would have them. Per rider and in total:
+   me, the puller at plan) and the fixed one up to 0.3.4-beta.4 (`expectedPullS`: every rider plan + 10 s
+   for plans up to 40 s, + 5 s above, the puller too, the rider directly before me at plan; since
+   beta.5 the engine counts the team's learned turn time instead, which this simulation does not
+   model; check 4's shadow and its errors against T0 compare the two). Present are the riders
+   who pulled between my last two pulls (before that the whole plan), as the live chain would have them. Per rider and in total:
    the error 180/120/60/30/10 s before each real start (a look before my previous pull's end has no
    value), the median of the absolute errors over −180…−30 s, how often the clock 10 s before
    said more than 3 s later than the real start, and the small downward jumps (−12…−3 s against the
    time passed). Judged from 5 min after the roll-off, or from when the last plan rider has rows
    (17 Nov with `--plan-all`: #1 and #2 only from +18 min), the race's first pull left out. Not what
-   any window showed: no puller detection, presence grace or pauses. Reference:
+   any window showed: no puller detection, presence grace or pauses. The seconds the current
+   engine is in chaos in the replay (the recorder's engine) have no value in any view, for both
+   models. Reference:
    `docs/countdown-sim/team-clock.mjs` (same numbers per rider without swap turns and with its
    start).
 

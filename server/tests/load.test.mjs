@@ -159,7 +159,9 @@ test('startup load test: MAX_CIRCLES clubs at full caps', t => {
         });`;
         const out = JSON.parse(execFileSync(process.execPath, ['--expose-gc', '-e', code], {encoding: 'utf8', timeout: 120000}));
         assert.equal(out.clubs, MAX_CIRCLES_DEFAULT);
-        assert.equal(out.listed, MAX_CIRCLES_DEFAULT);
+        // the first rider of each club's first team rides in all its MAX_PLANS races, and each race
+        // has its own live plan (races spec §1): one listing per race
+        assert.equal(out.listed, MAX_CIRCLES_DEFAULT * MAX_PLANS);
         const mb = v => (v / 1048576).toFixed(1);
         t.diagnostic(`load test: ${MAX_CIRCLES_DEFAULT} clubs of ${mb(bytes)} MB each, RSS ${mb(out.rss)} MB, heap ${mb(out.heap)} MB, ` +
             `a sweep with nothing to delete ${out.sweepMs.toFixed(0)} ms`);

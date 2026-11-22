@@ -1,9 +1,9 @@
-// The club settings /manage/settings (spec §5.2 "Club section", §5.4): the club's name, zone and
-// the race day of its weekly teams, who gets the plans (open, or private with the rider code),
-// sign-in (the masked address with Change e-mail, a new club link), Remove a rider; then the
-// "Records" band: the recordings per rider file with the quota, grouped by team and the session's
-// local day, the activity (the newest entries, the rest folded), and Delete club. The page never
-// reloads itself. A new rider code, Make private, Remove a rider and (with a race within 7 days)
+// The club settings /manage/settings (spec §5.2 "Club section", §5.4): the club's name and zone
+// (races spec §4c: every weekly team has its own race day) and the unit of the pull targets (team
+// cockpit spec §7), who gets the plans (open, or private with the rider code), sign-in (the masked
+// address with Change e-mail, a new club link), Remove a rider; then the "Records" band: the recordings per rider file with the quota, grouped by team
+// and the session's local day, the activity (the newest entries, the rest folded), and Delete
+// club. The page never reloads itself. A new rider code, Make private, Remove a rider and (with a race within 7 days)
 // another zone ask first in their place (UI panel wave 2), and the server asks without the script.
 // Also the rider code page, the answer of /manage/code that shows the code once. Pure: it
 // reads the club and the recordings it is given, and the clock is passed in. Every value goes
@@ -13,7 +13,6 @@ import {captainPage, th, flashBlock, hidden, postForm, armForm, sevLine, placeNa
 import {ic} from './icons.mjs';
 import {atLabel, nameOf, raceWithin} from './team-view.mjs';
 import {isPrivate} from './club.mjs';
-import {teamWeekday} from './select.mjs';
 import {formatRiderCode} from './ids.mjs';
 import {localDay, localHHMM} from './time.mjs';
 import {zoneSelect} from './web.mjs';
@@ -24,25 +23,35 @@ const MB = 1024 * 1024;
 const LOG_SHOWN = 6;
 // The log entries with words of their own (T['log-' + what]); any other shows its raw `what`.
 const LOG_WORDS = new Set([
-    'upload', 'live', 'delete', 'unpin', 'undo', 'back', 'discard', 'team-add', 'team-rename', 'team-start', 'race-start', 'team-kind', 'team-delete',
+    'upload', 'live', 'delete', 'unpin', 'undo', 'back', 'discard', 'team-add', 'team-rename', 'team-start', 'race-start', 'race-link', 'race-link-dropped',
+    'race-link-newer-dropped', 'race-move', 'plan-rename', 'team-kind', 'team-delete',
     'push-link',
-    'club-rename', 'club-tz', 'club-weekday',
+    'club-rename', 'club-tz', 'club-weekday', 'unit',
     'rider-remove', 'code-on', 'code-new', 'code-off', 'link-opened', 'admin-link', 'address-changed', 'club-restored', 'club-deleted',
 ]);
 const SETTINGS_PATH = '/manage/settings';
 
 
-// The club's name, zone and weekday. Another zone while a race of the club is within 7 days asks
-// first in its place (S11; the server asks too).
+// "Targets in" W/kg or watts (team cockpit spec §7): the unit of the captain pages' rider tables.
+function unitFields(club) {
+    const unit = club.targetUnit === 'watts' ? 'watts' : 'wkg';
+    const choice = value => `<label class="choice"><input type="radio" name="unit" value="${value}"${unit === value ? ' checked' : ''}>`
+        + `<span><strong>${esc(t(`set-unit-${value}`))}</strong></span></label>`;
+    return `<fieldset class="choices"><legend>${esc(t('set-unit'))}</legend>
+        ${choice('wkg')}
+        ${choice('watts')}
+      </fieldset>`;
+}
+
+
+// The club's name, zone and target unit. Another zone while a race of the club is within 7 days asks first in
+// its place (S11; the server asks too). Old 'club-weekday' log entries keep their words (LOG_WORDS).
 function clubCard(club, cfg, typed, now) {
-    const day = teamWeekday(club, null);
-    const days = [1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}"${n === day ? ' selected' : ''}>${esc(t(`weekday-${n}`))}</option>`);
     const fields = `
       <label class="field">${esc(t('name-label'))}<input name="name" value="${esc(typed?.name ?? club.name)}" maxlength="60" required autocomplete="off"></label>
       <label class="field">${esc(t('register-tz-label'))} <span class="hint">${esc(t('cs-tz-hint'))}</span>
         ${zoneSelect(cfg, club.tz, club.tz)}</label>
-      <label class="field">${esc(t('cs-weekday'))}
-        <select name="weekday">${days.join('')}</select></label>
+      ${unitFields(club)}
       `;
     const form = raceWithin(club, null, now)
         ? armForm('/manage/club', {}, {key: 'tz', body: fields, button: t('manage-club-save'), cls: 'btn primary', formCls: 'stack',
@@ -186,7 +195,9 @@ function logItem(club, e, now) {
     const label = e.label ?? '';
     // setStart logs an empty label when the start time was cleared
     const cleared = e.what === 'team-start' && label === '';
-    const words = cleared ? t('log-team-start-cleared') : LOG_WORDS.has(e.what) ? t(`log-${e.what}`, {label}) : String(e.what);
+    // the unit's entry names it as the settings do ('W/kg', 'Watts')
+    const unit = e.what === 'unit' ? t(label === 'watts' ? 'set-unit-watts' : 'set-unit-wkg') : null;
+    const words = cleared ? t('log-team-start-cleared') : LOG_WORDS.has(e.what) ? t(`log-${e.what}`, {label, unit}) : String(e.what);
     const team = e.team ? th('log-team', {team: `<span class="team">${esc(nameOf(club, e.team))}</span>`}) : '';
     return `<li><time>${esc(Number.isFinite(at) ? atLabel(at, now, club.tz) : '')}</time><span>${team}${esc(words)}</span></li>`;
 }

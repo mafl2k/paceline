@@ -36,30 +36,36 @@
 import {findMe} from './engine/plan.mjs';
 import {MAX_AGE_MS, LEASE_STALE_MS, planIds, selfEntry, planRidersPresent, initialRecState,
         recStep, makeTick, detPlanOnly, leaseStep, selfSubgroupId, eventSummary, eventLogStep, initialGate, gateStep,
-        gateEv, isTtt}
+        gateEv, isTtt, leaseHeld}
     from './engine/recording.mjs';
 import {BAR_RANGE_PCT, GREEN_PCT, AMBER_PCT, DRAFT_N, selfLive, draftMean, dashKind, wheelOf, placeOf,
         pushPower as pushHist, initialRotation, rotationStep, rotationStatus as statusOf, carryRotation,
         alignedPositions,
-        wheelToFollow, plannedWheel, captainNext, rotationTable, tableShown, powerBar}
+        wheelToFollow, plannedWheel, captainNext, rotationTable, tableShown, powerBar, lineIds, teamDet}
     from './engine/rotation.mjs';
+import {orderOutIds} from './engine/order.mjs';
 import {routeProfile, routeHills, hillAt, initialAlign, alignStep} from './engine/terrain.mjs';
 import {GAP_FINISHERS, initialGaps, gapStep, gapView, cutBehind} from './engine/gaps.mjs';
 import {initialCue, cueStep, cueView, dropWheel, linePlace, freshIds} from './engine/wheelcue.mjs';
 import {initialClock, clockStep, deltaText} from './engine/clock.mjs';
-import {ALIVE_PREFIX, aliveKey, parseAlive, aliveModes, staleKeys, aliveDue} from './engine/presence.mjs';
+import {ALIVE_PREFIX, aliveKey, parseAlive, aliveModes, restClockShown, restShows, staleKeys, aliveDue}
+    from './engine/presence.mjs';
 import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, initialMarker, markerStep, markerPower, actionModel,
         pullOnlyModel, penModel, riderTarget, barTarget, pickWeight,
-        shownModel}
+        shownModel, fieldsGapBand, fieldsShown, restClockOf, restTakes, restShowsOf, actionPhase, phaseStep,
+        restHandBack, demoBadge, vanishes,
+        fieldSlots, recoveryFields, smooth5, labelParts, planParts, PART_MARK}
     from './engine/display.mjs';
-import {serverBase, pollDue, pollEvery, pollLeaseStep, checkUrl, checkHeaders, inEventOf, rollStep, choosePlan,
-        lockAtRollOff, lockAfterClubs, lockFor, serverDecision, chooseForLock, pendingFor, recordEntry, entryUpdate,
-        answerHint, choiceStatus, dropsAtEventBegin, eventOverStatus, serverRuns, eventChange}
+import {serverBase, pollDue, pollEvery, retryAfterOf, backoffStep, pollLeaseStep, checkUrl, checkHeaders, inEventOf,
+        rollStep, choosePlan, lockAtRollOff, lockAfterClubs, lockFor, serverDecision, chooseForLock, pendingFor,
+        recordEntry, entryUpdate, answerHint, choiceStatus, dropsAtEventBegin, eventOverStatus, serverRuns,
+        eventChange, missedStep}
     from './engine/planserver.mjs';
 import {joinedIds, sameJoined, sameCodes, codesToSend, applyAnswer, answerClubs, markHinted} from './engine/clubs.mjs';
 import {activeEntry, fileActive, fileEnded, endFilePlan, endsAtGateClose} from './engine/library.mjs';
 import {activePlan, initFlush, schedFlush, onLibraryChange, readPrefs, writePrefs, onPrefsChange,
-        readLibrary, writeLibrary, readLock, writeLock, readPending, writePending, onKeyChange,
+        readLibrary, writeLibrary, readLock, writeLock, readPending, writePending, readEventSeen, writeEventSeen,
+        onKeyChange,
         LEASE_KEY, REC_STATE_KEY, POLL_LEASE_KEY, PENDING_KEY} from './store.mjs';
 import {readClubs, writeClubs, onClubsChange, initClubs} from './clubs.mjs';
 import {logUploadSinceFix, demoOn} from './engine/prefs.mjs';
@@ -94,6 +100,8 @@ let mode = 'info';         // 'info' | 'action' | 'rest'
 let plan = null;           // active plan or null
 let ids = new Set();       // plan rider + bench ids (strings)
 let riderIds = new Set();  // plan rider ids only: the bench takes no part in the rotation
+let planServerOn = null;   // plan server on/off the plan was loaded for (an ended file plan counts
+                           // only with it off)
 let planSig = null;        // sig of the loaded plan; a new plan keeps the front tracking when the
                            // puller is still a rider
 let detFailed = false;     // detOf threw once (logged once; those ticks record det: null)
@@ -114,6 +122,7 @@ let rideGate = initialGate();  // the plan server's event gate: TTT only with tt
 let roll = null;           // roll-off tracking (rollStep) in the current event
 let evKey = null;          // the event the plan server step is in (inEventOf key), null outside
 let planFromEvent = false; // the active plan came from (or was confirmed by) this event's answer
+let missGoneAt = null;     // this window's first fresh step without an event (missedGoneAt, W1)
 let joinedSeen = null;     // the ticked clubs as last read (ids joined with ','), to see a change
 let info = {joined: 0, club: null, hint: null};    // for the Info plan line (refreshInfo)
 let uploading = false;     // a recording upload (sweep) is under way in this window
@@ -196,7 +205,8 @@ function leaseFresh(lease, now) {
 function loadPlan() {
     let res = null;
     try {
-        res = activePlan();
+        planServerOn = prefs.serverOn;
+        res = activePlan({serverOn: planServerOn});
     } catch(e) {
         console.error('Paceline: loading the plan failed, continuing without one', e);
     }
@@ -371,11 +381,11 @@ function cueWheel(now) {
 }
 
 
-// The riders with my group for the cue: seen in my chain within CUE_FRESH_MS, the puller, not cut off
-// behind an open gap behind me.
+// The riders with my group for the cue: seen in my chain within CUE_FRESH_MS and in the line (not
+// sitting out, order.mjs), the puller, not cut off behind an open gap behind me.
 function cueGroupIds(now) {
     const cut = cutBehind(gaps, selfId);
-    return [...freshIds(rot.seen, now), rot.front.puller].filter(id => id != null && !cut.has(id));
+    return [...lineIds(freshIds(rot.seen, now), rot.order), rot.front.puller].filter(id => id != null && !cut.has(id));
 }
 
 
@@ -391,11 +401,12 @@ function myWheel(view) {
 }
 
 
-// The riders with my group: in my chain (with the presence grace), the puller, not cut off behind an
-// open gap behind me.
+// The riders with my group: in my chain (with the presence grace) and in the line, the puller, not cut
+// off behind an open gap behind me. A rider sitting out (skipped at the front, order.mjs; 20 Nov
+// 2026) is in the group but out of the rotation, so he is not the wheel I drop in behind.
 function groupIds() {
     const cut = cutBehind(gaps, selfId);
-    return [...rot.present, rot.front.puller].filter(id => id != null && !cut.has(id));
+    return [...lineIds(rot.present, rot.order), rot.front.puller].filter(id => id != null && !cut.has(id));
 }
 
 
@@ -703,12 +714,16 @@ function windowModel(view, reason, now) {
         return {...pen, watts: ok ? watts : null, marker: bar ? {...bar, zone: null} : null};
     }
     // The countdown as shown (clock.mjs): the rotation's clock with its corrections absorbed, or
-    // snapped and explained on the line under it (expert panel, 18 Nov 2026).
-    const resting = view && !view.mine && Number.isFinite(view.toMyPullS);
+    // snapped and explained on the line under it (expert panel, 18 Nov 2026). Its riders are the
+    // line (present, not sitting out), so a rider who goes out explains a snap like one who left.
+    // In chaos (20 Nov 2026) there is no countdown: the clock starts over when the order holds again.
+    const chaos = reason === 'chaos';
+    const resting = !chaos && view && !view.mine && Number.isFinite(view.toMyPullS);
     restClk = clockStep(restClk, {now, trueS: resting ? view.toMyPullS : null, standing: !!view?.standing,
-                                  present: resting ? (rot.present || []).filter(id => id !== selfId) : null});
+                                  present: resting ? lineIds(rot.present, rot.order).filter(id => id !== selfId) : null});
     const shown = resting ? {...view, toMyPullS: Math.floor(restClk.shownS)} : view;
-    const m = actionModel(shown, meanW, marker.zone, {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit)});
+    const m = actionModel(shown, meanW, marker.zone,
+                          {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit), chaos});
     return m.kind === 'rest' ? {...m, correction: restClk.label, fadeAt: restClk.fadeAt} : m;
 }
 
@@ -758,6 +773,11 @@ function detOf(now) {
         gap: gapNow(),    // the gap warning: {kind, id, m, s, n, mine, behind, level, closing} or null
         shadowEarly: stepOut.shadowEarly,
         shadowEnd06: stepOut.shadowEnd06,
+        // Does the team ride the plan's order (order.mjs, 20 Nov 2026): chaos, riders sitting out.
+        order: {chaos: !!rot.order?.chaos, out: orderOutIds(rot.order)},
+        // The learned turn and hand-over time (te) and the countdown of the old fixed rule (cdOld),
+        // 21 Nov 2026 (design 2026-11-21-paceline-beta5 §3): to compare both after the next TTT.
+        ...teamDet(rot, {now, plan, selfId, view}),
     };
 }
 
@@ -947,8 +967,10 @@ function eventBegins(key, now) {
 
 // The event is over (the gate closed): no lock, no pending answer, the hint was shown, no status
 // that only meant this race, and a file plan loaded by the time the event was last seen (`seenAt`)
-// ends; one loaded later (the gate closed late, after a gap in the data) stays.
+// ends; one loaded later (the gate closed late, after a gap in the data) stays. The event last seen
+// goes too: it has ended (W1).
 function eventOver(now, seenAt) {
+    writeEventSeen(null);
     writeLock(null);
     const pend = readPending();
     if (pend?.hint) {
@@ -1006,6 +1028,12 @@ function retarget(rec, target) {
 }
 
 
+// Plan-server failures in a row and the server's Retry-After (W8): pollEvery doubles the wait with
+// each failure, pollDue waits for retryAt. This window's own, it starts over with the poll lease,
+// and at a new event, server URL or club codes (backoffStep, M-7).
+let backoff = {fails: 0, retryAt: null, scope: null};
+
+
 // The poll lease owner's step (spec §7.1-§7.5): event begin and end, roll-off and lock, the pen
 // rule while several clubs' plans fit, and the check when due. Never in the demo, never with the
 // plan server off.
@@ -1015,6 +1043,16 @@ function serverTick(now) {
     // mid-race never ends the ride, a rider who is gone ends it.
     const summary = gateEv(list, eventOf(list, now), {gate: rideGate, now});
     const ev = inEventOf(summary, {tttOnly: prefs.tttOnly});
+    // An event this window did not see end (W1): its poll owner closed (or Sauce quit) within the
+    // grace after the finish. The next poll owner ends it once it sees another event, or after its
+    // own EVENT_GRACE_MS without one (missedStep), never while still asking Sauce (no data of mine,
+    // or a lookup that found nothing yet).
+    const seen = readEventSeen();
+    const missed = missedStep(missGoneAt, {seen, summary, ev, evKey, now});
+    missGoneAt = missed.goneAt;
+    if (missed.over) {
+        eventOver(now, seen.at);
+    }
     const wasOpen = rideGate.open;
     const lastSeen = rideGate.seenAt;    // the old event's, before this step sees a new one
     rideGate = gateStep(rideGate, {now, ev: summary, any: !prefs.tttOnly});
@@ -1027,6 +1065,9 @@ function serverTick(now) {
     }
     if (change.begin) {
         eventBegins(ev.key, now);
+    }
+    if (rideGate.open && ev && rideGate.seenAt === now) {
+        writeEventSeen({key: ev.key, at: now});    // the event as last seen, for the next poll owner (W1)
     }
     if (ev) {
         const time = selfEntry(list)?.state?.time;
@@ -1049,8 +1090,14 @@ function serverTick(now) {
         }
     }
     const p = readPrefs();
+    if (ev) {
+        backoff = backoffStep(backoff, {url: p.serverUrl, codes: codesToSend(readClubs(serverBase(p.serverUrl))),
+                                        eventKey: ev.key});
+    }
     if (!ev || selfId === null || polling || !clubsReady ||
-        !pollDue(p.serverCheckedAt, now, pollEvery({inEvent: true, hasPlan: planFromEvent, error: p.serverError}))) {
+        !pollDue(p.serverCheckedAt, now,
+                 pollEvery({inEvent: true, hasPlan: planFromEvent, error: p.serverError, fails: backoff.fails}),
+                 backoff.retryAt)) {
         return;
     }
     if (!serverBase(p.serverUrl)) {
@@ -1082,6 +1129,8 @@ function serverStep(now) {
         roll = null;
         evKey = null;
         planFromEvent = false;
+        missGoneAt = null;
+        backoff = {fails: 0, retryAt: null, scope: null};
     }
 }
 
@@ -1127,6 +1176,11 @@ async function checkServer(ev, p, now) {
         error = 'invalid';
     }
     if (error) {
+        // Audit fixes, 20 Nov 2026, W8: back off. The page reads Retry-After only where the server
+        // lets it (cross-origin in Sauce it reads null: the server exposes no headers), the doubling
+        // in pollEvery covers the rest.
+        backoff = {...backoff, fails: backoff.fails + 1,
+                   retryAt: retryAfterOf(res?.headers?.get('Retry-After') ?? null, Date.now())};
         setPrefs({serverError: error});
         return;
     }
@@ -1137,6 +1191,7 @@ async function checkServer(ev, p, now) {
 // An in-event answer: clubs first (lost update, auto-join), then the status, the pending answer
 // and the plan (spec §7.2-§7.5).
 function onAnswer(answer, req, now) {
+    backoff = {...backoff, fails: 0, retryAt: null};    // an answer: the server is back (W8)
     const fresh = readClubs(req.base);
     if (!sameJoined(fresh, req.clubs) || !sameCodes(fresh, req.clubs)) {
         // Ticked or coded while the request ran: keep the clubs part, drop the plans, ask again.
@@ -1353,14 +1408,18 @@ function renderRotation(now) {
     }
     // Next (for the captain, who calls who follows, how hard and how long): the full pull line;
     // dim when it is the plan's guess (before the start, climb, alone, no data), not the live one.
+    // In chaos a dim "Order ≠ plan" instead of a guess (20 Nov 2026); the Front line below still
+    // shows the real puller and his clock.
     const cn = captainNext({plan, view, reason, pullerId: rot.front.puller});
-    if (cn) {
+    if (cn?.chaos) {
+        textLine(nextEl, S.orderOffPlan, true);
+    } else if (cn) {
         const nx = cn.rider;
         riderLine(nextEl, nx, nx.id === selfId ? S.frontYou : nx.name, pullOf(nx));
     } else {
         textLine(nextEl, S.noRotation, true);
     }
-    nextEl.classList.toggle('pl-planned', !!cn && cn.planned);
+    nextEl.classList.toggle('pl-planned', !!cn?.planned);
     if (reason === 'finish' || reason === 'climb' || reason === 'descent') {
         textLine(frontEl, reason === 'finish' ? S.finishOff : reason === 'climb' ? S.climbPaused : S.descentPaused,
                  false);
@@ -1381,34 +1440,60 @@ function hhmm(ms) {
 
 // "Rollers fast · plan RE5CFQ" (with the club when two or more are ticked); without a plan "Plan
 // opens 19:00 · Rollers fast", the hint for an unticked club, or the prompt to load one.
+// As {cut, keep, tail} (display.mjs planParts): only the label and the club may be cut, never
+// " · plan RE5CFQ". whole: the hint, which fitInfo keeps whole (its instruction must show).
 function planLine() {
     if (plan) {
         return info.joined >= 2 && info.club ?
-            fmt('planLineClub', {label: plan.team, sig: plan.sig, club: info.club}) :
-            fmt('planLine', {label: plan.team, sig: plan.sig});
+            planParts('planLineClub', {label: plan.team, sig: plan.sig, club: info.club}) :
+            planParts('planLine', {label: plan.team, sig: plan.sig});
     }
+    const text = cut => ({cut, keep: '', tail: ''});
     if (prefs.serverOn && Number.isFinite(prefs.serverOpensAt)) {
-        return fmt('opensLine', {time: hhmm(prefs.serverOpensAt), label: prefs.serverOpensLabel ?? ''});
+        return text(fmt('opensLine', {time: hhmm(prefs.serverOpensAt), label: prefs.serverOpensLabel ?? ''}));
     }
     if (prefs.serverOn && info.hint) {
-        return fmt('hintLine', {club: info.hint.name});
+        return {...text(fmt('hintLine', {club: info.hint.name})), whole: true};
     }
-    return S.noPlanLine;
+    return text(S.noPlanLine);
+}
+
+
+function setPlanLine({cut, keep, tail, whole = false}) {
+    const el = $('#pl-line-plan');
+    setText(el.querySelector('.pl-plan-cut'), cut);
+    setText(el.querySelector('.pl-plan-keep'), keep);
+    setText(el.querySelector('.pl-plan-tail'), tail);
+    el.classList.toggle('pl-plan-whole', whole);
+}
+
+
+// Makes the window invisible (or not): html.pl-vanish drops a solid background, body.transparent-bg
+// makes Sauce paint the body fully transparent. Returns the flag. The class is added only when the
+// window changes into the vanished state (an edge), so Sauce's own 3 s "find this window"
+// highlight, which removes it, is not undone by the next render; while the window shows it is
+// removed on every render (it undoes Sauce's late re-add).
+let vanished = false;
+function applyVanish(on) {
+    document.documentElement.classList.toggle('pl-vanish', on);
+    if (!on) {
+        document.body.classList.remove('transparent-bg');
+    } else if (!vanished) {
+        document.body.classList.add('transparent-bg');
+    }
+    vanished = on;
+    return on;
 }
 
 
 function renderInfo(now) {
     document.documentElement.classList.toggle('pl-show-next', prefs.showNext);
     document.documentElement.classList.toggle('pl-table-front', tableFront());
-    // Outside a TTT event only one quiet line, so a placed window can still be found.
-    const quiet = muted();
-    document.documentElement.classList.toggle('pl-muted', quiet);
-    if (quiet) {
-        setText($('#pl-line-muted'), S.mutedLine);
-        fitInfo();
+    // Outside a TTT event the window is invisible (nothing, not even its background).
+    if (applyVanish(vanishes({mode, quiet: muted()}))) {
         return;
     }
-    setText($('#pl-line-plan'), planLine());
+    setPlanLine(planLine());
     // Without a self id the you-line says "waiting for Zwift" (even with no plan) and the
     // recorder line is hidden, since nothing records then.
     const you = $('#pl-line-you');
@@ -1460,16 +1545,19 @@ let tableSig = null;    // the plan the table's rows were made for
 
 
 // One row per plan rider: "#3 ■ Name  60s @ 4.4", the same cells as the lines above. Made again
-// when the plan changes.
+// when the plan changes. The captain table (tableFront) has one more row: the slot for the
+// "Order ≠ plan" row in chaos (20 Nov 2026), kept empty at the bottom otherwise, so the table
+// never changes its height when chaos starts or ends (fixed slots).
 function tableRows() {
     const table = $('#pl-table');
-    const sig = plan ? plan.sig + ':' + plan.riders.length : null;
+    const n = plan ? plan.riders.length + (tableFront() ? 1 : 0) : 0;
+    const sig = plan ? plan.sig + ':' + n : null;
     if (sig === tableSig) {
         return table.children;
     }
     tableSig = sig;
     const cells = $('#pl-line-front').children;
-    table.replaceChildren(...(plan ? plan.riders : []).map(() => {
+    table.replaceChildren(...Array.from({length: n}, () => {
         const row = document.createElement('div');
         row.className = 'pl-line pl-rot pl-trow';
         for (const cell of cells) {
@@ -1488,7 +1576,10 @@ function tableRows() {
 // captain mode with its table option (tableShown; user, 13 Nov 2026). Then its first row is the
 // front (bold, his time left, or ▲ / ▼ / – while the rotation pauses) and the next rider with the
 // group is set apart from the rest below him; no labels, the place says it. Riders dropped from
-// the group are last, dim, below a thin line (user, 14 Nov 2026).
+// the group are last, dim, below a thin line (user, 14 Nov 2026); riders sitting out (skipped at
+// the front, order.mjs) with them, in normal running too, so the table and the Next line agree.
+// In chaos (20 Nov 2026, spec 2026-11-20-paceline-chaos-counter section 7): the real puller on
+// top, a dim "Order ≠ plan" in the Next row, the other riders dim in plan order below it.
 function renderTable(now) {
     const table = $('#pl-table');
     const {view, reason} = rotationStatus(now);
@@ -1498,20 +1589,33 @@ function renderTable(now) {
         return;
     }
     const started = pullerId != null && reason !== 'still';
-    const rows = rotationTable(plan, {pullerId, presentIds: started ? rot.present : null});
+    const rows = rotationTable(plan, {pullerId, presentIds: started ? rot.present : null,
+                                      outIds: orderOutIds(rot.order)});
     const els = tableRows();
     const front = tableFront();
-    const nextAt = front ? rows.findIndex((row, i) => i > 0 && row.present) : -1;
-    const droppedAt = rows.findIndex(row => !row.present);    // they come last, set apart below
-    rows.forEach((row, i) => {
+    const offPlan = front && reason === 'chaos' && rows.length > 0;
+    const text = {text: S.orderOffPlan};
+    const slots = offPlan ? [rows[0], text, ...rows.slice(1)] : front ? [...rows, {...text, slot: true}] : rows;
+    const nextAt = offPlan ? 1 : front ? slots.findIndex((row, i) => i > 0 && row.rider && row.present) : -1;
+    const droppedAt = slots.findIndex(row => row.rider && !row.present);    // they come last, set apart below
+    slots.forEach((row, i) => {
         const el = els[i];
         const c = cellsOf(el);
-        el.classList.toggle('pl-me', row.rider.id === selfId);
-        el.classList.toggle('pl-pulling', row.pulling);
-        el.classList.toggle('pl-absent', !row.present);
         el.classList.toggle('pl-gap-after', i === nextAt && i + 1 !== droppedAt);
         el.classList.toggle('pl-dropped-first', i === droppedAt && i > 0);
         el.classList.toggle('pl-top', front && (i === 0 || i === nextAt));    // the two to call out, larger
+        el.classList.toggle('pl-trow-slot', !!row.slot);    // the empty slot keeps its height (CSS)
+        if (!row.rider) {
+            el.classList.remove('pl-me', 'pl-pulling', 'pl-absent', 'pl-offplan');
+            textLine(el, row.text, true);
+            return;
+        }
+        el.classList.remove('pl-text');
+        c.name.classList.remove('pl-dim');
+        el.classList.toggle('pl-me', row.rider.id === selfId);
+        el.classList.toggle('pl-pulling', row.pulling);
+        el.classList.toggle('pl-absent', !row.present);
+        el.classList.toggle('pl-offplan', offPlan && i > 1 && row.present);
         setText(c.label, '');    // the place says it (user, 13 Nov 2026)
         setText(c.num, fmt('place', {n: row.number}));
         paint(c.sw, row.rider.color);
@@ -1536,24 +1640,22 @@ function renderTable(now) {
 const FIT_BASE_PX = 20;
 const FIT_MIN_PX = 11;
 const FIT_MAX_PX = 72;
-const FIT_MUTED_PX = 14;
+const FIT_HINT_MIN_PX = 8;    // the hint's line alone, when it is too long at FIT_MIN_PX
 let fitKey = null;
 
 
 function fitInfo() {
     const box = $('#pl-box');
     const table = $('#pl-table');
-    const key = [innerWidth, innerHeight, plan ? plan.sig : '', prefs.showNext, tableFront(), table.hidden, muted(),
+    const key = [innerWidth, innerHeight, plan ? plan.sig : '', prefs.showNext, tableFront(), table.hidden,
                  prefs.targetUnit, $('#pl-line-plan').textContent, $('#pl-line-you').textContent].join('|');
     // Also when the content no longer fits (a font loaded late, a longer text than measured).
     if (key === fitKey && box.scrollHeight <= box.clientHeight + 1) {
         return;
     }
     fitKey = key;
-    if (muted()) {
-        box.style.fontSize = `${FIT_MUTED_PX}px`;    // the quiet line stays small
-        return;
-    }
+    const planEl = $('#pl-line-plan');
+    planEl.style.fontSize = '';
     box.style.fontSize = `${FIT_BASE_PX}px`;
     const cs = getComputedStyle(box);
     const availW = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -1583,24 +1685,43 @@ function fitInfo() {
     for (const p of probes) {
         p.remove();
     }
+    // The hint (another club has a plan for me) shows whole (final review, 20 Nov 2026): when it is
+    // still too long at the smallest text, only its own line gets smaller.
+    if (planEl.classList.contains('pl-plan-whole')) {
+        const need = naturalWidth(planEl);
+        if (need > availW) {
+            const planPx = parseFloat(getComputedStyle(planEl).fontSize);
+            planEl.style.fontSize = `${Math.max(FIT_HINT_MIN_PX, Math.floor(planPx * availW / need * 10) / 10)}px`;
+        }
+    }
+}
+
+
+// The width a line's content needs.
+function naturalWidth(el) {
+    const old = el.style.width;
+    el.style.width = 'max-content';
+    const w = el.getBoundingClientRect().width;
+    el.style.width = old;
+    return w;
 }
 
 
 // The widest line and the height of the content at the box's current font size.
 function contentSize(box, probes) {
-    // The width the line's content needs.
-    const lineW = el => {
-        const old = el.style.width;
-        el.style.width = 'max-content';
-        const w = el.getBoundingClientRect().width;
-        el.style.width = old;
-        return w;
-    };
-    // The lines outside the grid (plan line), and the grid at its natural width (all its rows,
-    // the probes included, share the columns).
+    const shown = el => !el.hidden && getComputedStyle(el).display !== 'none';
+    // The lines outside the grid, and the grid at its natural width (all its rows, the probes
+    // included, share the columns). Of the plan line only " · plan CODE" counts, with room for the
+    // "…" of the label before it (user, 20 Nov 2026: the label is cut instead of keeping every
+    // line small; final review: the code never is); the hint counts whole. All of it counts for
+    // the height below.
+    const planEl = $('#pl-line-plan');
+    const keep = planEl.querySelector('.pl-plan-keep');
     const lines = [...box.children].filter(el => el.classList.contains('pl-line') && el.id !== 'pl-line-rec' &&
-        !el.hidden && getComputedStyle(el).display !== 'none');
-    const w = Math.max(1, ...lines.map(lineW), lineW($('#pl-grid')));
+        el !== planEl && shown(el));
+    const planW = !shown(planEl) ? 0 : planEl.classList.contains('pl-plan-whole') ? naturalWidth(planEl) :
+        keep.textContent ? keep.getBoundingClientRect().width + parseFloat(getComputedStyle(keep).fontSize) : 0;
+    const w = Math.max(1, planW, ...lines.map(naturalWidth), naturalWidth($('#pl-grid')));
     const {height, justifyContent} = box.style;
     box.style.height = 'auto';
     box.style.justifyContent = 'flex-start';
@@ -1661,25 +1782,50 @@ function show(el, on) {
 
 // The action window: one element that keeps its size; only its content changes. Resting: the
 // countdown and my place (or the dash). READY (the last WARN_S before my pull, also the start
-// rider in the pen) and the pull: target, my power now and the time, the power bar below.
+// rider in the pen) and the pull: target, my power now and the time, the power bar below. While I
+// rest with a Rest window open (it has the countdown) and the option on, the recovery fields; in
+// chaos (20 Nov 2026) always, with or without a Rest window (which shows "≠"), the default fields
+// (my power now in the middle) when the option is off (display.mjs fieldsShown). While I would show
+// a countdown, a Rest window has it only once it shows it (audit fixes, 20 Nov 2026, W2:
+// display.mjs restTakes, its sign of life's clock), or once it shows what I showed a moment ago
+// (I-1: restHandBack, no flash of the countdown at the end of my pull or a dash); for a dash an
+// open one is enough, as before.
 function renderAction(now) {
-    show($('#pl-demo-badge'), demoKind === 'pref');
     const {view, reason} = rotationStatus(now);
     let m = windowModel(view, reason, now);
     const me = myRider(view);
+    const quiet = muted();
     if (mode === 'rest') {
-        // The Rest window shows only the rest. During my pull it disappears completely, background
-        // included, and from READY on (the last WARN_S before my pull, and the start rider in the
-        // pen) too while an Action window is open, which takes over (user, 13 Nov 2026); without
-        // one it shows READY itself.
-        const ready = m.kind === 'rest' && (m.next || m.timeS === 0);
-        const vanish = m.kind === 'pull' || (ready && windowOpen('action', now));
-        document.documentElement.classList.toggle('pl-vanish', vanish);
-        document.body.classList.toggle('transparent-bg', vanish);
+        // The Rest window shows only the rest: it disappears completely, background included, outside
+        // a TTT and during my pull and from READY on while an Action window is open (vanishes).
+        const vanish = applyVanish(vanishes({mode, quiet, model: m, actionOpen: windowOpen('action', now, aliveEntries())}));
+        show($('#pl-demo-badge'), demoBadge({demo: demoKind === 'pref', vanish}));    // W12
         renderRestRow(vanish ? {kind: 'blank'} : m, reason);
+        // Tell the Action windows at once whether this window shows the countdown (W2), and what it
+        // shows (I-1: the hand-back).
+        const shown = restClockOf({vanish, model: m});
+        const shows = restShowsOf({vanish: vanish && !quiet, model: m});
+        if (shown !== restShown || shows !== restShowing) {
+            restShown = shown;
+            restShowing = shows;
+            aliveStep(now, true);
+        }
         return;
     }
-    if (windowOpen('rest', now)) {
+    // The Action window vanishes outside a TTT only (its content is blank there anyway).
+    show($('#pl-demo-badge'), demoBadge({demo: demoKind === 'pref', vanish: applyVanish(quiet)}));
+    const alive = aliveEntries();    // parsed once per render
+    actPhase = phaseStep(actPhase, {phase: actionPhase(m), now});
+    const handBack = restHandBack({shows: restShows(alive, {now, selfId: ME}), phase: actPhase, now});
+    const restOpen = restTakes({restOpen: windowOpen('rest', now, alive), restShown: restClockOpen(now, alive),
+                                handBack, model: m});
+    if (fieldsShown({recFields: winSettings.recFields, restOpen, model: m, reason})) {
+        renderFields(fieldSlots(winSettings), me, now, reason);
+        return;
+    }
+    if (reason === 'chaos') {
+        // My pull (the only thing left here in chaos) as always.
+    } else if (restOpen) {
         // An open Rest window has the countdown (user, 17 Nov 2026: no setting): here only my pull,
         // blank while resting, armed (READY) in its last seconds. Without an open Rest window the
         // countdown shows here, so it is never missing.
@@ -1698,16 +1844,22 @@ function renderAction(now) {
 // ---------- which Paceline windows are open (presence.mjs) ----------
 
 let aliveAt = null;    // when this window last wrote its sign of life
+let restShown = false;    // the Rest window shows its countdown or READY (its sign of life's clock, W2)
+let restShowing = null;    // ... what it shows (display.mjs restShowsOf, its sign of life's shows, I-1)
+let actPhase = null;    // the Action window's phase and when it changed (display.mjs phaseStep, I-1)
 
 
-// Writes this window's sign of life every ALIVE_REFRESH_MS and drops keys of windows long gone.
-function aliveStep(now) {
-    if (!aliveDue(aliveAt, now)) {
+// Writes this window's sign of life every ALIVE_REFRESH_MS (force: at once) and drops keys of
+// windows long gone. clock: a Rest window that shows its countdown (audit fixes, 20 Nov 2026, W2);
+// shows: what it shows (I-1).
+function aliveStep(now, force = false) {
+    if (!force && !aliveDue(aliveAt, now)) {
         return;
     }
     aliveAt = now;
     try {
-        localStorage.setItem(aliveKey(ME), JSON.stringify({mode, at: now}));
+        localStorage.setItem(aliveKey(ME), JSON.stringify({mode, at: now, clock: mode === 'rest' && restShown,
+                                                           shows: mode === 'rest' ? restShowing : null}));
         const entries = aliveEntries();
         for (const id of staleKeys(entries, now)) {
             localStorage.removeItem(aliveKey(id));
@@ -1735,8 +1887,14 @@ function aliveEntries() {
 
 
 // True while another window of this mode ('action' | 'rest' | 'info') is open.
-function windowOpen(m, now) {
-    return aliveModes(aliveEntries(), {now, selfId: ME}).has(m);
+function windowOpen(m, now, entries = aliveEntries()) {
+    return aliveModes(entries, {now, selfId: ME}).has(m);
+}
+
+
+// True while another Rest window shows its countdown (W2, presence.mjs restClockShown).
+function restClockOpen(now, entries = aliveEntries()) {
+    return restClockShown(entries, {now, selfId: ME});
 }
 
 
@@ -1762,10 +1920,13 @@ function renderRestRow(m, reason) {
     show(dash, m.kind === 'none' && dk !== 'none');
     if (m.kind === 'none') {
         setText(dash, dk === 'climb' ? S.dashClimb : dk === 'descent' ? S.dashDescent :
-            dk === 'unknown' ? S.dashUnknown : S.noRotation);
+            dk === 'chaos' ? S.dashChaos : dk === 'unknown' ? S.dashUnknown : S.noRotation);
         dash.classList.toggle('pl-warn', dk === 'unknown');
     }
     const resting = m.kind === 'rest';
+    // In chaos (20 Nov 2026) I still rest behind the dash: the gap line shows under it as under
+    // the countdown.
+    const chaosRest = dk === 'chaos';
     // The standing clock (expert panel, 13 Nov 2026): the number stays, dimmed with "≥" (my pull is at
     // least that far away), and under it how long the puller is over his plan, "+12". No blinking.
     const standing = resting && !!m.standing;
@@ -1774,7 +1935,7 @@ function renderRestRow(m, reason) {
     // it), then the standing clock, then someone else's gap (dim, the puller deals with it). A gap
     // that is closing comes after the standing clock too (green when mine or critical).
     // The early stage only when it is mine (close up before the draft is gone).
-    const g0 = resting ? gapNow() : null;
+    const g0 = resting || chaosRest ? gapNow() : null;
     const g = g0 && (g0.level === 'full' || g0.mine) ? g0 : null;
     const over = $('#pl-act-over');
     // Amber when I must close it or the team needs the riders cut off; someone with riders to spare
@@ -1800,17 +1961,23 @@ function renderRestRow(m, reason) {
     over.classList.toggle('pl-cue-swap', !!cueRider && cueId !== plannedWheel(plan, selfId)?.id);
     show($('#pl-act-overlbl'), !!cueRider);
     show($('#pl-act-oversw'), !!cueRider);
-    let cueText = '';
+    let cueParts = null;
     if (cueRider) {
         paint($('#pl-act-oversw'), cueRider.color);
         // Not the plan's wheel: his place in the line, not his plan number (user, 14 Nov 2026).
         const place = over.classList.contains('pl-cue-swap') ?
             linePlace(plan, {pullerId: rot.front.puller, selfId, id: cueId, presentIds: cue.kind === 'start' ? groupIds() : cueGroupIds(Date.now())}) : null;
-        cueText = firstName(cueId).toUpperCase() + (place ? ` ${fmt('place', {n: place})}` : '');
+        cueParts = {pre: '', cut: firstName(cueId).toUpperCase(), post: place ? ` ${fmt('place', {n: place})}` : ''};
     }
-    setText($('#pl-act-overtxt'), corr ? correctionText(corr) : cueRider ? cueText :
-        urgent && g.mine ? fmt('gapMe', {gap: gapAmount(g)}) : urgent ? gapInfo(g) :
-        standing ? `+${m.overS}` : g?.mine ? fmt('gapMe', {gap: gapAmount(g)}) : g ? gapInfo(g) : '');
+    setOverParts(corr ? correctionParts(corr) : cueRider ? cueParts :
+        urgent && g.mine ? labelParts('gapMe', {gap: gapAmount(g)}) : urgent ? gapParts(g) :
+        standing ? plainParts(`+${m.overS}`) : g?.mine ? labelParts('gapMe', {gap: gapAmount(g)}) : g ? gapParts(g) : plainParts(''));
+    // "Wheel" only as a whole word (final review, 20 Nov 2026): when the line is too long for it,
+    // the label goes, not shrunk to a clipped piece of the "W".
+    const lbl = $('#pl-act-overlbl');
+    if (cueRider && lbl.scrollWidth > lbl.clientWidth) {
+        show(lbl, false);
+    }
     show(clockEl, resting);
     show(placeEl, resting && m.place !== null);
     if (!resting) {
@@ -1840,17 +2007,43 @@ function renderRestRow(m, reason) {
 }
 
 
+// The status line under the clock stays on one line (user, 20 Nov 2026; the clock's size counts
+// on one line): one text in three parts, the middle one cut with "…" when the line is too long.
+// The middle part is the rider names, or without names the label before the gap ("Gap ahead",
+// display.mjs labelParts); the gap, the delta and the place are never cut.
+
+
+function setOverParts({pre, cut, post}) {
+    const el = $('#pl-act-overtxt');
+    setText(el.querySelector('.pl-over-pre'), pre);
+    setText(el.querySelector('.pl-over-cut'), cut);
+    setText(el.querySelector('.pl-over-post'), post);
+}
+
+
+function plainParts(text) {
+    return {pre: text, cut: '', post: ''};
+}
+
+
+// The text of `key` with vars[cutKey] as the part that may be cut.
+function cutParts(key, vars, cutKey) {
+    const [pre, post = ''] = fmt(key, {...vars, [cutKey]: PART_MARK}).split(PART_MARK);
+    return {pre, cut: String(vars[cutKey]), post};
+}
+
+
 // The clock's correction for the rest line: "DANA out −40s", "DANA back +1:10", "−25s", "READY off +36s".
-function correctionText(c) {
+function correctionParts(c) {
     const delta = deltaText(c.deltaS);
     if (c.kind === 'readyOff') {
-        return fmt('corrReadyOff', {delta});
+        return plainParts(fmt('corrReadyOff', {delta}));
     }
     if (c.kind === 'out' || c.kind === 'back') {
         const name = c.ids.map(id => firstName(id).toUpperCase()).join(', ');
-        return fmt(c.kind === 'out' ? 'corrOut' : 'corrBack', {name, delta});
+        return cutParts(c.kind === 'out' ? 'corrOut' : 'corrBack', {name, delta}, 'name');
     }
-    return delta;
+    return plainParts(delta);
 }
 
 
@@ -1864,11 +2057,11 @@ function fadeIn(el, from, ms) {
 
 
 // Someone else's gap, for the rest line: a rider by name, the gap ahead of me, or the riders behind.
-function gapInfo(g) {
+function gapParts(g) {
     if (g.kind === 'one') {
-        return fmt('gapInfoOne', {name: firstName(g.id), gap: gapAmount(g)});
+        return cutParts('gapInfoOne', {name: firstName(g.id), gap: gapAmount(g)}, 'name');
     }
-    return g.behind ? fmt('gapInfoAhead', {gap: gapAmount(g)}) : fmt('gapInfoSplit', {n: g.n, gap: gapAmount(g)});
+    return g.behind ? labelParts('gapInfoAhead', {gap: gapAmount(g)}) : labelParts('gapInfoSplit', {n: g.n, gap: gapAmount(g)});
 }
 
 
@@ -1876,7 +2069,9 @@ function gapInfo(g) {
 // when the team needs the riders cut off (always the group behind me), amber for a rider or a split
 // the team can spare; green while it is closing (user, 17 Nov 2026). Ease off; the target does not
 // count then.
-function renderGapBand(on, g) {
+// text: a strings key instead of the text by kind ('gapMe', or what restGapBand gives for the
+// recovery fields in chaos).
+function renderGapBand(on, g, text = null) {
     const band = $('#pl-act-gap');
     $('#pl-act-bar').classList.toggle('pl-gapped', on);
     show(band, on);
@@ -1887,7 +2082,8 @@ function renderGapBand(on, g) {
     band.dataset.critical = g.critical ? '1' : '';
     band.dataset.closing = g.closing ? '1' : '';
     const gap = gapAmount(g);
-    setText(band, g.kind === 'group' ? fmt('gapGroup', {gap}) :
+    setText(band, text === 'gapMe' || text === 'gapInfoAhead' ? fmt(text, {gap}) :
+        g.kind === 'group' ? fmt('gapGroup', {gap}) :
         g.kind === 'one' ? fmt('gapOne', {name: firstName(g.id).toUpperCase(), gap}) :
         fmt('gapSplit', {n: g.n, gap}));
 }
@@ -1906,6 +2102,10 @@ function renderGapEarly(on, g) {
 }
 
 
+// An empty cell that keeps its line height (a no-break space).
+const KEEP = '\u00a0';
+
+
 // READY and the pull: three fixed points with their units under them, and the bar. The target
 // left, my power now in the middle (the marker's value, in its zone colour once the pull has
 // settled; neutral in READY), the time right (READY, the pull's seconds, over time "−4" amber).
@@ -1917,7 +2117,7 @@ function renderTriple(m, me, now) {
     const hasTarget = m.watts !== null && m.watts !== undefined;
     // No weight at all: the target and the "now" number are both watts. With the plan's pull_wkg
     // the target is it (riderTarget), and the "now" number my live W/kg (live watts / weight).
-    const unit = weight === null ? 'W' : prefs.targetUnit;
+    const unit = nowUnit(weight);
     const target = hasTarget ? riderTarget(me, weight, unit) : null;
     const wnum = $('#pl-act-wnum');
     setText(wnum, target ? target.value : S.noRotation);
@@ -1931,6 +2131,7 @@ function renderTriple(m, me, now) {
     nowEl.dataset.zone = zone ?? '';
     nowEl.classList.toggle('pl-dim', nowText === null);
     const timeEl = $('#pl-act-time');
+    timeEl.classList.remove('pl-dim');    // a missing recovery field there before
     if (m.kind === 'armed') {
         setText(timeEl, S.ready);
         setText($('#pl-act-tunit'), '');
@@ -1955,6 +2156,49 @@ function renderTriple(m, me, now) {
     const mine = !!g && !g.behind;    // a gap behind me while I pull: mine to deal with
     renderGapBand(mine && g.level === 'full', g);
     renderGapEarly(mine && g.level === 'early', g);
+}
+
+
+// The unit of my power now: Paceline's target unit, watts without any weight (as the pull shows it).
+function nowUnit(weight) {
+    return weight === null ? 'W' : prefs.targetUnit;
+}
+
+
+// The recovery fields (spec 2026-11-20 big numbers section 3): the pull's three cells, each with
+// its unit line under it; an Off slot stays empty (KEEP keeps its line height, so nothing moves when
+// my pull starts), a missing value is the dim "–". The middle one is the pull's "now" cell, so it
+// follows "Smaller middle field". No bar; in chaos a gap the rest line would show goes into the
+// bar's place (fieldsGapBand), so an Action-only rider does not lose it; outside chaos the open
+// Rest window shows it.
+function renderFields(slots, me, now, reason) {
+    show($('#pl-act-row'), false);
+    show($('#pl-act-over'), false);
+    show($('#pl-act-tri'), true);
+    const entry = selfEntry(currentNearby(now));
+    const weight = pickWeight(liveWeight(), me?.weight);
+    const fields = recoveryFields(slots, entry?.state, {
+        unit: nowUnit(weight),
+        weight,
+        nowW: markerPower(marker, now),
+        smooth5W: smooth5({on: winSettings.recSmooth5, sauce: entry?.stats?.power?.smooth?.['5'], hist, now}),
+    });
+    const g = gapNow();
+    renderGapEarly(false, g);    // the middle unit line back to plain (it set "now" there)
+    const cells = [['#pl-act-wnum', '#pl-act-wunit'], ['#pl-act-now', '#pl-act-nowlbl'], ['#pl-act-time', '#pl-act-tunit']];
+    fields.forEach((f, i) => {
+        const num = $(cells[i][0]);
+        setText(num, f ? f.num ?? S.noRotation : KEEP);
+        num.classList.toggle('pl-dim', !!f && f.num === null);
+        num.classList.remove('pl-warn');
+        num.dataset.zone = '';    // no target in recovery: no colour
+        setText($(cells[i][1]), f ? f.unit : KEEP);
+    });
+    const bar = $('#pl-act-bar');
+    bar.classList.add('pl-off', 'pl-neutral');
+    show($('#pl-bar-marker'), false);
+    const b = fieldsGapBand(g, reason);
+    renderGapBand(!!b, g, b?.text);
 }
 
 
@@ -2047,6 +2291,35 @@ function applyBackground() {
 }
 
 
+// The Action window's own options (Sauce's per-window settings store, settings.html), each with its
+// default while unset (and in the plain-browser preview): "Smaller middle field" on, the recovery
+// fields off with the slots off / Power now / off, "5 s smoothed" off.
+const WIN_DEFAULTS = {midSmall: true, recFields: false, recLeft: 'off', recMid: 'now', recRight: 'off', recSmooth5: false};
+let winSettings = {...WIN_DEFAULTS};
+
+function readWinSettings() {
+    try {
+        const all = Common.settingsStore.get() || {};
+        const out = {...WIN_DEFAULTS};
+        for (const k of Object.keys(WIN_DEFAULTS)) {
+            if (all[k] !== undefined && all[k] !== null) {
+                out[k] = all[k];
+            }
+        }
+        winSettings = out;
+    } catch(e) {
+        console.warn('Paceline: could not read the window settings', e);
+    }
+}
+
+
+// "Smaller middle field" (Action window, per window; default on): off makes my power in the
+// middle as large as the two sides.
+function applyMidSmall() {
+    document.documentElement.classList.toggle('pl-mid-same', winSettings.midSmall === false);
+}
+
+
 function applyStrings() {
     document.title = mode === 'action' ? S.actionTitle : mode === 'rest' ? S.restTitle : S.overlayTitle;
     for (const el of document.querySelectorAll('[data-s]')) {
@@ -2086,9 +2359,16 @@ export async function main(m = 'info') {
         Common.initInteractionListeners();
         if (Common.settingsStore && Common.setBackground) {
             applyBackground();
+            readWinSettings();
+            applyMidSmall();
             Common.settingsStore.addEventListener('set', ev => {
                 if (ev.data && (ev.data.key == null || BG_KEYS.includes(ev.data.key))) {
                     applyBackground();
+                }
+                if (ev.data && (ev.data.key == null || Object.hasOwn(WIN_DEFAULTS, ev.data.key))) {
+                    readWinSettings();
+                    applyMidSmall();
+                    render();
                 }
             });
         }
@@ -2129,6 +2409,9 @@ export async function main(m = 'info') {
         prefs = p;
         refreshInfo();    // another server has another Clubs table
         syncDemo(Date.now());
+        if (prefs.serverOn !== planServerOn) {
+            loadPlan();    // an ended file plan counts only with the plan server off
+        }
         render();
     });
     if (Common) {
@@ -2140,10 +2423,16 @@ export async function main(m = 'info') {
             }
         }, {persistent: true});
     }
-    // Closing the window: its sign of life goes at once, so the others take over without waiting.
+    // Closing the window: its sign of life goes at once, so the others take over without waiting,
+    // and so do the recorder and poll leases it holds (W4: they no longer wait LEASE_STALE_MS).
     addEventListener('pagehide', () => {
         try {
             localStorage.removeItem(aliveKey(ME));
+            for (const key of [LEASE_KEY, POLL_LEASE_KEY]) {
+                if (leaseHeld(readJson(key), ME)) {
+                    localStorage.removeItem(key);
+                }
+            }
         } catch(e) {
             // ignore
         }

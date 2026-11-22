@@ -1,0 +1,848 @@
+{
+ "id": "k7f3q9x2m4",
+ "name": "Kettenfett RC",
+ "status": "active",
+ "email": "captain@example.org",
+ "tz": "Europe/Berlin",
+ "createdAt": "2026-11-01T10:00:00.000Z",
+ "confirmedAt": "2026-11-01T10:05:00.000Z",
+ "riderCode": null,
+ "tokens": [],
+ "teams": {
+  "rollers": {
+   "name": "Rollers",
+   "start": "19:30",
+   "live": "a00003",
+   "version": 6,
+   "changedAt": "2026-11-20T18:30:00.000Z",
+   "kind": "weekly",
+   "weekday": null,
+   "liveBefore": {
+    "id": "a00002",
+    "version": 4,
+    "at": "2026-11-20T18:10:00.000Z"
+   },
+   "types": [
+    "slow"
+   ]
+  },
+  "sprockets": {
+   "name": "Sprockets",
+   "start": "19:40",
+   "live": "a00008",
+   "version": 4,
+   "changedAt": "2026-11-20T19:10:00.000Z",
+   "kind": "weekly",
+   "weekday": 4,
+   "liveBefore": {
+    "id": "a00007",
+    "version": 4,
+    "at": "2026-11-20T19:10:00.000Z"
+   }
+  },
+  "cogs": {
+   "name": "Cogs",
+   "start": null,
+   "live": "a00009",
+   "version": 2,
+   "changedAt": "2026-11-20T19:20:00.000Z",
+   "kind": "weekly",
+   "weekday": null
+  },
+  "sunday-specials": {
+   "name": "Sunday Specials",
+   "start": null,
+   "live": "a00012",
+   "version": 5,
+   "changedAt": "2026-11-20T19:41:00.000Z",
+   "kind": "special",
+   "weekday": null,
+   "raceStarts": {
+    "2026-11-22": "18:00",
+    "2026-11-29": "20:15"
+   },
+   "types": [
+    "slow",
+    "fast"
+   ]
+  },
+  "oldies": {
+   "name": "Oldies",
+   "start": "17:00",
+   "live": "a00013",
+   "version": 3,
+   "changedAt": "2026-11-20T19:55:00.000Z",
+   "kind": "special",
+   "weekday": null
+  }
+ },
+ "sheets": {
+  "a00001": {
+   "team": "rollers",
+   "label": "Rollers",
+   "date": "2026-11-17",
+   "sig": "EDW3KT",
+   "json": {
+    "team": {
+     "name": "Rollers"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1002": {
+      "name": "Cleo",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1003": {
+      "name": "Dan",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-16T18:00:00.000Z",
+   "via": "file",
+   "eventId": 5110001,
+   "boundAt": "2026-11-17T18:10:00.000Z",
+   "pinnedEventId": null,
+   "plan": "a00001",
+   "n": 1,
+   "at": "2026-11-16T18:00:00.000Z",
+   "copyOf": null,
+   "jsonName": "rollers",
+   "type": null,
+   "recSig": "EDW3KT"
+  },
+  "a00002": {
+   "team": "rollers",
+   "label": "Rollers",
+   "date": "2026-11-24",
+   "sig": "EPWRV4",
+   "json": {
+    "team": {
+     "name": "Rollers"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1002": {
+      "name": "Cleo",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1003": {
+      "name": "Dan",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1004": {
+      "name": "Eva",
+      "order": 4,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T18:00:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00002",
+   "n": 1,
+   "at": "2026-11-20T18:00:00.000Z",
+   "copyOf": null,
+   "jsonName": "rollers",
+   "type": null,
+   "recSig": "EPWRV4"
+  },
+  "a00003": {
+   "team": "rollers",
+   "label": "Rollers",
+   "date": "2026-11-24",
+   "sig": "C5YFNZ",
+   "json": {
+    "team": {
+     "name": "Rollers"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1002": {
+      "name": "Cleo",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1003": {
+      "name": "Dan",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1005": {
+      "name": "Finn",
+      "order": 4,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T18:10:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00002",
+   "n": 2,
+   "at": "2026-11-20T18:10:00.000Z",
+   "copyOf": null,
+   "jsonName": "rollers",
+   "type": null,
+   "recSig": "C5YFNZ"
+  },
+  "a00004": {
+   "team": "rollers",
+   "label": "Rollers",
+   "date": "2026-11-24",
+   "sig": "SGSG9T",
+   "json": {
+    "team": {
+     "name": "Rollers"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1002": {
+      "name": "Cleo",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1003": {
+      "name": "Dan",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1006": {
+      "name": "Gus",
+      "order": 4,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T18:20:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00002",
+   "n": 3,
+   "at": "2026-11-20T18:20:00.000Z",
+   "copyOf": null,
+   "jsonName": "rollers",
+   "type": null,
+   "recSig": "SGSG9T"
+  },
+  "a00005": {
+   "team": "rollers",
+   "label": "Rollers · slow",
+   "date": "2026-11-24",
+   "sig": "2BWZPK",
+   "json": {
+    "team": {
+     "name": "Rollers slow"
+    },
+    "riders": {
+     "1002": {
+      "name": "Cleo",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1003": {
+      "name": "Dan",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1004": {
+      "name": "Eva",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {
+     "1001": {
+      "name": "Ben"
+     }
+    }
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T18:30:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5123456,
+   "plan": "a00005",
+   "n": 1,
+   "at": "2026-11-20T18:30:00.000Z",
+   "copyOf": null,
+   "jsonName": "rollersslow",
+   "type": "slow",
+   "recSig": "2BWZPK"
+  },
+  "a00006": {
+   "team": "sprockets",
+   "label": "Sprockets",
+   "date": "2026-11-26",
+   "sig": "HZ342Y",
+   "json": {
+    "team": {
+     "name": "Sprockets"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1007": {
+      "name": "Hanna",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1008": {
+      "name": "Ida",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:00:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5120001,
+   "plan": "a00006",
+   "n": 1,
+   "at": "2026-11-20T19:00:00.000Z",
+   "copyOf": null,
+   "jsonName": "sprockets",
+   "type": null,
+   "recSig": "HZ342Y"
+  },
+  "a00007": {
+   "team": "sprockets",
+   "label": "Sprockets",
+   "date": "2026-11-26",
+   "sig": "77EGMR",
+   "json": {
+    "team": {
+     "name": "Sprockets"
+    },
+    "riders": {
+     "1007": {
+      "name": "Hanna",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1008": {
+      "name": "Ida",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1009": {
+      "name": "Jo",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:05:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5120001,
+   "plan": "a00006",
+   "n": 2,
+   "at": "2026-11-20T19:05:00.000Z",
+   "copyOf": null,
+   "jsonName": "sprockets",
+   "type": null,
+   "recSig": "77EGMR"
+  },
+  "a00008": {
+   "team": "sprockets",
+   "label": "Sprockets",
+   "date": "2026-11-26",
+   "sig": "HZ342Y",
+   "json": {
+    "team": {
+     "name": "Sprockets"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1007": {
+      "name": "Hanna",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1008": {
+      "name": "Ida",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:00:00.000Z",
+   "via": "back",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5120001,
+   "plan": "a00006",
+   "n": 3,
+   "at": "2026-11-20T19:10:00.000Z",
+   "copyOf": 1,
+   "jsonName": "sprockets",
+   "type": null,
+   "recSig": "HZ342Y"
+  },
+  "a00009": {
+   "team": "cogs",
+   "label": "Cogs",
+   "date": "2026-11-24",
+   "sig": "8FP9BJ",
+   "json": {
+    "team": {
+     "name": "Cogs"
+    },
+    "riders": {
+     "1009": {
+      "name": "Jo",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:20:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00009",
+   "n": 1,
+   "at": "2026-11-20T19:20:00.000Z",
+   "copyOf": null,
+   "jsonName": "cogs",
+   "type": null,
+   "recSig": "8FP9BJ"
+  },
+  "a00010": {
+   "team": "sunday-specials",
+   "label": "Sunday Specials · fast",
+   "date": "2026-11-22",
+   "sig": "0W5JDR",
+   "json": {
+    "team": {
+     "name": "Specials"
+    },
+    "riders": {
+     "1004": {
+      "name": "Eva",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1005": {
+      "name": "Finn",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:30:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5130001,
+   "plan": "a00010",
+   "n": 1,
+   "at": "2026-11-20T19:30:00.000Z",
+   "copyOf": null,
+   "jsonName": "specials",
+   "type": "fast",
+   "recSig": "0W5JDR"
+  },
+  "a00011": {
+   "team": "sunday-specials",
+   "label": "Sunday Specials · slow",
+   "date": "2026-11-22",
+   "sig": "CVDD6H",
+   "json": {
+    "team": {
+     "name": "Specials B"
+    },
+    "riders": {
+     "1004": {
+      "name": "Eva",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1006": {
+      "name": "Gus",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:35:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": 5130002,
+   "plan": "a00011",
+   "n": 1,
+   "at": "2026-11-20T19:35:00.000Z",
+   "copyOf": null,
+   "jsonName": "specialsb",
+   "type": "slow",
+   "recSig": "CVDD6H"
+  },
+  "a00012": {
+   "team": "sunday-specials",
+   "label": "Sunday Specials",
+   "date": "2026-11-29",
+   "sig": "DXT02D",
+   "json": {
+    "team": {
+     "name": "Specials"
+    },
+    "riders": {
+     "1004": {
+      "name": "Eva",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1005": {
+      "name": "Finn",
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     },
+     "1006": {
+      "name": "Gus",
+      "order": 3,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:40:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00012",
+   "n": 1,
+   "at": "2026-11-20T19:40:00.000Z",
+   "copyOf": null,
+   "jsonName": "specials",
+   "type": null,
+   "recSig": "DXT02D"
+  },
+  "a00013": {
+   "team": "oldies",
+   "label": "Oldies",
+   "date": "2026-11-23",
+   "sig": "NF0H8X",
+   "json": {
+    "team": {
+     "name": "Oldies"
+    },
+    "riders": {
+     "1008": {
+      "name": "Ida",
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000",
+      "weight": 70
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "uploadedAt": "2026-11-20T19:50:00.000Z",
+   "via": "file",
+   "eventId": null,
+   "boundAt": null,
+   "pinnedEventId": null,
+   "plan": "a00013",
+   "n": 1,
+   "at": "2026-11-20T19:50:00.000Z",
+   "copyOf": null,
+   "jsonName": "oldies",
+   "type": null,
+   "recSig": "NF0H8X"
+  }
+ },
+ "log": [
+  {
+   "at": "2026-11-01T10:10:00.000Z",
+   "what": "team-add",
+   "team": "rollers",
+   "label": "Rollers"
+  },
+  {
+   "at": "2026-11-01T10:10:00.000Z",
+   "what": "team-add",
+   "team": "sprockets",
+   "label": "Sprockets"
+  },
+  {
+   "at": "2026-11-01T10:10:00.000Z",
+   "what": "team-add",
+   "team": "cogs",
+   "label": "Cogs"
+  },
+  {
+   "at": "2026-11-01T10:10:00.000Z",
+   "what": "team-add",
+   "team": "sunday-specials",
+   "label": "Sunday Specials"
+  },
+  {
+   "at": "2026-11-01T10:10:00.000Z",
+   "what": "team-add",
+   "team": "oldies",
+   "label": "Oldies"
+  },
+  {
+   "at": "2026-11-16T18:00:00.000Z",
+   "what": "upload",
+   "team": "rollers",
+   "label": "Rollers v1"
+  },
+  {
+   "at": "2026-11-20T18:00:00.000Z",
+   "what": "upload",
+   "team": "rollers",
+   "label": "Rollers v1"
+  },
+  {
+   "at": "2026-11-20T18:10:00.000Z",
+   "what": "upload",
+   "team": "rollers",
+   "label": "Rollers v2"
+  },
+  {
+   "at": "2026-11-20T18:20:00.000Z",
+   "what": "upload",
+   "team": "rollers",
+   "label": "Rollers v3"
+  },
+  {
+   "at": "2026-11-20T18:30:00.000Z",
+   "what": "upload",
+   "team": "rollers",
+   "label": "Rollers · slow v1"
+  },
+  {
+   "at": "2026-11-20T19:00:00.000Z",
+   "what": "upload",
+   "team": "sprockets",
+   "label": "Sprockets v1"
+  },
+  {
+   "at": "2026-11-20T19:05:00.000Z",
+   "what": "upload",
+   "team": "sprockets",
+   "label": "Sprockets v2"
+  },
+  {
+   "at": "2026-11-20T19:10:00.000Z",
+   "what": "back",
+   "team": "sprockets",
+   "label": "Sprockets v1 → v3"
+  },
+  {
+   "at": "2026-11-20T19:20:00.000Z",
+   "what": "upload",
+   "team": "cogs",
+   "label": "Cogs v1"
+  },
+  {
+   "at": "2026-11-20T19:30:00.000Z",
+   "what": "upload",
+   "team": "sunday-specials",
+   "label": "Sunday Specials · fast v1"
+  },
+  {
+   "at": "2026-11-20T19:35:00.000Z",
+   "what": "upload",
+   "team": "sunday-specials",
+   "label": "Sunday Specials · slow v1"
+  },
+  {
+   "at": "2026-11-20T19:40:00.000Z",
+   "what": "upload",
+   "team": "sunday-specials",
+   "label": "Sunday Specials v1"
+  },
+  {
+   "at": "2026-11-20T19:41:00.000Z",
+   "what": "live",
+   "team": "sunday-specials",
+   "label": "Sunday Specials"
+  },
+  {
+   "at": "2026-11-20T19:50:00.000Z",
+   "what": "upload",
+   "team": "oldies",
+   "label": "Oldies v1"
+  },
+  {
+   "at": "2026-11-20T19:55:00.000Z",
+   "what": "team-kind",
+   "team": "oldies",
+   "label": "special"
+  }
+ ],
+ "inbox": [
+  {
+   "id": "a00014",
+   "at": "2026-11-20T20:00:00.000Z",
+   "source": "receive",
+   "team": "rollers",
+   "forPlan": null,
+   "via": "zwiftgopher",
+   "json": {
+    "team": {
+     "name": "Rollers"
+    },
+    "riders": {
+     "1001": {
+      "name": "Ben",
+      "weight": 70,
+      "ftp": 250,
+      "order": 1,
+      "pull_duration": 60,
+      "color": "#ff0000"
+     },
+     "1002": {
+      "name": "Cleo",
+      "weight": 70,
+      "ftp": 250,
+      "order": 2,
+      "pull_duration": 60,
+      "color": "#ff0000"
+     }
+    },
+    "roster": {}
+   },
+   "text": null,
+   "warnings": [],
+   "warningsMore": 0
+  }
+ ],
+ "weekday": 2
+}

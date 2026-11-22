@@ -5,7 +5,7 @@
 // keeps raw files, so the record is turned back into the two files first (recordFiles).
 import {importFiles, PlanError} from './plan.mjs';
 import {addPlan, activeEntry, fileEnded} from './library.mjs';
-import {takeLease, isTtt} from './recording.mjs';
+import {takeLease, isTtt, EVENT_GRACE_MS} from './recording.mjs';
 import {CHANNEL} from '../version.mjs';
 
 export const RELEASE_SERVER_URL = 'https://ttt.mafl.net';
@@ -354,6 +354,78 @@ export function eventChange(prevKey, ev) {
 }
 
 
+// The event the poll owner last saw (paceline:event-seen:v1): {key, at}, key an inEventOf key and
+// at the gate's seenAt; anything else is null.
+export function normalizeEventSeen(raw) {
+    if (!raw || typeof raw !== 'object' || typeof raw.key !== 'string' || !raw.key || !Number.isFinite(raw.at)) {
+        return null;
+    }
+    return {key: raw.key, at: raw.at};
+}
+
+
+// A missed event end (audit fixes, 20 Nov 2026, W1; probe s8-fileplan: Sauce quit within
+// EVENT_GRACE_MS of the finish, so eventOver never ran and the file plan of race 1 still overrode
+// the club's server plan in race 2, 25 s in). The window that steps now did not see that event
+// (`seen`, kept by the poll owner) end: it is over once the rider is in another event, or after
+// EVENT_GRACE_MS without one. The grace counts from this window's own first fresh step without the
+// event (`goneAt`, missedGoneAt), like gateStep's goneAt, not from seen.at: a reload or Sauce
+// restart of 30 s or more and then a subgroup blip, which the gate tolerates, must not end the race.
+export function missedEventOver(seen, {ev, now, goneAt}) {
+    const s = normalizeEventSeen(seen);
+    if (!s) {
+        return false;
+    }
+    if (ev) {
+        return ev.key !== s.key;
+    }
+    return Number.isFinite(goneAt) && now - goneAt >= EVENT_GRACE_MS;
+}
+
+
+// Still asking Sauce for the missed rule: no data of mine (summary undefined, gateEv), or my
+// subgroup's lookup found nothing yet (found: false; eventOf asks again after EVENT_RETRY_MS). Review
+// fix round 1, 21 Nov 2026 (s8e/s8f): after a restart mid-race one failed getEventSubgroup kept
+// found: false for 30 s, counted as "no event", and race 77's file plan, lock and pending answer
+// ended about 32 s after the reopen while the rider was still in it.
+function missedAsking(summary) {
+    return summary === undefined || summary?.found === false;
+}
+
+
+// The `goneAt` for missedEventOver, one step at a time: the first step without an event (summary
+// null: no subgroup; or a found event inEventOf rejects), kept while none is there, null as soon as
+// one is. A step without data of mine keeps it as it was. A lookup that found nothing yet resets it
+// like an event (controller ruling, fix round 2, 21 Nov 2026): I still have a subgroup, so the race
+// may well run, and a blip, 30 s of failed lookups and a second blip must not end it at once.
+export function missedGoneAt(goneAt, {summary, ev, now}) {
+    if (summary === undefined) {
+        return goneAt;
+    }
+    if (ev || summary?.found === false) {
+        return null;
+    }
+    return Number.isFinite(goneAt) ? goneAt : now;
+}
+
+
+// serverTick's missed rule for one step: the next goneAt, and whether to run the missed eventOver
+// (with seen.at). Only for an event this window did not see itself (seen.key !== evKey; its own
+// gate ends that), and never while still asking Sauce.
+// A summary of the stored event that `ev` rejects (no TTT here under tttOnly) counts as that event
+// (final review, 21 Nov 2026, M-2; probe w1: a private TTT that is one only by its event's name,
+// window B's getEvent failed, so its summary was found but no TTT; B took the poll lease and ended
+// the race 30 s later, file plan, lock and pending answer for all windows). Same key: same race.
+export function missedStep(goneAt, {seen, summary, ev, evKey, now}) {
+    const s = normalizeEventSeen(seen);
+    const same = !ev && !!s && inEventOf(summary)?.key === s.key;
+    const at = same ? {key: s.key} : ev;
+    const next = missedGoneAt(goneAt, {summary, ev: at, now});
+    const over = !missedAsking(summary) && !!s && s.key !== evKey && missedEventOver(s, {ev: at, now, goneAt: next});
+    return {goneAt: next, over};
+}
+
+
 // What a new event deactivates: a server plan of another event, and a file plan that has ended
 // (at the last gate close, after 18 h, or a 0.2 entry): it no longer overrides the server, so the
 // pen and "Plan opens ..." show this event's plan.
@@ -427,14 +499,57 @@ export function serverRuns({act, demo, serverOn}) {
 
 
 // True when it is time to ask the server again (checkedAt: the last attempt by any window), every
-// `every` ms (POLL_MS, or POLL_FAST_MS when a plan is missing in the event).
-export function pollDue(checkedAt, now, every = POLL_MS) {
+// `every` ms (POLL_MS, or POLL_FAST_MS when a plan is missing in the event). Not before retryAt (the
+// server's Retry-After, retryAfterOf; null: none).
+export function pollDue(checkedAt, now, every = POLL_MS, retryAt = null) {
+    if (Number.isFinite(retryAt) && now < retryAt) {
+        return false;
+    }
     return !Number.isFinite(checkedAt) || now - checkedAt >= every || now < checkedAt;
 }
 
 
 // How often to ask: POLL_FAST_MS in the TTT event (inEvent) while there is no plan or the last
-// check failed (no answer, no plan for me on the server, ...), else POLL_MS.
-export function pollEvery({inEvent, hasPlan, error}) {
-    return inEvent && (!hasPlan || !!error) ? POLL_FAST_MS : POLL_MS;
+// check had no usable answer, else POLL_MS. A failing server (audit fixes, 20 Nov 2026, W8: a 429
+// or 5xx was asked again every 10 s, forever, probes/poll.mjs) is asked less often with each
+// failure in a row (fails): POLL_FAST_MS doubling (10, 20, 40, 60 s) up to POLL_MS. 'notfound'
+// (the server answered, no plan for me) stays at POLL_FAST_MS.
+export function pollEvery({inEvent, hasPlan, error, fails = 1}) {
+    if (!inEvent) {
+        return POLL_MS;
+    }
+    if (error === 'offline' || error === 'invalid' || error === 'http') {
+        return Math.min(POLL_MS, POLL_FAST_MS * 2 ** (Math.max(1, fails) - 1));
+    }
+    return !hasPlan || !!error ? POLL_FAST_MS : POLL_MS;
+}
+
+
+// The backoff {fails, retryAt, scope} (W8) for a check of `scope` ({url, codes, eventKey}: the server,
+// the club codes sent, the event): kept while that is the same, a fresh one when it changed (final
+// review, 21 Nov 2026, M-7: retryAt went only with an answer or the poll lease, so a readable
+// Retry-After of up to an hour would have silenced the check in the next race too, or after the rider
+// fixed the server URL or a club code). Not when the event is gone for a step: serverTick passes
+// only steps with an event.
+export function backoffStep(backoff, {url, codes, eventKey}) {
+    const scope = JSON.stringify([url ?? null, [...(codes || [])].sort(), eventKey ?? null]);
+    return backoff?.scope === scope ? backoff : {fails: 0, retryAt: null, scope};
+}
+
+
+// The longest Retry-After honoured: the server's own longest (server/api.mjs:132, one hour).
+export const RETRY_AFTER_MAX_MS = 3600000;
+
+
+// When the server wants to be asked again, from a Retry-After header value (seconds, or an HTTP
+// date), as a time in ms; null for no or an unusable value. Never later than now +
+// RETRY_AFTER_MAX_MS, a date in the past counts as now.
+export function retryAfterOf(value, now) {
+    let at = null;
+    if (typeof value === 'string' && /^\d+$/.test(value)) {
+        at = now + Number(value) * 1000;
+    } else if (typeof value === 'string' && value.endsWith(' GMT') && Number.isFinite(Date.parse(value))) {
+        at = Math.max(now, Date.parse(value));
+    }
+    return at === null ? null : Math.min(at, now + RETRY_AFTER_MAX_MS);
 }

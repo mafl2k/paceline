@@ -89,6 +89,36 @@ export const textOf = html => html.replace(/<[^>]*>/g, ' ').replace(/&#39;/g, '\
 export const count = (s, sub) => s.split(sub).length - 1;
 
 
+// The whole element that starts at the first match of `open` (e.g. '<details class="more">'),
+// nested elements of the same tag included; null without one.
+export function element(html, open, from = 0) {
+    const start = html.indexOf(open, from);
+    if (start < 0) {
+        return null;
+    }
+    const tag = /^<([a-z0-9]+)/.exec(open)[1];
+    const re = new RegExp(`<${tag}[\\s>]|</${tag}>`, 'g');
+    re.lastIndex = start + 1;
+    let depth = 1;
+    for (let m = re.exec(html); m; m = re.exec(html)) {
+        depth += m[0].startsWith('</') ? -1 : 1;
+        if (depth === 0) {
+            return html.slice(start, m.index + m[0].length);
+        }
+    }
+    return null;
+}
+
+// Every element that starts with `open`.
+export function elements(html, open) {
+    const out = [];
+    for (let at = html.indexOf(open); at >= 0; at = html.indexOf(open, at + 1)) {
+        out.push(element(html, open, at));
+    }
+    return out;
+}
+
+
 // The flash at the top of a page: {kind, text}, or null. The flash of a change of the live plan
 // carries its Undo (undoOf) after the text.
 export function flashOf(body) {
@@ -99,10 +129,16 @@ export function flashOf(body) {
 
 // The Undo of a page (UI panel wave 2, ui.mjs flashBlock): {text, form} of the first flash line that
 // carries one (the text of that line, the form's markup), or null: the flash itself (role status)
-// or the line of its own after a reload (no role).
+// or the line of its own after a reload (no role); else the team page live card's Undo in its action bar.
 export function undoOf(body) {
     const m = /<div class="flash ok undo"(?: role="status")?>[\s\S]*?<p>([^<]*)<\/p>(<form method="post" action="\/manage\/live\/undo">[^]*?<\/form>)<\/div>/.exec(body);
-    return m ? {text: textOf(m[1]).trim(), form: m[2]} : null;
+    if (m) {
+        return {text: textOf(m[1]).trim(), form: m[2]};
+    }
+    // the team page's live card offers it in its action bar after the flash of its switch is gone
+    // (team cockpit spec §5.3b): no line of its own, text null
+    const b = /<div class="cp-undo">(<form method="post" action="\/manage\/live\/undo">[^]*?<\/form>)<\/div>/.exec(body);
+    return b ? {text: null, form: b[1]} : null;
 }
 
 
@@ -160,41 +196,64 @@ export async function postUpload(srv, cookie, fields, {headers = {}, path: to = 
     return fetch(srv.base + p, {method: 'POST', redirect: 'manual', headers: h, body: fd});
 }
 
-// An upload through the intake: POST /manage/upload (expects 303 to the assign page), then Store
-// on the assign page (POST /manage/inbox/<id>) with `choices`: team (the upload's), as 'new', live
-// 'on', the team's version as base and drawn `<team>:<as>` (the page drawn for these choices) by
-// default; a choice set to undefined is not sent. {id, status, body} of the Store.
+// The entry id of the intake's answer: the Location /manage/team/<slug>?e=<id>#panel (the team page
+// with the entry picked).
+function entryOfLocation(location) {
+    const m = /^\/manage\/team\/[a-z0-9-]+\?e=([0-9a-hjkmnp-tv-z]{6})#panel$/.exec(location ?? '');
+    assert.ok(m, location);
+    return m[1];
+}
+
+
+// An upload through the intake: POST /manage/upload (expects 303 to the team page with the entry
+// picked), then Store from its form (POST /manage/inbox/<id>) with `choices`: team (the upload's),
+// as 'new', live 'on', the team's version as base and drawn `<team>:<as>` (the form drawn for these
+// choices) by default; a choice set to undefined is not sent. {id, status, body, location} of the
+// Store: after a 303 `body` is the page it leads to (fetched with the club cookie and the flash
+// cookie, so its panel's head shows the Store flash), else the Store's own answer.
 export async function storeUpload(srv, cookie, fields, choices = {}) {
     const res = await postUpload(srv, cookie, fields);
     const text = await res.text();
     assert.equal(res.status, 303, text);
-    const location = res.headers.get('location');
-    const m = /^\/manage\/inbox\/([0-9a-hjkmnp-tv-z]{6})$/.exec(location ?? '');
-    assert.ok(m, location);
+    const id = entryOfLocation(res.headers.get('location'));
     const team = Object.hasOwn(choices, 'team') ? choices.team : fields.team;
     const base = team && srv.store.get(CID).teams[team] ? VERSION_OF(srv, team) : '';
     const merged = {team, as: 'new', live: 'on', base, ...choices};
     const all = {drawn: `${merged.team ?? ''}:${merged.as ?? ''}`, ...merged};
     const sent = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
-    const stored = await post(srv, cookie, location, sent);
-    return {id: m[1], status: stored.status, body: stored.body};
+    return {id, ...await storePost(srv, cookie, id, sent)};
 }
 
-// storeUpload that must answer 200 (the result page): its body.
+// Store of entry `id` (POST /manage/inbox/<id>) with `fields` as the form posts them: {status, body,
+// location}. After a 303 `body` is the page it leads to (the team page with the stored version
+// picked, fetched with the club cookie and the flash cookie: its panel's head shows the Store flash),
+// else the Store's own answer (a refusal: the team page with the form as posted).
+export async function storePost(srv, cookie, id, fields) {
+    const stored = await post(srv, cookie, `/manage/inbox/${id}`, fields);
+    if (stored.status !== 303) {
+        return {status: stored.status, body: stored.body, location: null};
+    }
+    const location = stored.headers.get('location');
+    const pair = stored.headers.getSetCookie().map(c => c.split(';')[0]).find(c => c.startsWith('__Host-pl_flash='));
+    const got = await fetch(srv.base + location, {redirect: 'manual', headers: {cookie: pair ? `${cookie}; ${pair}` : cookie}});
+    assert.equal(got.status, 200, location);
+    return {status: 303, body: await got.text(), location};
+}
+
+// storeUpload that must answer 303 (to the team page with the stored version picked): the body of
+// the page it leads to.
 export async function storeOk(srv, cookie, fields, choices = {}) {
     const {status, body} = await storeUpload(srv, cookie, fields, choices);
-    assert.equal(status, 200, body);
+    assert.equal(status, 303, body);
     return body;
 }
 
-// POST /manage/upload as the upload page: 303 to the assign page; the entry id.
+// POST /manage/upload as the upload page: 303 to the team page with the entry picked; the entry id.
 export async function intake(srv, cookie, fields) {
     const res = await postUpload(srv, cookie, fields);
     const text = await res.text();
     assert.equal(res.status, 303, text);
-    const m = /^\/manage\/inbox\/([0-9a-hjkmnp-tv-z]{6})$/.exec(res.headers.get('location') ?? '');
-    assert.ok(m, res.headers.get('location'));
-    return m[1];
+    return entryOfLocation(res.headers.get('location'));
 }
 
 
@@ -235,4 +294,21 @@ export function armHas(form, action, fields, cls, yes) {
     return typeof form === 'string' && new RegExp(`^<form (?:class="[^"]*" )?method="post" action="${esc(action)}" data-arm[ >]`).test(form)
         && form.includes(`>${CLUB_FIELD}${fields}`) && !form.includes('<input type="hidden" name="confirm"')
         && new RegExp(`<p id="(arm-[^"]+)">[^]*<button class="${esc(cls)}" type="submit" name="confirm" value="1" aria-describedby="\\1" data-arm-yes>${esc(yes)}</button>`).test(form);
+}
+
+
+// The Store flash in the panel's head of the team page a Store led to (store-form.mjs resultBlock):
+// {kind, text, lines, links, all} (`lines` the texts of its result lines, `links` [href, text] of
+// its ways to the teams still to do, `all` the text and the lines as one string, as the result page
+// read); null without one.
+export function storeFlash(body) {
+    const panel = element(body, '<div id="panel"') ?? '';
+    const flash = flashOf(panel);
+    if (flash === null) {
+        return null;
+    }
+    const result = element(panel, '<div class="result" data-hold-reload>') ?? '';
+    const lines = [...result.matchAll(/<li class="[a-z]+"><svg[^>]*>[\s\S]*?<\/svg><span>([\s\S]*?)<\/span><\/li>/g)].map(m => textOf(m[1]).trim());
+    const links = [...result.matchAll(/<a class="btn secondary block" href="([^"]*)">([^<]*)<\/a>/g)].map(m => [m[1].replace(/&amp;/g, '&'), textOf(m[2]).trim()]);
+    return {...flash, lines, links, all: [flash.text, ...lines].join(' ')};
 }

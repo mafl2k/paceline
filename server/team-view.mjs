@@ -1,21 +1,23 @@
 // The team view (spec §5.4): one pure model of a team's state, drawn by the picker, the switcher,
-// the team page and the assign page. Order (by start time), the status line and the worst state
+// the team page; a view per race (raceView, races spec §4b: the team's own view
+// is its nearest race's, with every race ahead and the races that are over). Order (by start time), the status line and the worst state
 // (red: riders get nothing; amber: check; grey: before the gate; green: all riders have the plan),
 // the notes counted as "N to fix", each rider's state after the gate (none is recorded before it),
 // riders-only counts, an inbox entry's riders in words, the pull target in W/kg, the live version
-// with what it changed, Back and a newer version that is not live, one row per plan of this race in
-// a fixed order, Make live and Restore vN in words, and what a start time would do for a team
+// and a newer version that is not live, one row per plan of this race in a fixed order, Make live in
+// words, and what a start time would do for a team
 // without one. Pure: it reads the
 // club and the checks (store.seenOf) it is given, and the clock is passed in. Plain text: the pages
 // escape it.
 import {t, andList} from './pages.mjs';
-import {pullTarget, diffVersions, diffSummary, diffPeople} from './diff.mjs';
+import {pullTarget} from './diff.mjs';
 import {
-    servable, datePicks, effects, outdated, plannedStart, startOf, raceStart, raceStartAt, planOpen, nextRaceDate, stillToRace, usedUp,
+    servable, datePicks, effects, outdated, plannedStart, raceStart, raceStartAt, raceTime, planOpen, nextRaceDate, rhythmDate, raceOver, stillToRace, usedUp,
     PLAN_OPEN_MS, USED_UP_MS,
 } from './select.mjs';
-import {isUsed, backTo, ClubError, receivedFor, plannerName, isShare} from './club.mjs';
-import {planOfId, racePlans, previousVersion} from './plans.mjs';
+import {isUsed, receivedFor, plannerName, isShare} from './club.mjs';
+import {planOfId, plansOf, racePlans} from './plans.mjs';
+import {raceOf, racesOf, raceOfSheet} from './races.mjs';
 import {localHHMM, localLabel, localDate, localDay, zonedToUtc, isDate, addDays} from './time.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
 
@@ -35,10 +37,6 @@ export const REFRESH_AFTER_MS = 60 * MIN_MS;
 export const PEN_FROM_MS = 2 * HOUR_MS;
 // The pin mismatch counts checks up to S + 4 h (when the sheet is used up).
 export const PIN_UNTIL_MS = 4 * HOUR_MS;
-// A team without a live plan is red ("riders get nothing") only from this long before its next
-// race's S (UI panel, 19 Nov 2026): before that a weekly team in the days after its race is neutral,
-// "Next race Thu 26 Nov", so red keeps its meaning on race day.
-export const RED_BEFORE_MS = 2 * DAY_MIN * MIN_MS;
 
 export const SEV = {ok: 0, neutral: 1, warn: 2, err: 3};
 // The icon of a team whose worst state is not its status line's.
@@ -74,8 +72,8 @@ export function ridersLine(entry) {
     return riders.length === 1 ? t('tv-riders-line-one', {names}) : t('tv-riders-line', {n: riders.length, names});
 }
 
-// When a version was made (`at`), as the pages show it: a Back copy reads as the time of the Back,
-// not of the upload it copies (its uploadedAt, which stays the precedence time). Null without one.
+// When a version was made (`at`), as the pages show it: an old Restore copy reads as the time of the
+// Restore, not of the upload it copies (its uploadedAt, which stays the precedence time). Null without one.
 const madeLabel = (sheet, now, tz) => {
     const at = Date.parse(sheet.at);
     return Number.isFinite(at) ? atLabel(at, now, tz) : null;
@@ -105,20 +103,21 @@ export const teamOfCheck = (club, entry) => (typeof entry?.sheet === 'string' &&
 export const inPen = (club, slug, entry, S) => Boolean(entry?.inEvent) && teamOfCheck(club, entry) === slug
     && S !== null && atOf(entry) >= S - PEN_FROM_MS;
 
-// A pinned sheet's check in another event (F27): not "in pen", it counts for the pin mismatch.
-export const otherEvent = (entry, sheet) => sheet.pinnedEventId != null && entry.event != null && entry.event !== sheet.pinnedEventId;
-
+// A check in another event than the race's link (F27): not "in pen", it counts for the pin mismatch.
+// `race` is the race of the checked plan (races.mjs), or null.
+export const otherEvent = (entry, race) => race?.pinnedEventId != null && entry.event != null && entry.event !== race.pinnedEventId;
 
 // By start time, then by name, then slug; never by status. A weekly team's start time is the
-// team's; a special team's is that of its next race (liveAndStart, with `now`). Teams without one
-// last: weekly ones, then special ones.
+// team's; a special team's is that of its first race ahead (nextRaceDate, with `now`). Teams
+// without one last: weekly ones, then special ones.
 export function teamOrder(club, now) {
     const keyOf = slug => {
         const team = club.teams[slug];
         if (team.kind !== 'special') {
             return {group: team.start == null ? 1 : 0, time: team.start ?? ''};
         }
-        const {time} = liveAndStart(club, slug, now);
+        const date = nextRaceDate(club, slug, now);
+        const time = date === null || raceStartAt(club, slug, date) === null ? null : raceStart(club, slug, date);
         return {group: time === null ? 2 : 0, time: time ?? ''};
     };
     const keys = new Map(Object.keys(club.teams).map(s => [s, keyOf(s)]));
@@ -139,8 +138,8 @@ export function teamOrder(club, now) {
 
 
 // The teams the picker folds into "Other teams" (plan versions spec §9, decision 11): the special
-// teams with no live plan still to race and no stored plan dated from today to today + 14 days.
-// Weekly teams (any kind but 'special') never fold.
+// teams with no race still to race that has a live plan, and no stored plan dated from today to
+// today + 14 days. Weekly teams (any kind but 'special') never fold.
 export function foldedTeams(club, now) {
     const today = localDate(now, club.tz);
     const last = addDays(today, FOLD_DAYS);
@@ -149,8 +148,8 @@ export function foldedTeams(club, now) {
         if (team.kind !== 'special') {
             continue;
         }
-        const live = typeof team.live === 'string' && Object.hasOwn(club.sheets, team.live) ? club.sheets[team.live] : null;
-        const racing = live !== null && isDate(live.date) && stillToRace(club, slug, live.date, now);
+        const racing = racesOf(club, slug).some(([date, r]) => typeof r.live === 'string' && Object.hasOwn(club.sheets, r.live)
+            && isDate(date) && stillToRace(club, slug, date, now));
         const soon = Object.values(club.sheets).some(sh => sh.team === slug && isDate(sh.date) && sh.date >= today && sh.date <= last);
         if (!racing && !soon) {
             folded.add(slug);
@@ -191,55 +190,50 @@ export function atLabel(ms, now, tz) {
 }
 
 
-// The team's live plan, S and its start time 'HH:MM'. `live` is the servable live plan {slug, id,
-// sheet, S}; a live pointer without a start time (a weekly team without one, a special team's plan
-// stored by 0.3.0 without any) is `live` with S null unless it is used up; else null. S is the live
-// plan's, else the next race day's (raceStartAt: a weekly team's start time, a special team's plan
-// of that day), else null; `time` is S's start time, or null.
-// The date of the race the team's view is about: the live plan's when it is still to race; for a
-// special team without one, the earliest stored date still to race (review I1: nextRaceDate gives
-// the newest, the upload's default, so a far race would hide tonight's); else nextRaceDate.
-function viewRaceDate(club, slug, now) {
-    const team = club.teams[slug];
-    const live = typeof team.live === 'string' && Object.hasOwn(club.sheets, team.live) ? club.sheets[team.live] : null;
-    if (team.kind !== 'special' || (live !== null && isDate(live.date) && stillToRace(club, slug, live.date, now))) {
-        return nextRaceDate(club, slug, now);
-    }
-    let first = null;
-    for (const sheet of Object.values(club.sheets)) {
-        if (sheet.team === slug && isDate(sheet.date) && (first === null || sheet.date < first) && stillToRace(club, slug, sheet.date, now)) {
-            first = sheet.date;
+// The race dates of team `slug` (races spec §4): `ahead` the races still to race by date, the
+// nearest first; `over` the races that are over (raceOver: from S + 2 h), the newest first;
+// `regular` a weekly team's next rhythm date (rhythmDate) when it has no race ahead, else null. The
+// regular race day is no race of its own (spec §8, user 21 Nov 2026): only the default date of an
+// upload (nextRaceDate) and, without a race ahead, the team page's neutral "Next regular race".
+export function raceDates(club, slug, now) {
+    const ahead = [];
+    const over = [];
+    for (const [date] of racesOf(club, slug)) {
+        if (isDate(date)) {
+            (raceOver(club, slug, date, now) ? over : ahead).push(date);
         }
     }
-    return first;
+    return {ahead, over: over.reverse(), regular: ahead.length ? null : rhythmDate(club, slug, now)};
 }
 
 
-function liveAndStart(club, slug, now) {
-    const team = club.teams[slug];
-    const c = servable(club, now).find(x => x.slug === slug);
-    if (c) {
-        return {live: c, S: c.S, time: startOf(club, c.sheet)};
+// The live version of team `slug`'s race on `date` while it is not used up (isUsed: 4 h after S;
+// without a start time once the date has passed): {slug, id, sheet, S, race}, S null without a start
+// time (nothing is sent). Null without one.
+function raceLive(club, slug, date, now) {
+    const race = date === null ? null : raceOf(club, slug, date);
+    const id = race?.live;
+    if (typeof id !== 'string' || !Object.hasOwn(club.sheets, id)) {
+        return null;
     }
-    let live = null;
-    const id = team.live;
-    if (typeof id === 'string' && Object.hasOwn(club.sheets, id) && plannedStart(club, club.sheets[id]) === null
-        && !isUsed(club, club.sheets[id], now)) {
-        live = {slug, id, sheet: club.sheets[id], S: null};
-    }
-    const date = viewRaceDate(club, slug, now);
-    const S = date === null ? null : raceStartAt(club, slug, date);
-    return {live, S, time: S === null ? null : raceStart(club, slug, date)};
+    const sheet = club.sheets[id];
+    return isUsed(club, sheet, now) ? null : {slug, id, sheet, S: plannedStart(club, sheet), race};
 }
 
 
-// The smallest team S not yet used up (the club's next race), or null.
+// The smallest S not yet used up among every team's races (the club's next race): the races ahead
+// (a team without one: its regular race day, raceDates), and those over but still served (S + 2 h
+// to S + 4 h: only with a live plan, which riders still get); null without one.
 export function nextRaceAt(club, now) {
     let best = null;
     for (const slug of Object.keys(club.teams)) {
-        const {S} = liveAndStart(club, slug, now);
-        if (S !== null && now <= S + USED_UP_MS && (best === null || S < best)) {
-            best = S;
+        const {ahead, over, regular} = raceDates(club, slug, now);
+        const served = over.filter(date => raceLive(club, slug, date, now) !== null);
+        for (const date of [...ahead, ...(regular === null ? [] : [regular]), ...served]) {
+            const S = raceStartAt(club, slug, date);
+            if (S !== null && now <= S + USED_UP_MS && (best === null || S < best)) {
+                best = S;
+            }
         }
     }
     return best;
@@ -255,9 +249,11 @@ export function nextRace(club, now) {
 
 const riderStateOf = (kind, sev, text, time = null) => ({kind, sev, text, time});
 
-// One rider's state against the live sheet, the checks in this order. `versions` are the live
-// plan's versions ([id, sheet], by n): a code of one of them reads as its n.
-function riderState(club, slug, sheet, S, entry, versions) {
+// One rider's state against the live sheet, the checks in this order. `plans` are the plans of the
+// live version's race (plansOf; team cockpit spec §5.6): a code of a version of the live version's
+// own plan reads as its n (the highest such n), else a code of another plan's version names that
+// plan and n (the one stored last), else the code.
+function riderState(club, slug, sheet, S, entry, plans) {
     if (!entry) {
         // a private club records no check of a rider without the code (api.mjs): say it may be that
         // (UI panel, audit S12)
@@ -266,7 +262,7 @@ function riderState(club, slug, sheet, S, entry, versions) {
     const at = atOf(entry);
     const time = Number.isFinite(at) ? localHHMM(at, club.tz) : null;
     if (inPen(club, slug, entry, S)) {
-        if (otherEvent(entry, sheet)) {
+        if (otherEvent(entry, raceOfSheet(club, sheet))) {
             return riderStateOf('other-event', 'err', t('tv-state-other-event', {event: entry.event}), time);
         }
         return entry.sig === sheet.sig ? riderStateOf('has-in-event', 'ok', t('tv-state-has-in-event'))
@@ -280,11 +276,21 @@ function riderState(club, slug, sheet, S, entry, versions) {
         return riderStateOf('has', 'ok', t('tv-state-has'));
     }
     if (entry.sig) {
-        const older = versions.filter(([, v]) => v.sig === entry.sig).at(-1);
-        return riderStateOf('old-code', 'warn', older ? t('tv-state-old-version', {n: older[1].n, ln: sheet.n})
-            : t('tv-state-old-code', {sig: entry.sig}), time);
+        return riderStateOf('old-code', 'warn', oldCodeText(sheet, entry.sig, plans), time);
     }
     return riderStateOf('checked', 'neutral', t('tv-state-checked', {time: time ?? '–'}));
+}
+
+
+// The words of a code that is not the live sheet's (riderState).
+function oldCodeText(sheet, sig, plans) {
+    const own = plans.find(p => p.id === sheet.plan)?.versions.filter(([, v]) => v.sig === sig).at(-1);
+    if (own) {
+        return t('tv-state-old-version', {n: own[1].n, ln: sheet.n});
+    }
+    const others = plans.filter(p => p.id !== sheet.plan).flatMap(p => p.versions).filter(([, v]) => v.sig === sig);
+    const other = others.reduce((best, v) => (best === null || atOf(v[1]) > atOf(best[1]) ? v : best), null);
+    return other ? t('tv-state-old-plan', {label: other[1].label, n: other[1].n}) : t('tv-state-old-code', {sig});
 }
 
 
@@ -294,6 +300,7 @@ const isHas = state => state.kind === 'has' || state.kind === 'has-in-event';
 // Riders whose in-event check contradicts the live sheet's event link, one note per other event
 // (most riders first): in the pen window up to S + 4 h.
 function pinNotes(club, slug, {id, sheet, S}, listed, entryOf) {
+    const race = raceOfSheet(club, sheet);
     const byEvent = new Map();
     const atLink = [];
     for (const r of listed) {
@@ -302,13 +309,13 @@ function pinNotes(club, slug, {id, sheet, S}, listed, entryOf) {
         if (!e?.inEvent || teamOfCheck(club, e) !== slug || !(at >= S - PEN_FROM_MS && at <= S + PIN_UNTIL_MS)) {
             continue;
         }
-        if (otherEvent(e, sheet)) {
+        if (otherEvent(e, race)) {
             byEvent.set(e.event, [...(byEvent.get(e.event) ?? []), r.name]);
-        } else if (e.event === sheet.pinnedEventId) {
+        } else if (e.event === race?.pinnedEventId) {
             atLink.push(r.name);
         }
     }
-    const pinned = sheet.pinnedEventId;
+    const pinned = race?.pinnedEventId;
     return [...byEvent].sort((a, b) => b[1].length - a[1].length || a[0] - b[0]).map(([event, names]) => {
         const one = names.length === 1;
         const list = andList(names);
@@ -388,12 +395,24 @@ function trapOf(club, slug, sheet, listed, now) {
 }
 
 
-// The whole view of one team (spec §5.4). `seen` is store.seenOf(cid): {zwiftId: {at, sig, mod,
-// sheet, inEvent, event}}.
-export function teamView(club, slug, {now, seen = {}}) {
+// The fixed order of a race's plans (spec §9): the first stored first (by its first version's `at`,
+// then the plan id), so a switch moves only the live flag, never a row.
+const firstAt = p => Date.parse(p.versions[0][1].at) || 0;
+export const byRaceOrder = (a, b) => firstAt(a) - firstAt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+
+// The view of team `slug`'s race on `date` (spec §5.4, races spec §4b; null: nothing ahead, a special
+// team without a race). `seen` is store.seenOf(cid): {zwiftId: {at, sig, mod, sheet, inEvent,
+// event}}. `date` is the race's date (`raceDate` too); `event` its event: the link {id, pinned:
+// true}, else the event learned from a rider's check {id, pinned: false}, else null. `regular`: a
+// date without a race (a weekly team's regular race day, raceDates): no race, never an alarm (spec
+// §8), only the neutral "Next regular race".
+export function raceView(club, slug, date, {now, seen = {}}) {
     const team = club.teams[slug];
     const tz = club.tz;
-    const {live: lv, S, time} = liveAndStart(club, slug, now);
+    const lv = raceLive(club, slug, date, now);
+    const S = date === null ? null : raceStartAt(club, slug, date);
+    const time = S === null ? null : raceStart(club, slug, date);
     const sheet = lv?.sheet ?? null;
     const sent = lv !== null && lv.S !== null;
     const open = sent && planOpen(S, now);
@@ -401,8 +420,7 @@ export function teamView(club, slug, {now, seen = {}}) {
     const opens = gateAt === null ? null : atLabel(gateAt, now, tz);
     const today = localDate(now, tz);
     let when;
-    // the date of the race the view is about: the live plan's, else the next race's
-    const raceDate = lv?.sheet.date ?? viewRaceDate(club, slug, now);
+    const raceDate = date;
     if (S === null) {
         // a special team without a race: no day
         when = raceDate === null ? {day: null, time: null, until: null, today: false}
@@ -419,45 +437,38 @@ export function teamView(club, slug, {now, seen = {}}) {
 
     const plan = sheet ? planOf(sheet) : {riders: []};
     const entryOf = r => (Object.hasOwn(seen, r.id) ? seen[r.id] : null);
-    const stateOf = r => (open ? riderState(club, slug, sheet, S, entryOf(r), livePlan.versions) : null);
-    const bySev = (a, b) => SEV[b.state.sev] - SEV[a.state.sev];
-    const riders = plan.riders.map((r, i) => {
-        const target = pullTarget(sheet, r);
-        return {
-            id: r.id, name: r.name, pos: i + 1,
-            pull: target === null ? t('tv-pull', {s: r.pullS}) : t('tv-pull-target', {s: r.pullS, target}),
-            state: stateOf(r),
-        };
-    });
-    if (open) {
-        riders.sort((a, b) => bySev(a, b) || a.pos - b.pos);
-    }
+    // every plan of the live version's race: a rider may hold any of their versions (spec §5.6)
+    const racePlansOf = open ? plansOf(club, slug).filter(p => p.date === sheet.date) : [];
+    const stateOf = r => (open ? riderState(club, slug, sheet, S, entryOf(r), racePlansOf) : null);
+    // in ride order: the live card draws them in the rider table (cockpit-panel.mjs, a later race's cockpit-page.mjs ridersCard)
+    const riders = plan.riders.map((r, i) => ({id: r.id, name: r.name, pos: i + 1, state: stateOf(r)}));
     const count = riders.length;
     const has = open ? riders.filter(r => isHas(r.state)).length : null;
 
-    // "No start time" (user, 19 Nov 2026): a weekly team without one; a special team gets its time
-    // with each upload, so only a race with plans but no time at all (plans stored by 0.3.0) has
-    // none, live or not
+    const regular = raceDate !== null && raceOf(club, slug, raceDate) === null;
+    // "No start time" (user, 19 Nov 2026): a race without one, its own or the team's (a weekly
+    // team's race may have its own, races spec §1); a special team gets its time with each upload,
+    // so only a race with plans but no time at all (plans stored by 0.3.0) has none, live or not
     const special = team.kind === 'special';
-    const noStart = special ? S === null && raceDate !== null : team.start == null;
+    const noStart = special || raceDate !== null ? S === null && raceDate !== null : team.start == null;
     let status;
-    if (noStart) {
+    if (noStart && regular) {
+        // no start time and no plan (a weekly team's regular race day): a setting, no rider is affected
+        // yet, so neutral (spec §8, coordinator 21 Nov 2026); a plan whose race has no time is red below
+        status = {sev: 'neutral', kind: 'start-unset', icon: 'clock', text: t('tv-start-unset')};
+    } else if (noStart) {
         const text = live ? t('tv-no-start-plan') : special ? t('tv-no-start-not-live', {day: when.day}) : t('tv-no-start-none');
         status = {sev: 'err', kind: 'no-start', icon: 'clock', text};
     } else if (!live && when.day === null) {
         // a special team with no race planned: nothing is missing (Task 8b review)
         status = {sev: 'neutral', kind: 'no-race', icon: 'clock', text: t('tp-race-none')};
+    } else if (!live && forRace) {
+        // plans of this race stored, none live: red at once, at any distance from the race (spec §8,
+        // user 21 Nov 2026: a plan stored on Tuesday for Thursday stayed grey and was missed)
+        status = {sev: 'err', kind: 'none-live', icon: 'noPlan', text: t('tv-none-live')};
     } else if (!live) {
-        // red only near the race (RED_BEFORE_MS); plans stored but none live say so, not "upload one"
-        const near = S === null || S - now <= RED_BEFORE_MS;
-        // plans of this race only (review M1): a later race's plan gives riders nothing tonight
-        const stored = forRace;
-        if (stored) {
-            status = {sev: near ? 'err' : 'neutral', kind: 'none-live', icon: 'noPlan', text: t(near ? 'tv-none-live' : 'tv-none-live-later')};
-        } else {
-            status = near ? {sev: 'err', kind: 'no-plan', icon: 'noPlan', text: t('tv-no-plan')}
-                : {sev: 'neutral', kind: 'next-race', icon: 'clock', text: t('tv-next-race', {day: when.day})};
-        }
+        // no plan: the regular race day is no race, so nothing is missing (spec §8)
+        status = {sev: 'neutral', kind: 'next-race', icon: 'clock', text: t('tv-next-regular', {day: when.day, time: when.time})};
     } else if (!open) {
         status = {sev: 'neutral', kind: 'opens', icon: 'clock', text: count === 1 ? t('tv-opens-one', {opens}) : t('tv-opens', {opens, n: count})};
     } else {
@@ -471,18 +482,17 @@ export function teamView(club, slug, {now, seen = {}}) {
     // notes only for a plan riders get: the pin mismatch once the plan is open, then the holes
     const notes = [];
     if (sent) {
-        if (open && sheet.pinnedEventId != null) {
+        if (open && raceOfSheet(club, sheet)?.pinnedEventId != null) {
             notes.push(...pinNotes(club, slug, lv, plan.riders, entryOf));
         }
         notes.push(...holeNotes(club, slug, sheet, now));
     }
     const sev = worst([status.sev, ...notes.map(n => n.sev), ...(open ? riders.map(r => r.state.sev) : [])]);
 
-    // one row per plan of this race (spec §9): the first stored first, so a switch moves only the
-    // live flag; the live plan by its live version, every other by its newest
-    const firstAt = p => Date.parse(p.versions[0][1].at) || 0;
-    const plans = racePlans(club, slug, now)
-        .sort((a, b) => firstAt(a) - firstAt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    // one row per plan of this race (races spec §4) in the fixed order (byRaceOrder): a switch moves
+    // only the live flag; the live plan by its live version, every other by its newest
+    const plans = racePlans(club, slug, now).filter(p => p.date === raceDate)
+        .sort(byRaceOrder)
         .map(p => {
             const [id, s] = p.live !== null ? [p.live, club.sheets[p.live]] : p.newest;
             const {riders: listed} = planOf(s);
@@ -492,11 +502,36 @@ export function teamView(club, slug, {now, seen = {}}) {
             };
         });
 
+    const race = raceDate === null ? null : raceOf(club, slug, raceDate);
+    const event = race?.pinnedEventId != null ? {id: race.pinnedEventId, pinned: true}
+        : race?.eventId != null ? {id: race.eventId, pinned: false} : null;
     return {
-        slug, name: team.name, version: team.version, start: team.start ?? null, special, noStart, raceDate, S, gateAt, opens, open, when, live, status, notes, sev,
+        slug, name: team.name, version: team.version, start: team.start ?? null, special, noStart, regular, raceDate, date: raceDate, event,
+        S, gateAt, opens, open, when, live, status, notes, sev,
         icon: sev === status.sev ? status.icon : SEV_ICON[sev],
-        riders, has, count, plans, forRace, received: receivedOf(club, slug, now),
+        riders, has, count, plans, forRace,
         trap: noStart && live ? trapOf(club, slug, sheet, plan.riders, now) : [],
+    };
+}
+
+
+// The whole view of one team (spec §5.4; races spec §4b, "mix"): the view of its nearest race
+// (raceView of raceDates' first race ahead; without one of its regular race day, a weekly team's,
+// else of null), which the picker, the switcher and the tiles show, plus `races` (a view per race
+// ahead, nearest first; races[0] is the view's own race; [] without a race ahead),
+// `over` (the races that are over, newest first: {date, day, plans: [{planId, label}]}, the plans
+// in a race's order) and `received` (the plans waiting from ZwiftGopher).
+export function teamView(club, slug, {now, seen = {}}) {
+    const {ahead, over, regular} = raceDates(club, slug, now);
+    const races = ahead.map(date => raceView(club, slug, date, {now, seen}));
+    const view = races[0] ?? raceView(club, slug, regular, {now, seen});
+    return {
+        ...view, races,
+        over: over.map(date => ({
+            date, day: dateDay(date, club.tz),
+            plans: plansOf(club, slug).filter(p => p.date === date).sort(byRaceOrder).map(p => ({planId: p.id, label: p.label})),
+        })),
+        received: receivedOf(club, slug, now),
     };
 }
 
@@ -508,70 +543,81 @@ export function plannerHref(planner, share) {
 }
 
 
-// The share value the team page's planner link carries: the live version's (one not raced yet), else
-// that of the newest version among the plans of the team's next race, else null.
+// The share value the team page's planner link carries: that of the team's first race ahead
+// (raceDates, the race the page is about): its live version's, else that of the newest version among
+// its plans, else null.
 export function teamShare(club, slug, now) {
-    const id = club.teams[slug]?.live;
-    const live = typeof id === 'string' && Object.hasOwn(club.sheets, id) ? club.sheets[id] : null;
-    if (live !== null && !isUsed(club, live, now) && isShare(live.zgShare)) {
+    const date = raceDates(club, slug, now).ahead[0] ?? null;
+    const live = raceLive(club, slug, date, now)?.sheet ?? null;
+    if (live !== null && isShare(live.zgShare)) {
         return live.zgShare;
     }
-    const date = nextRaceDate(club, slug, now);
     const newest = racePlans(club, slug, now).filter(p => p.date === date).flatMap(p => p.versions.map(([, v]) => v))
         .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0];
     return isShare(newest?.zgShare) ? newest.zgShare : null;
 }
 
 
-// The plans received from ZwiftGopher waiting for the team (club.mjs receivedFor), newest first:
-// {id, at ('19:42', or the day before it), name (the planner's team name in the JSON, or null),
-// riders (the count, riders without the bench)}.
-function receivedOf(club, slug, now) {
-    return receivedFor(club, slug, now).map(e => {
-        const at = Date.parse(e.at);
-        let riders = 0;
-        let line = null;
-        try {
-            riders = normalizePlan(e.json, e.text).plan.riders.length;
-            line = ridersLine(e);
-        } catch {
-            // an entry the engine cannot read: its row still offers Review and Discard
-        }
-        return {id: e.id, at: Number.isFinite(at) ? atLabel(at, now, club.tz) : '–', name: plannerName(e), riders,
-            line: line ?? (riders === 1 ? t('tp-riders-one') : t('tp-riders-n', {n: riders}))};
-    });
+// An inbox entry as its row shows it: {id, at ('19:42', or the day before it), name (the planner's
+// team name in the JSON, or null), riders (the count, riders without the bench), line (ridersLine,
+// or the count alone for an entry the engine cannot read)}.
+export function entryInfo(club, e, now) {
+    const at = Date.parse(e.at);
+    let riders = 0;
+    let line = null;
+    try {
+        riders = normalizePlan(e.json, e.text).plan.riders.length;
+        line = ridersLine(e);
+    } catch {
+        // an entry the engine cannot read: its row still offers Review and Discard
+    }
+    return {id: e.id, at: Number.isFinite(at) ? atLabel(at, now, club.tz) : '–', name: plannerName(e), riders,
+        line: line ?? (riders === 1 ? t('tp-riders-one') : t('tp-riders-n', {n: riders}))};
 }
 
 
-// The live row's model: the live version (`lv` from liveAndStart) of plan `p` with its n, what it
-// changed against the version before it (`lines`, `summary`; [] and null for a version that cannot
-// be read), Back to that version (`back`, with backAsk's words; null for a plan's first version) and
-// the plan's newer version when that is not live.
+// The plans received from ZwiftGopher waiting for the team (club.mjs receivedFor), newest first, as
+// entryInfo gives them.
+function receivedOf(club, slug, now) {
+    return receivedFor(club, slug, now).map(e => entryInfo(club, e, now));
+}
+
+
+// The notice of a newer version that is not live (team cockpit spec §5.6) for the race whose live
+// version is `liveId`: the newest version of the live version's own plan (never another plan's: a
+// variant kept as a backup must not prompt a Make live), when it is not the live one, was never live
+// (no `liveAt`) and was stored at or after the time the live one went live (its `liveAt`; a version
+// from before liveAt existed counts from its own `at`). A step back to an older version therefore
+// stays quiet. {id, n, at: ISO string} | null.
+export function newerNotLive(club, slug, liveId) {
+    const p = typeof liveId === 'string' && Object.hasOwn(club.sheets, liveId) ? planOfId(club, slug, liveId) : null;
+    if (p === null) {
+        return null;
+    }
+    const [id, newest] = p.newest;
+    if (id === liveId || newest.liveAt != null) {
+        return null;
+    }
+    const live = club.sheets[liveId];
+    const since = Date.parse(live.liveAt) || Date.parse(live.at) || 0;
+    // >=: a version stored in the same millisecond as the Make live counts as after it
+    return Date.parse(newest.at) >= since ? {id, n: newest.n, at: newest.at} : null;
+}
+
+
+// The live row's model: the live version (`lv` from raceLive) of plan `p` with its n and the plan's
+// newer version when newerNotLive gives one.
 function liveCard(club, slug, lv, p, {now, marksOf}) {
     const {sheet} = lv;
     const tz = club.tz;
-    const prev = previousVersion(club, lv.id);
-    const prevN = prev === null ? null : prev[1].n;
-    // a version normalizePlan cannot read must not break every page that shows the team
-    let lines = [];
-    let summary = null;
-    try {
-        lines = diffVersions(club, prev?.[1] ?? null, sheet, now);
-        // the version's own n in front ("v3: …"), except for a first version, which has no Restore
-        summary = diffSummary(lines, {copyOf: sheet.copyOf ?? null, n: prev === null ? null : sheet.n});
-    } catch {
-        lines = [];
-        summary = null;
-    }
-    const [newestId, newest] = p.newest;
+    const nw = newerNotLive(club, slug, lv.id);
+    const race = raceOfSheet(club, sheet);
     return {
         id: lv.id, label: sheet.label, date: sheet.date, day: dateDay(sheet.date, tz), sig: sheet.sig,
-        at: madeLabel(sheet, now, tz), pinnedEventId: sheet.pinnedEventId ?? null, eventId: sheet.eventId ?? null,
+        at: madeLabel(sheet, now, tz), pinnedEventId: race?.pinnedEventId ?? null, eventId: race?.eventId ?? null,
         sent: lv.S !== null,
-        n: sheet.n, planId: p.id, versions: p.versions.length, prevN,
-        summary, lines,
-        back: prevN === null ? null : {n: prevN, words: backAsk(club, slug, {plan: p.id, n: prevN}, now)},
-        newer: newestId === lv.id ? null : {id: newestId, n: newest.n, at: madeLabel(newest, now, tz), marks: marksOf(newestId)},
+        n: sheet.n, planId: p.id, versions: p.versions.length,
+        newer: nw === null ? null : {id: nw.id, n: nw.n, at: madeLabel(club.sheets[nw.id], now, tz), marks: marksOf(nw.id)},
     };
 }
 
@@ -591,19 +637,26 @@ export function teamRow(view) {
         quiet = t('tv-row-no-race');
         short = t('tv-short-no-race');
     } else if (status.kind === 'none-live') {
-        // plans stored, none live: make one live (red near the race, else neutral)
+        // plans stored, none live: make one live (red at once, spec §8)
         main = status.text;
         quiet = t('tv-row-none-live');
         short = t('tv-short-none-live');
     } else if (status.kind === 'next-race') {
+        // the regular race day without a plan: neutral (spec §8)
         main = status.text;
         quiet = t('tv-row-upload-later');
         short = t('tv-short-next-race');
-    } else if (status.sev === 'err') {
+    } else if (status.kind === 'start-unset') {
+        // no start time and no plan: neutral, the start time is still to set (spec §8)
         main = status.text;
-        quiet = status.kind === 'no-plan' ? t('tv-row-upload') : live ? t(view.special ? 'tv-row-ready-special' : 'tv-row-ready', {label: live.label})
+        quiet = t('tv-row-neither');
+        short = t('tv-short-no-start');
+    } else if (status.sev === 'err') {
+        // no start time
+        main = status.text;
+        quiet = live ? t(view.special ? 'tv-row-ready-special' : 'tv-row-ready', {label: live.label})
             : t(view.special ? 'tv-row-special-time' : 'tv-row-neither');
-        short = t(status.kind === 'no-plan' ? 'tv-short-no-plan' : 'tv-short-no-start');
+        short = t('tv-short-no-start');
     } else if (notes.length) {
         main = t('tv-row-fix', {n: notes.length, short: notes[0].short});
         quiet = status.text;
@@ -620,110 +673,11 @@ export function teamRow(view) {
 }
 
 
-// The id backDry gives its dry run's copy: never a stored id, as freeVersionId checks.
-function dryRunIds() {
-    let i = 0;
-    return () => `zz${String(i++).padStart(4, '0')}`;
-}
-
-
-// The dry run of Restore v`n` of plan `planId` (any of its ids), with club.mjs's own backTo on a copy
-// of the club: {r, team, p, moves, holes} (holes of this team only), or null when the plan is not
-// live (its copy would not go live) or backTo would refuse. `version` is the team's version the page
-// was drawn with (default: the current one), so a stale page is refused, not asked about.
-function backDry(club, slug, {plan, n, version}, now) {
-    const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
-    const p = team && typeof plan === 'string' ? planOfId(club, slug, plan) : null;
-    if (p === null || p.live === null) {
-        return null;
-    }
-    // backTo changes only the team, the sheet map and the log, so these are copied and the sheets
-    // themselves shared
-    const after = {...club, teams: {...club.teams, [slug]: {...team}}, sheets: {...club.sheets}, log: [...(club.log ?? [])]};
-    let r;
-    try {
-        r = backTo(after, slug, {plan, n, version: version ?? team.version}, {now, newId: dryRunIds()});
-    } catch (e) {
-        if (e instanceof ClubError) {
-            return null;
-        }
-        throw e;
-    }
-    const {moves, holes} = effects(club, after, p.date, now);
-    return {r, team, p, moves, holes: holes.filter(h => h.slug === slug)};
-}
-
-
-// "v1 lists Ben, who now rides Sprockets. Rollers then rides without him. Restore v1 anyway?": what
-// the dry run `backDry` gave would do to riders. Holes of this team first (one sentence), then each
-// move, then the question. Null when nothing moves and no hole opens.
-function movesWords(club, slug, {r, team, moves, holes}) {
-    if (!moves.length && !holes.length) {
-        return null;
-    }
-    const parts = [];
-    if (holes.length) {
-        const names = [...new Set(holes.map(h => h.name))];
-        const teams = [...new Set(holes.map(h => nameOf(club, h.rides)))];
-        parts.push(t(names.length === 1 ? 'back-q-hole' : 'back-q-holes', {n: r.from, names: andList(names), teams: andList(teams), team: team.name}));
-    }
-    parts.push(...moves.map(m => `${t('result-move', {name: m.name, from: nameOf(club, m.from), to: nameOf(club, m.to)})}.`));
-    parts.push(t('back-q', {n: r.from}));
-    return parts.join(' ');
-}
-
-
-// The question before Restore v`n` of a live plan (spec §8 step 4, decision 12), by phase: before the
-// gate "From 19:00, riders get v1 instead of v2.", after it "Riders in the event get v1 instead of v2
-// within a minute." (for a team without a start time: that riders get nothing until it has one); then
-// the riders that change ("With v1: Hanna in, Ben out.", as the version diffs name them), then the
-// moves and holes (movesWords). Null when no question is due: the plan is not live (Restore only
-// stores a version), or backTo would refuse (`version` stale, `n` not stored, a used-up plan), which
-// the POST then says.
-export function backAsk(club, slug, {plan, n, version = null}, now) {
-    return backQuestion(club, slug, {plan, n, version}, now)?.words ?? null;
-}
-
-
-// backAsk's words and whether Restore must ask before it acts (UI panel wave 2, the Make live rule):
-// only while the gate of the plan's race is open (from S - 30 min until it is used up) or when the
-// words warn: a move, a hole of this team, no start time. Otherwise it acts at once, with Undo.
-// {words, ask}, or null as backAsk.
-export function backQuestion(club, slug, {plan, n, version = null}, now) {
-    const dry = backDry(club, slug, {plan, n, version}, now);
-    if (dry === null) {
-        return null;
-    }
-    const live = club.sheets[dry.p.live];
-    const from = dry.r.from;
-    const words = movesWords(club, slug, dry);
-    const S = plannedStart(club, live);
-    const gate = S === null ? null : S - PLAN_OPEN_MS;
-    const parts = [S === null ? noStartWords(club, slug, live)
-        : now >= gate ? t('back-q-live-open', {n: from, ln: live.n}) : t('back-q-live', {n: from, ln: live.n, at: atLabel(gate, now, club.tz)})];
-    const who = ridersChange(club, live, dry.p.versions.find(([, v]) => v.n === from)?.[1] ?? null, now);
-    if (who !== null) {
-        parts.push(t('back-q-who', {n: from, who}));
-    }
-    if (words !== null) {
-        parts.push(words);
-    }
-    return {words: parts.join(' '), ask: S === null || words !== null || gateOpen(club, live, now)};
-}
-
-
-// Who comes and goes when riders get version `to` instead of `from`: "Hanna in, Ben and Gus out"
-// (diff.mjs), or null when nobody does or a version cannot be read.
-function ridersChange(club, from, to, now) {
-    if (from === null || to === null) {
-        return null;
-    }
-    try {
-        return diffPeople(diffVersions(club, from, to, now));
-    } catch {
-        return null;
-    }
-}
+// A copy of a team for a dry run: its races copied too, so a live pointer set on the copy never
+// reaches the club.
+const teamCopy = team => ({
+    ...team, races: Object.fromEntries(Object.entries(team.races ?? {}).map(([date, race]) => [date, {...race}])),
+});
 
 
 // What riders get from a version without a start time: nothing until the team has one; a special
@@ -736,13 +690,11 @@ function noStartWords(club, slug, sheet) {
 
 // What Make live of version `id` does, in words (spec §9), by phase: before the gate "From 19:00,
 // riders get 'Rollers · slow' v2 instead of 'Rollers · fast' v5.", after it "Riders in the event get
-// … within a minute." (a team without a start time sends nothing, and says so). A team has one live
-// plan: making a plan of another race live (the live plan is not used up and its date differs, as
-// the assign page's box decides) ends the live plan for its race, which then has no plan, so the
-// words say that and ask (UI panel, 19 Nov 2026). Then the question about its outdated marks, or the
-// riders it moves between teams and the teams it leaves with a hole (UI panel wave 2). A question
-// makes the confirm's button "Make live anyway". The version's own label: a newer version may carry
-// another type.
+// … within a minute." (a team without a start time sends nothing, and says so). Live is per race
+// (races spec §1): the words name only the plans of the version's own race, never another race's.
+// Then the question about its outdated marks, or the riders it moves between teams and the teams it
+// leaves with a hole (UI panel wave 2). A question makes the confirm's button "Make live anyway".
+// The version's own label: a newer version may carry another type.
 export function liveWords(club, slug, id, now) {
     return liveQuestion(club, slug, id, now).words;
 }
@@ -756,10 +708,15 @@ export function gateOpen(club, sheet, now) {
 
 
 // The riders Make live of `id` moves to or from another team and the holes it opens that were not
-// there before, on the version's date, from a dry run on a copy of the club: {moves, holes}.
+// there before, on the version's date, from a dry run on a copy of the club (the team with a copy of
+// its races; only the version's own race changes): {moves, holes}.
 function liveDry(club, slug, id, now) {
     const sheet = club.sheets[id];
-    const after = {...club, teams: {...club.teams, [slug]: {...club.teams[slug], live: id}}};
+    const after = {...club, teams: {...club.teams, [slug]: teamCopy(club.teams[slug])}};
+    const race = raceOf(after, slug, sheet.date);
+    if (race !== null) {
+        race.live = id;
+    }
     const key = h => `${h.slug} ${h.id}`;
     const had = new Set(effects(club, club, sheet.date, now).holes.map(key));
     const {moves, holes} = effects(club, after, sheet.date, now);
@@ -768,24 +725,22 @@ function liveDry(club, slug, id, now) {
 
 
 // liveWords' words and whether Make live must ask before it acts (UI panel wave 2, the Make live
-// rule; the server decides it again on the POST): never for the version that is live already; else
-// while the gate is open of the race of the plan being replaced or of the one becoming live (from
-// S - 30 min until that race is used up), or when the words warn: outdated marks, a move, a new hole,
-// another race's plan, no start time. Otherwise it acts at once and offers Undo. {words, ask, marks}:
-// `marks` the outdated marks the words ask about (liveConfirmPage lists them).
+// rule; the server decides it again on the POST): never for the version that is live already in its
+// race; else while the gate is open of that race (from S - 30 min until it is used up), or when the
+// words warn: outdated marks, a move, a new hole, no start time. Otherwise it acts at once and
+// offers Undo. Only the version's own race counts (races spec §1: the team's other races keep their
+// live plans). {words, ask, marks}: `marks` the outdated marks the words ask about (liveConfirmPage
+// lists them).
 export function liveQuestion(club, slug, id, now) {
     const sheet = club.sheets[id];
     const tz = club.tz;
-    const team = club.teams[slug];
-    const {live: lv} = liveAndStart(club, slug, now);
-    const other = lv !== null && lv.id !== id && lv.sheet.date !== sheet.date;
+    // the race's live version while it is not used up
+    const lv = raceLive(club, slug, sheet.date, now);
     const S = plannedStart(club, sheet);
     const gate = S === null ? null : S - PLAN_OPEN_MS;
     const v = {label: sheet.label, n: sheet.n, at: gate === null ? null : atLabel(gate, now, tz)};
     let head;
-    if (other) {
-        head = t('tp-live-words-other-race', {...v, day: dateDay(sheet.date, tz), live: lv.sheet.label, ln: lv.sheet.n, liveDay: dateDay(lv.sheet.date, tz)});
-    } else if (S === null) {
+    if (S === null) {
         head = noStartWords(club, slug, sheet);
     } else {
         const open = now >= gate ? '-open' : '';
@@ -793,10 +748,8 @@ export function liveQuestion(club, slug, id, now) {
             : t(`tp-live-words${open}`, {...v, live: lv.sheet.label, ln: lv.sheet.n});
     }
     const words = [head];
-    if (other && S === null) {
-        words.push(noStartWords(club, slug, sheet));
-    }
-    const {moves, holes} = team.live === id ? {moves: [], holes: []} : liveDry(club, slug, id, now);
+    const liveId = raceOfSheet(club, sheet)?.live ?? null;
+    const {moves, holes} = liveId === id ? {moves: [], holes: []} : liveDry(club, slug, id, now);
     // a rider the switch brings to this team is no outdated mark: the move names him
     const coming = new Set(moves.filter(m => m.to === slug).map(m => m.id));
     const marks = (outdated(club, slug, now).get(id) ?? []).filter(m => !coming.has(m.id));
@@ -813,39 +766,46 @@ export function liveQuestion(club, slug, id, now) {
         words.push(`${t('result-holes', {teams: andList(others.map(s => nameOf(club, s)))})}.`);
     }
     if (marks.length) {
-        words.push(t(marks.length === 1 ? 'tp-make-live-q-one' : 'tp-make-live-q', {label: sheet.label, names: andList(marks.map(m => m.name))}));
-    } else if (other || moves.length || others.length) {
+        words.push(t(marks.length === 1 ? 'tp-make-live-q-one' : 'tp-make-live-q', {label: sheet.label, n: sheet.n, names: andList(marks.map(m => m.name))}));
+    } else if (moves.length || others.length) {
         words.push(t('tp-live-q-anyway'));
     }
-    const current = typeof team.live === 'string' && Object.hasOwn(club.sheets, team.live) ? club.sheets[team.live] : null;
-    const warn = other || S === null || marks.length > 0 || moves.length > 0 || others.length > 0;
+    // the race's live version, used up or not (the gate of the plan being replaced)
+    const current = typeof liveId === 'string' && Object.hasOwn(club.sheets, liveId) ? club.sheets[liveId] : null;
+    const warn = S === null || marks.length > 0 || moves.length > 0 || others.length > 0;
     const open = gateOpen(club, sheet, now) || (current !== null && gateOpen(club, current, now));
-    return {words: words.join(' '), ask: team.live !== id && (warn || open), marks};
+    return {words: words.join(' '), ask: liveId !== id && (warn || open), marks};
 }
 
 
-// How long Undo is offered after a Make live or Restore that changed the live plan (UI panel wave 2).
+// How long Undo is offered after a Make live that changed the live plan (UI panel wave 2).
 export const UNDO_MS = 10 * MIN_MS;
 
 
-// The Undo of the last change of team `slug`'s live plan, while it is offered: the team's own record
-// of it (team.liveBefore, club.mjs makeLive) is of its current version (nothing changed since), at
-// most UNDO_MS old, and the version that was live before is still one of the team's. {id, prev,
-// live, version}: `prev` the version Undo makes live again, `live` the one live now; else null.
+// The Undo of the last change of a live plan of team `slug`, while it is offered: the team's own
+// record of it (team.liveBefore, club.mjs makeLive) is of its current version (nothing changed
+// since), at most UNDO_MS old, and the version that was live before is still one of the team's.
+// Live is per race (races spec §1): the race is that of the version Undo makes live again, and
+// `live` that race's live version. {id, prev, live, version}: `prev` the version Undo makes live
+// again, `live` the one live now; else null.
 export function undoOffer(club, slug, now) {
     const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
     const u = team?.liveBefore;
-    if (u === null || typeof u !== 'object' || u.version !== team.version || typeof team.live !== 'string' || !Object.hasOwn(club.sheets, team.live)) {
+    if (u === null || typeof u !== 'object' || typeof u.id !== 'string' || !Object.hasOwn(club.sheets, u.id)) {
+        return null;
+    }
+    const liveId = raceOfSheet(club, club.sheets[u.id])?.live ?? null;
+    if (u.version !== team.version || typeof liveId !== 'string' || !Object.hasOwn(club.sheets, liveId)) {
         return null;
     }
     const at = Date.parse(u.at);
     if (!Number.isFinite(at) || now < at || now - at > UNDO_MS) {
         return null;
     }
-    if (typeof u.id !== 'string' || u.id === team.live || !Object.hasOwn(club.sheets, u.id) || club.sheets[u.id].team !== slug) {
+    if (typeof u.id !== 'string' || u.id === liveId || !Object.hasOwn(club.sheets, u.id) || club.sheets[u.id].team !== slug) {
         return null;
     }
-    return {id: u.id, prev: club.sheets[u.id], live: club.sheets[team.live], version: team.version};
+    return {id: u.id, prev: club.sheets[u.id], live: club.sheets[liveId], version: team.version};
 }
 
 
@@ -866,14 +826,29 @@ export function raceWithin(club, slug, now, days = 7) {
 }
 
 
-// Does plan `p` (plansOf) have an event link? A plan whose live version or newest version is pinned
-// (the team settings list exactly these; Remove clears the link on every version). The pinned event
-// id, or null.
-export function linkedPlan(club, p) {
-    for (const id of [p.live, p.newest[0]]) {
-        if (id !== null && Object.hasOwn(club.sheets, id) && club.sheets[id].pinnedEventId != null) {
-            return club.sheets[id].pinnedEventId;
-        }
+// What moving team `slug`'s race on `date` to `to` at `start` (as posted: blank is the team's start
+// time for a weekly team) does, in words, for the question before the move (races spec §7: a date or
+// time change asks first like Make live): the race from and to (its local day and time, the day alone
+// without a time) with how many plans move with it; then when riders get the plan for the new start:
+// within a minute only while the new start's gate is open (the rider API sends a plan from its S -
+// 30 min: an open gate of the old start does not count, its riders lose the plan until the new
+// gate), else from the new gate; and that the event learned from riders' checks is forgotten when
+// the race has one. Plain text.
+export function raceMoveWords(club, slug, date, {to, start}, now) {
+    const team = club.teams[slug];
+    const tz = club.tz;
+    const posted = typeof start === 'string' && start.trim() !== '' ? start.trim() : null;
+    const time = raceTime(team, posted);
+    const was = raceStartAt(club, slug, date);
+    const S = time === null || !isDate(to) ? null : zonedToUtc(to, time, tz);
+    const label = (ms, day) => (ms === null ? dateDay(day, tz) : localLabel(ms, tz));
+    const n = plansOf(club, slug).filter(p => p.date === date).length;
+    const parts = [t(n === 1 ? 'rm-move-words-one' : 'rm-move-words', {from: label(was, date), to: label(S, to), n})];
+    if (S !== null) {
+        parts.push(planOpen(S, now) && !usedUp(S, now) ? t('rm-move-open') : t('rm-move-later', {at: atLabel(S - PLAN_OPEN_MS, now, tz)}));
     }
-    return null;
+    if (raceOf(club, slug, date)?.eventId != null) {
+        parts.push(t('rm-move-learned'));
+    }
+    return parts.join(' ');
 }

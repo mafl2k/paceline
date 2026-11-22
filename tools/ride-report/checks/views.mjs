@@ -18,11 +18,13 @@ export const MY_PULL_MIN_S = 20;       // a turn of mine this long closes a roun
 
 // The countdown models: the expected length of rider r's pull ({id, pullS}) while he is between
 // the puller and me, and while he pulls; beforeMe: r is the rider directly before me in the plan
-// order (of those present). 'new' is the engine's (rotationView, expectedPullS).
+// order (of those present). 'new' is the fixed rule up to 0.3.4-beta.4 (expectedPullS without the
+// learned E/H); since beta.5 the engine counts the team's learned turn time instead (design
+// 2026-11-21-paceline-beta5 §2), which this simulation does not model.
 export const MODELS = [
     {key: 'old', label: 'bis 0.3.0-beta.3: Plan + 10 s je Fahrer zwischen Zieher und mir, der Zieher nur sein Plan',
      between: r => r.pullS + CHANGE_ALLOWANCE_S, puller: r => r.pullS},
-    {key: 'new', label: 'Engine heute: jeder Fahrer Plan + 10 s, auch der Zieher; der Fahrer direkt vor mir nur sein Plan',
+    {key: 'new', label: 'fest bis 0.3.4-beta.4: jeder Fahrer Plan + 10 s (Pläne bis 40 s) oder + 5 s (länger), auch der Zieher; der Fahrer direkt vor mir nur sein Plan',
      between: (r, beforeMe) => expectedPullS(r.pullS, beforeMe), puller: (r, beforeMe) => expectedPullS(r.pullS, beforeMe)},
 ];
 
@@ -50,9 +52,10 @@ function timelineFor(pulls, me) {
 }
 
 
-// One view: the clock per second from the first pull to `to` ({ts, v}: v null during my pull or
-// without a plan), with `me` and the model. tickAt(ts): the tick index at ts, for the plan.
-export function simulateView(ride, pulls, me, model, {to, tickAt}) {
+// One view: the clock per second from the first pull to `to` ({ts, v}: v null during my pull,
+// without a plan or while silent), with `me` and the model. tickAt(ts): the tick index at ts, for
+// the plan. silent(i): the windows show no countdown at tick i (chaos, 20 Nov 2026), so no value.
+export function simulateView(ride, pulls, me, model, {to, tickAt, silent = () => false}) {
     const line = timelineFor(pulls, me);
     const myTurns = turnsOf(pulls, me);
     const out = [];
@@ -65,7 +68,12 @@ export function simulateView(ride, pulls, me, model, {to, tickAt}) {
             k++;
         }
         const cur = line[k];
-        const plan = ride.planAt(tickAt(ts));
+        const i = tickAt(ts);
+        if (silent(i)) {
+            out.push({ts, v: null});
+            continue;
+        }
+        const plan = ride.planAt(i);
         const R = plan ? plan.riders.map(r => ({id: String(r.id), pullS: r.pullS})) : [];
         const pi = R.findIndex(r => r.id === cur.id);
         const mi = R.findIndex(r => r.id === me);
@@ -175,7 +183,11 @@ export function evalStart(ride, {from, to}) {
 }
 
 
-export function viewsCheck(ride, gt, {from, to, minPulls = MIN_PULLS}) {
+// Chaos (20 Nov 2026, spec 2026-11-20-paceline-chaos-counter section 6): where the current engine
+// finds the team off the plan's order (the replay's reason 'chaos', the recorder's engine) the
+// windows show no countdown, so those seconds are silent for every view and both models: the
+// models are compared on the same seconds, and a chaos second is no error of either.
+export function viewsCheck(ride, gt, {from, to, minPulls = MIN_PULLS, frames = null}) {
     const pulls = gt._pulls;
     if (!pulls?.length) {
         return {skipped: 'keine Züge erkannt', verdict: 'entfällt (keine Züge)'};
@@ -197,6 +209,9 @@ export function viewsCheck(ride, gt, {from, to, minPulls = MIN_PULLS}) {
         }
         return ptr;
     };
+    const quiet = ride.ticks.map((t, i) => !!frames?.[i] && !frames[i].skipped && frames[i].reason === 'chaos' &&
+        t.ts >= from && t.ts <= to);
+    const silent = i => quiet[i];
     const {at: evalFrom, late} = evalStart(ride, {from, to});
     const firstStart = pulls[0].start;
     const riders = [];
@@ -211,7 +226,7 @@ export function viewsCheck(ride, gt, {from, to, minPulls = MIN_PULLS}) {
         const by = {};
         for (const m of MODELS) {
             ptr = 0;
-            by[m.key] = judgeView(simulateView(ride, pulls, id, m, {to, tickAt}), starts, {evalFrom});
+            by[m.key] = judgeView(simulateView(ride, pulls, id, m, {to, tickAt, silent}), starts, {evalFrom});
         }
         riders.push({who: L(id), pulls: turns.length, ...by});
     }
@@ -239,7 +254,7 @@ export function viewsCheck(ride, gt, {from, to, minPulls = MIN_PULLS}) {
     return {
         verdict,
         rules: {minPulls, startSkipS: START_SKIP_MS / 1000, looks: LOOKS_S, errLooks: ERR_LOOKS_S, lateS: LATE_S,
-                smallJump: SMALL_JUMP_S, runOnS: RUN_ON_S},
+                smallJump: SMALL_JUMP_S, runOnS: RUN_ON_S, chaosS: quiet.filter(Boolean).length},
         evalFrom, lateRiders: late.map(L),
         models: MODELS.map(m => ({key: m.key, label: m.label})),
         riders, total,

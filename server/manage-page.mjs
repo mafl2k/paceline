@@ -3,27 +3,22 @@
 // pages (renderPlace), and the answers every form gives (done, refuse, attempt). The routes are in
 // manage.mjs, the team forms in manage-teams.mjs, the club settings' in manage-club.mjs.
 import {html} from './http.mjs';
-import {t, T} from './pages.mjs';
+import {t} from './pages.mjs';
 import {teamsPage} from './teams-page.mjs';
-import {teamPage, teamGonePage, teamSettingsPage, newTeamPage} from './team-page.mjs';
-import {versionsPage, planGonePage} from './versions-page.mjs';
+import {teamGonePage, teamSettingsPage, newTeamPage} from './team-page.mjs';
 import {settingsPage} from './settings-page.mjs';
 import {ClubError} from './club.mjs';
 import {isSlug, SHEET_RE} from './ids.mjs';
 import {planOfId} from './plans.mjs';
 import {redirectWithFlash} from './flash.mjs';
 import {principal, noLonger} from './web.mjs';
+import {frameOf, clubErrorText} from './manage-frame.mjs';
+import {renderCockpit} from './manage-cockpit.mjs';
+import {cockpitPath} from './cockpit-page.mjs';
 
-
-// What the captain frame (ui.mjs captainPage) of club `cid` draws its sidebar with, for every
-// captain page: the clock, the riders seen (the team rows' states) and `others`: the other clubs
-// this browser's cookie opens ({id, name}, in its order; ctx.others from handleManage holds their
-// ids), each a switch in the footer, which then also has "Log out of <club>" and "Log out of all
-// clubs". A club gone since the gate looked is left out.
-export function frameOf(ctx, cid) {
-    const others = (ctx.others ?? []).map(id => ctx.store.get(id)).filter(Boolean).map(c => ({id: c.id, name: c.name}));
-    return {now: ctx.now, seen: ctx.store.seenOf(cid), others};
-}
+// The captain frame's clock, riders seen and other clubs (a leaf module: manage-cockpit.mjs uses it
+// too, without an import cycle).
+export {frameOf};
 
 
 // The team picker of club `cid` as HTML, with an optional flash ({kind: 'ok' | 'err', text});
@@ -43,11 +38,8 @@ export function renderSettings(ctx, cid, {flash = null, typed = null} = {}) {
 }
 
 
-// The page text of a ClubError (T['club-' + code] with its vars).
-export function clubErrorText(e) {
-    const key = `club-${e.code}`;
-    return Object.hasOwn(T, key) ? t(key, e.vars) : String(e.code);
-}
+// The page text of a ClubError: in the leaf manage-frame.mjs (the cockpit's dry run needs it).
+export {clubErrorText};
 
 
 // ---- the forms of the captain pages (urlencoded, POST) ----
@@ -65,17 +57,15 @@ export const sheetOf = (club, slug, id) => (teamOf(club, slug) && Object.hasOwn(
     ? club.sheets[id] : null);
 
 
-// The page an action goes back to (spec §5.4): {page: 'team', slug}, {page: 'team-settings', slug},
-// {page: 'versions', slug, plan}, {page: 'new-team'}, {page: 'settings'} or {page: 'teams'}. The team
-// place is its team page, the team-settings place the team's settings, versions the versions page of
-// plan `plan` (an id of it), new-team the new-team page, settings the club settings, teams the team
-// picker /manage.
+// The page an action goes back to (spec §5.4): {page: 'team', slug, v?, e?}, {page:
+// 'team-settings', slug}, {page: 'new-team'}, {page: 'settings'} or {page: 'teams'}. The team place
+// is its team page (the team cockpit, team cockpit spec §8; `v` or `e` its selection, the query
+// placeQuery gives), the team-settings place the team's settings, new-team the new-team page,
+// settings the club settings, teams the team picker /manage. A place from before the switch
+// (`versions`, a plan's page) is no place any more: every caller names the team place instead.
 export function placePath(place) {
     if (place.page === 'team') {
-        return `/manage/team/${place.slug}`;
-    }
-    if (place.page === 'versions') {
-        return `/manage/team/${place.slug}/plan/${place.plan}`;
+        return cockpitPath(place.slug);
     }
     if (place.page === 'team-settings') {
         return `/manage/team/${place.slug}/settings`;
@@ -87,24 +77,29 @@ export function placePath(place) {
 }
 
 
-// The page of `place` as HTML, drawn now (a refusal answers with it): the team page, which then
-// never reloads itself, the team's settings or a plan's versions page (none of them a team that is no
-// more: then the team-gone page; nor a plan that is no more: then the plan-gone page); the new-team
-// page; the club settings; for the teams place the team picker, which
-// then never reloads itself either. `typed` (what was posted) fills the forms of the team settings,
-// the new-team page and the club settings again.
+// The place of a team form's answer: the team page with the selection `sel` ({v} or {e}).
+export const teamPlace = (slug, sel = {}) => ({page: 'team', slug, ...sel});
+
+// The query of a place's selection: '?v=<id>', '?e=<id>', '?r=<race date>' (that race's live version,
+// whichever it is: where an action that made a version live lands, so a reload follows live) or ''.
+export function placeQuery(place) {
+    return typeof place.v === 'string' ? `?v=${place.v}` : typeof place.e === 'string' ? `?e=${place.e}` : typeof place.r === 'string' ? `?r=${place.r}` : '';
+}
+
+
+// The page of `place` as HTML, drawn now (a refusal answers with it): the team page with the
+// place's selection, which then never reloads itself, or the team's settings (neither of a team that
+// is no more: then the team-gone page); the new-team page; the club settings; for the teams place
+// the team picker, which then never reloads itself either. `typed` (what was posted) fills the forms
+// of the team settings, the new-team page and the club settings again.
 export function renderPlace(ctx, cid, place, {flash = null, typed = null} = {}) {
     const club = ctx.store.get(cid);
     const frame = frameOf(ctx, cid);
-    if (place.page === 'team' || place.page === 'team-settings' || place.page === 'versions') {
+    if (place.page === 'team' || place.page === 'team-settings') {
         if (!teamOf(club, place.slug)) {
             return teamGonePage(club, {...frame, flash});
         }
-        if (place.page === 'versions') {
-            return planOf(club, place.slug, place.plan) ? versionsPage(club, place.slug, place.plan, {...frame, flash, planner: ctx.push?.href(club, place.slug, ctx.now) ?? null})
-                : planGonePage(club, place.slug, {...frame, flash});
-        }
-        return place.page === 'team' ? teamPage(club, place.slug, {...frame, flash, refresh: false, planner: ctx.push?.href(club, place.slug, ctx.now) ?? null})
+        return place.page === 'team' ? renderCockpit(ctx, cid, place.slug, {v: place.v ?? null, e: place.e ?? null, r: place.r ?? null, flash, refresh: false})
             : teamSettingsPage(club, place.slug, {...frame, flash, typed, push: ctx.push?.on === true});
     }
     if (place.page === 'new-team') {
@@ -140,12 +135,15 @@ export function postedClub(req, res, ctx, cid, posted) {
 
 
 // What was done, as a one-shot flash on the page of `place`: 303 there (POST -> 303 -> GET). `extra`
-// goes into the flash. A change of the live plan passes {row, undo} (user, 19 Nov 2026: Undo where
-// the action was): `row` the id of the plan live now, whose row (team page) or head (plan page)
-// shows the flash in place of the top flash, with Undo when `undo`; the 303 lands on that row
-// (#plan-<row>).
+// goes into the flash ({undo}: a change of the live plan offers Undo in the panel's head).
+// `extra.anchor` (a string, an element id: a race's 'race-<date>', a plan's block) is the 303's
+// fragment and stays out of the flash. A team place with a selection goes to it (its query) and
+// lands on the panel (#panel), whose head shows the flash.
 export function done(res, ctx, cid, place, text, kind = 'ok', extra = {}) {
-    redirectWithFlash(res, ctx, cid, placePath(place), {kind, text, ...extra}, {hash: typeof extra.row === 'string' ? `plan-${extra.row}` : null});
+    const {anchor, ...rest} = extra;
+    const query = placeQuery(place);
+    const hash = query !== '' ? 'panel' : typeof anchor === 'string' ? anchor : null;
+    redirectWithFlash(res, ctx, cid, placePath(place), {kind, text, ...rest}, {hash, query});
 }
 
 

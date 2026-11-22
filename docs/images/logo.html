@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- Source of docs/images/logo.png, the Paceline logo for the Sauce mod store (512 x 512).
+     Fonts: Noteworthy and Bradley Hand (macOS). Render with headless Chrome:
+     "Google Chrome" --headless --hide-scrollbars --force-device-scale-factor=1 --window-size=512,512
+       --virtual-time-budget=2000 --screenshot=logo.png file://$PWD/docs/images/logo.html
+     The script at the end draws the scribbled strike-throughs (text.x). Power is in W/kg only. --><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}svg{display:block}</style></head><body>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <filter id="wob" x="-5%" y="-5%" width="110%" height="110%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/>
+    <feDisplacementMap in="SourceGraphic" scale="3.5"/>
+  </filter>
+  <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="8" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.45  0 0 0 0 0.40  0 0 0 0 0.30  0 0 0 0.06 0"/></filter>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+    <rect width="6" height="6" fill="#4a7fe0"/><line x1="0" y1="0" x2="0" y2="6" stroke="#2c5bc0" stroke-width="2.2"/>
+  </pattern>
+  <!-- one rider from above, facing up; box 60 x 130 -->
+  <symbol id="r" viewBox="0 0 60 110" overflow="visible">
+    <g stroke="#2a2a2a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="30" y1="1" x2="30" y2="22" stroke-width="3.4"/>
+      <line x1="30" y1="86" x2="30" y2="108" stroke-width="3.4"/>
+      <path d="M22 22 L38 22"/>
+      <path d="M14 50 Q12 34 24 23 M46 50 Q48 34 36 23" stroke-width="5" stroke="#1f2f55"/>
+      <ellipse cx="20" cy="76" rx="6.5" ry="11" fill="#1f2f55"/>
+      <ellipse cx="40" cy="72" rx="6.5" ry="11" fill="#1f2f55"/>
+      <path d="M8 46 Q30 34 52 46 Q54 66 44 82 Q30 88 16 82 Q6 66 8 46 Z" fill="url(#hatch)"/>
+      <circle cx="30" cy="39" r="10.5" fill="#fff"/>
+      <path d="M24 36 Q30 31 36 36" stroke-width="2"/>
+    </g>
+  </symbol>
+</defs>
+<!-- paper -->
+<rect width="512" height="512" fill="#fbf7ea"/>
+<rect width="512" height="512" filter="url(#paper)"/>
+<g stroke="#9db8e6" stroke-width="1.6">
+  <line x1="0" y1="128" x2="512" y2="128"/><line x1="0" y1="160" x2="512" y2="160"/><line x1="0" y1="192" x2="512" y2="192"/>
+  <line x1="0" y1="224" x2="512" y2="224"/><line x1="0" y1="256" x2="512" y2="256"/><line x1="0" y1="288" x2="512" y2="288"/>
+  <line x1="0" y1="320" x2="512" y2="320"/><line x1="0" y1="352" x2="512" y2="352"/><line x1="0" y1="384" x2="512" y2="384"/>
+  <line x1="0" y1="416" x2="512" y2="416"/><line x1="0" y1="448" x2="512" y2="448"/><line x1="0" y1="480" x2="512" y2="480"/>
+</g>
+<line x1="66" y1="0" x2="66" y2="512" stroke="#e58a8a" stroke-width="2"/>
+<!-- pencil frame like the sheet -->
+<g filter="url(#wob)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <!-- title -->
+  <text x="268" y="98" text-anchor="middle" font-family="Noteworthy" font-weight="700" font-size="88" fill="#26324f" stroke="none">Paceline</text>
+  <path d="M110 112 Q260 104 430 110" stroke="#26324f" stroke-width="4"/>
+  <!-- road edges -->
+  <path d="M92 150 Q84 330 98 500" stroke="#555" stroke-width="3"/>
+  <path d="M276 150 Q288 330 274 500" stroke="#555" stroke-width="3"/>
+  <!-- the line -->
+          <use href="#r" x="138" y="140" width="64" height="117"/>
+  <use href="#r" x="138" y="228" width="64" height="117"/>
+  <use href="#r" x="138" y="316" width="64" height="117"/>
+  <use href="#r" x="138" y="404" width="64" height="117"/>
+  <!-- the plan on the side, reworked during the race, free hand -->
+  <g font-family="Bradley Hand" font-weight="700" fill="#26324f" stroke="#26324f" stroke-width="0.8">
+    <g transform="rotate(-9 380 160)"><text x="318" y="166" font-size="28">plan</text><text x="384" y="166" font-size="28" class="x">v2</text><text x="426" y="160" font-size="30" fill="#e0661a" stroke="#e0661a">v3</text></g>
+    <text x="296" y="236" font-size="40" transform="rotate(-6 380 226)">45s@4.1</text>
+    <path d="M462 214 l8 10 l16 -24" fill="none" stroke="#2f8a3e" stroke-width="4"/>
+    <text x="370" y="276" font-size="25" transform="rotate(-14 420 270)">40s@4.2</text>
+    <text x="304" y="318" font-size="31" class="x" transform="rotate(5 370 310)">30s@4.4</text>
+    <text x="452" y="322" font-size="34" fill="#e0661a" stroke="#e0661a" transform="rotate(12 460 312)">?</text>
+    <g transform="rotate(-3 380 388)"><text x="290" y="394" font-size="26" class="x">60s</text><text x="342" y="398" font-size="33">45s@3.9</text></g>
+    <text x="318" y="468" font-size="36" transform="rotate(7 390 458)">15s@4.8</text>
+    <text x="456" y="500" font-size="32" fill="#e0661a" stroke="#e0661a" transform="rotate(10 470 490)">!!</text>
+    <text x="0" y="0" font-size="20" fill="#5a5a5a" stroke="#5a5a5a" stroke-width="0.4" transform="translate(44 430) rotate(-90)">TTT · Thu</text>
+  </g>
+  <ellipse cx="384" cy="460" rx="76" ry="30" fill="none" stroke="#f07a1a" stroke-width="4" transform="rotate(9 384 460)"/>
+  <path d="M398 282 Q392 292 396 300" fill="none" stroke="#f07a1a" stroke-width="3"/>
+  <!-- rotation arrow, orange marker -->
+  <path d="M208 164 Q262 178 262 260 Q262 430 222 480" stroke="#f07a1a" stroke-width="9"/>
+  <path d="M238 482 L218 486 L224 462" stroke="#f07a1a" stroke-width="9"/>
+</g>
+</svg><script>
+for (const t of document.querySelectorAll('text.x')) {
+  const b = t.getBBox(), y = b.y + b.height * 0.55, n = Math.max(3, Math.round(b.width / 14));
+  let d = `M${b.x - 4} ${y}`;
+  for (let i = 1; i <= n; i++) d += ` L${b.x - 4 + i * (b.width + 8) / n} ${y + (i % 2 ? -5 : 5)}`;
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', d); p.setAttribute('fill', 'none'); p.setAttribute('stroke', '#26324f');
+  p.setAttribute('stroke-width', '3'); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
+  t.parentNode.appendChild(p);
+}
+</script></body></html>

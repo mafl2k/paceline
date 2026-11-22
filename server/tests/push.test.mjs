@@ -8,11 +8,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {planJson, clubJson, seedDb} from './helpers.mjs';
-import {CID, NOW, SETUP_AT, ROLLERS, makeClub, serve, textOf, count, post, followPost, intake, upload, storeOk} from './manage-helpers.mjs';
+import {planJson, clubJson, seedDb, liveId, T} from './helpers.mjs';
+import {CID, NOW, SETUP_AT, ROLLERS, makeClub, serve, textOf, count, post, followPost, intake, upload, storeOk, storePost, storeFlash, element} from './manage-helpers.mjs';
+import {teamView} from '../team-view.mjs';
 import {
     addEntry, receiveEntry, entryOf, sweepInbox, ClubError, INBOX_MAX, INBOX_BYTES, INBOX_KEEP_MS, RECEIVE_KEEP_MS, deleteTeam, plannerName,
-    shareOf, backTo, uploadSheet, removeRider,
+    shareOf, uploadSheet, removeRider,
 } from '../club.mjs';
 import {archiveRow} from '../logs.mjs';
 import http from 'node:http';
@@ -60,7 +61,8 @@ const plan = (name = 'Rollers fast', riders = ROLLERS.slice(0, 6)) => planJson(n
 
 // The "Plan on ZwiftGopher" link of a team page (the empty card's button, or the head's button beside
 // "Upload a plan", UI panel wave 3), or null.
-const plannerOf = body => /<a class="btn secondary (?:block|small)" href="([^"]*)" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">/.exec(body)?.[1]
+// (the team page's primary way to a plan, races spec §4)
+const plannerOf = body => /<a class="btn primary (?:block|small)" href="([^"]*)" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">/.exec(body)?.[1]
     .replaceAll('&amp;', '&') ?? null;
 
 async function pageOf(srv, cookie, p) {
@@ -76,16 +78,16 @@ test('push: the team page links to the planner with a fresh token; the upload pa
     upload(kf.club, 'sprockets', {riders: ROLLERS.slice(0, 4), at: SETUP_AT});
     const srv = await serve(t, kf, {env: ENV});
     const secret = secretOf(srv);
-    // a team without plans: the empty card's second button, under "Upload a plan"
+    // a team without plans: the empty card's main button, "Upload a file instead" after it (races spec §4)
     const body = await pageOf(srv, kf.cookie, '/manage/team/rollers');
     const href = plannerOf(body);
     assert.equal(href, `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'rollers')}&plhost=paceline.example.org`);
-    assert.match(body, /<section class="card empty"[\s\S]*?Upload a plan<\/a>\s*<a class="btn secondary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">[\s\S]*?Plan on ZwiftGopher<\/a>\s*<\/section>/);
+    assert.match(body, /<section class="card empty"[\s\S]*?<\/p>\s*<a class="btn primary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">[\s\S]*?Plan on ZwiftGopher<\/a><a class="btn quiet small" href="\/manage\/upload\?team=rollers">[\s\S]*?Upload a file instead<\/a>\s*<\/section>/);
     // no second pair in the head: the empty card has them
-    assert.ok(!body.includes('class="headacts"'), body);
-    // a team with plans: in the head, beside "Upload a plan" (UI panel wave 3; "ZwiftGopher" alone on phones)
+    assert.ok(!body.includes('class="headacts'), body);
+    // a team with plans: in the head, "Upload a file instead" under it (races spec §4)
     const other = await pageOf(srv, kf.cookie, '/manage/team/sprockets');
-    assert.match(other, /<div class="headacts"><a class="btn secondary small" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a plan<\/a><a class="btn secondary small" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[^"]*" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)"><svg[^>]*>[\s\S]*?<\/svg><span class="desk">Plan on ZwiftGopher<\/span><span class="mob">ZwiftGopher<\/span><\/a><\/div>/);
+    assert.match(other, /<section class="headacts planner"><a class="btn primary small" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[^"]*" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)"><svg[^>]*>[\s\S]*?<\/svg>Plan on ZwiftGopher<\/a><a class="btn quiet small" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a file instead<\/a><\/section>/);
     assert.ok(!other.includes('uplink'), 'no links under the plans any more');
     assert.equal(plannerOf(other), `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'sprockets')}&plhost=paceline.example.org`);
     assert.notEqual(new URL(plannerOf(other)).searchParams.get('paceline'), new URL(href).searchParams.get('paceline'));
@@ -115,8 +117,10 @@ test('push: a plan lands in the team\'s inbox, never live; 201 with the club, te
     assert.equal(c.inbox.length, 1);
     const [entry] = c.inbox;
     assert.deepEqual([entry.source, entry.via, entry.team, entry.forPlan], ['receive', 'zwiftgopher', 'rollers', null]);
+    // a pushed plan carries no race (races spec §4): the assign page asks when two are ahead
+    assert.equal(Object.hasOwn(entry, 'forDate'), false);
     assert.deepEqual(Object.keys(entry.json.riders), ROLLERS.slice(0, 6));
-    assert.equal(c.teams.rollers.live, null, 'nothing live');
+    assert.equal(liveId(c, 'rollers'), null, 'nothing live');
     assert.equal(Object.keys(c.sheets).length, 0, 'nothing stored');
 
     // text/plain is taken too (a simple request, no preflight); the header carries the token as well
@@ -372,22 +376,22 @@ test('push: the team page lists every received plan, newest first; picker and si
     const srv = await serve(t, kf, {env: ENV});
     // a link drawn 20 minutes ago
     const token = tokenFor(secretOf(srv), 'rollers', {expiry: Math.floor(NOW / 1000) - 20 * 60 + WEEK_S});
-    // an upload waiting for the team is no received plan
+    // an upload waiting for the team is listed with them, as an upload
     await intake(srv, kf.cookie, {team: 'rollers', json: planJson('Rollers', ['1001'])});
     srv.clock.now = NOW - 20 * 60000;
     assert.equal((await push(srv, token, plan('Rollers &amp; <b>fast</b>'))).status, 201);
     srv.clock.now = NOW - 5 * 60000;
     assert.equal((await push(srv, token, plan('Rollers slow', ROLLERS.slice(0, 4)))).status, 201);
     srv.clock.now = NOW;
-    const [, first, second] = srv.store.get(CID).inbox;
+    const [up, first, second] = srv.store.get(CID).inbox;
 
+    // "Not stored yet" in the list (team cockpit spec §5.2): newest first, each a link to the page with it picked
     const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
-    const text = textOf(page);
-    // Discard asks first in its place, naming the riders (B1, UI panel wave 2)
-    assert.match(text, /2 new plans from ZwiftGopher Sent 19:20 In the planner: Rollers slow · 4 riders Review and store Discard… 4 riders \(Ben, Cleo …\) Discards the plan with 4 riders \(Ben, Cleo …\)\. [^]* Discard plan Cancel Sent 19:05 In the planner: Rollers & <b>fast<\/b> · 6 riders Review and store Discard… /);
-    assert.match(page, /In the planner: Rollers &amp; &lt;b&gt;fast&lt;\/b&gt;/, 'the name is escaped');
-    assert.ok(page.indexOf(`href="/manage/inbox/${second.id}"`) < page.indexOf(`href="/manage/inbox/${first.id}"`), 'newest first');
-    assert.match(page, new RegExp(`<form class="discard" method="post" action="/manage/inbox/${first.id}/discard" data-arm><input type="hidden" name="club" value="${CID}"><input type="hidden" name="back" value="/manage/team/rollers">`));
+    const pending = element(page, '<section class="cp-pending"');
+    assert.deepEqual([...pending.matchAll(/data-sel="e:([^"]+)"><a class="cp-link" href="([^"]+)"/g)].map(m => [m[1], m[2]]),
+        [up.id, second.id, first.id].map(id => [id, `/manage/team/rollers?e=${id}#panel`]));
+    assert.match(textOf(pending), /Not stored yet Uploaded 19:25 · 'Rollers' · 1 rider Sent 19:20 · 'Rollers slow' · 4 riders Sent 19:05 · 'Rollers & <b>fast<\/b>' · 6 riders/);
+    assert.match(pending, /&#39;Rollers &amp; &lt;b&gt;fast&lt;\/b&gt;&#39;/, 'the name is escaped');
     // the rows: the sidebar (and switcher) of every page, and the picker's tile
     assert.equal(count(page, '<span class="newplans">2 new plans</span>'), 2, 'switcher and sidebar');
     const picker = await pageOf(srv, kf.cookie, '/manage');
@@ -395,36 +399,38 @@ test('push: the team page lists every received plan, newest first; picker and si
     assert.doesNotMatch(picker, /<span class="tile-name">Sprockets<\/span>[^\n]*newplans/);
     // Sprockets' page has no list, but the Rollers row in its sidebar has the mark
     const sprockets = await pageOf(srv, kf.cookie, '/manage/team/sprockets');
-    assert.doesNotMatch(sprockets, /new plans? from ZwiftGopher/);
+    assert.equal(sprockets.includes('class="cp-pending"'), false);
     assert.match(sprockets, /<span class="trow-name">Rollers <span class="newplans">2 new plans<\/span>/);
 
-    // Discard from the team page comes back to it, with one plan left
+    // Discard in the picked plan's form comes back to the team page, with one plan left
+    const picked = await pageOf(srv, kf.cookie, `/manage/team/rollers?e=${first.id}`);
+    assert.match(picked, new RegExp(`<form class="discard" method="post" action="/manage/inbox/${first.id}/discard" data-arm><input type="hidden" name="club" value="${CID}"><input type="hidden" name="back" value="/manage/team/rollers">`));
     const gone = await followPost(srv, kf.cookie, `/manage/inbox/${first.id}/discard`, {back: '/manage/team/rollers', confirm: '1'});
     assert.equal(gone.location, '/manage/team/rollers');
-    assert.match(textOf(gone.page), /New plan from ZwiftGopher Sent 19:20/);
+    assert.ok(!gone.page.includes(`data-sel="e:${first.id}"`) && gone.page.includes(`data-sel="e:${second.id}"`), gone.page);
     assert.match(gone.page, /<span class="newplans">1 new plan<\/span>/);
 });
 
 
-test('push: the assign page says where it came from and starts with Make live off', async t => {
+test('push: the Store form says where it came from and starts with Make live off', async t => {
     const kf = makeClub();
     const srv = await serve(t, kf, {env: ENV});
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 201);
     const [entry] = srv.store.get(CID).inbox;
-    const page = await pageOf(srv, kf.cookie, `/manage/inbox/${entry.id}`);
-    assert.match(textOf(page), /From ZwiftGopher, 19:25/);
+    const page = await pageOf(srv, kf.cookie, `/manage/team/rollers?e=${entry.id}`);
+    assert.match(textOf(element(page, '<div id="panel"')), /Sent 19:25 · 'Rollers fast' · 6 riders/);
     assert.match(page, /<input type="checkbox" name="live" value="on">/, 'the box is off');
     assert.doesNotMatch(page, /name="live" value="on" checked/);
     // the same plan uploaded: the box starts on (Rollers has nothing live)
     const id = await intake(srv, kf.cookie, {team: 'rollers', json: plan()});
-    const up = await pageOf(srv, kf.cookie, `/manage/inbox/${id}`);
-    assert.match(textOf(up), /Uploaded 19:25/);
+    const up = await pageOf(srv, kf.cookie, `/manage/team/rollers?e=${id}`);
+    assert.match(textOf(element(up, '<div id="panel"')), /Uploaded 19:25 · 'Rollers fast' · 6 riders/);
     assert.match(up, /name="live" value="on" checked/);
     // ticked and stored, it goes live
-    const stored = await post(srv, kf.cookie, `/manage/inbox/${entry.id}`, {team: 'rollers', as: 'new', live: 'on', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
-    assert.equal(stored.status, 200, stored.body);
+    const stored = await storePost(srv, kf.cookie, entry.id, {team: 'rollers', as: 'new', live: 'on', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
+    assert.equal(stored.status, 303, stored.body);
     const c = srv.store.get(CID);
-    assert.equal(c.sheets[c.teams.rollers.live].via, 'zwiftgopher');
+    assert.equal(c.sheets[liveId(c, 'rollers')].via, 'zwiftgopher');
 });
 
 
@@ -438,6 +444,46 @@ test('push: assignChoices starts a received entry with the box off where an uplo
         // ticked by the captain, it stays ticked through a redraw
         assert.equal(assignChoices(c, entry, new URLSearchParams({drawn: 'rollers:new', as: 'new', live: 'on'}), NOW).live, true);
     }
+});
+
+
+test('push: a pushed plan stored not live is red at once, days before its race (spec §8)', async t => {
+    // Saturday 21 Nov: Rollers' next regular race is Thu 26 Nov 19:30, 5 days ahead
+    const kf = makeClub();
+    const sat = T('2026-11-21T10:00:00Z');
+    const srv = await serve(t, kf, {env: ENV, now: sat});
+    assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 201);
+    const [entry] = srv.store.get(CID).inbox;
+    // stored as the box starts (off): not live
+    const stored = await storePost(srv, kf.cookie, entry.id, {team: 'rollers', as: 'new', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
+    assert.equal(stored.status, 303, stored.body);
+    const c = srv.store.get(CID);
+    const [[id, sheet]] = Object.entries(c.sheets).filter(([, s]) => s.team === 'rollers');
+    assert.deepEqual([sheet.date, sheet.via, liveId(c, 'rollers')], ['2026-11-26', 'zwiftgopher', null]);
+    // the Store flash: red, with Make live in the panel
+    assert.deepEqual([storeFlash(stored.body).kind, storeFlash(stored.body).text], ['err', 'Stored as v1 of \'Rollers\'. Not live: riders get nothing until you press Make live.']);
+    // (5 days before the gate it does not ask first: a plain form, primary while the race has nothing live)
+    const makeLive = sid => `action="/manage/live"><input type="hidden" name="club" value="${CID}"><input type="hidden" name="team" value="rollers"><input type="hidden" name="sheet" value="${sid}">`;
+    const body = element(stored.body, '<div id="panel-body"');
+    assert.ok(body.includes(makeLive(id)) && body.includes('<button class="btn primary" type="submit">Make v1 live</button>'), body);
+    // the team page, the picker row and the hub: red, with the hub's "Make a plan live"
+    assert.deepEqual(teamView(c, 'rollers', {now: sat}).status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
+    const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
+    assert.match(page, /<span class="sw-icon err">/);
+    assert.ok(page.includes('<a class="trow err" href="/manage/team/rollers" aria-current="page">'), page);
+    const hub = await pageOf(srv, kf.cookie, '/manage');
+    // the race's one plan: the team page with it picked (team cockpit spec §5.6)
+    assert.ok(hub.includes(`<a class="btn secondary small" href="/manage/team/rollers?v=${id}#panel">Make a plan live<span class="sr"> (Rollers)</span></a>`), hub);
+    assert.ok(hub.includes('<a class="tile edge-err" href="/manage/team/rollers">'), hub);
+    // the same file again, not live: nothing new, and still the red line with Make live
+    const again = await intake(srv, kf.cookie, {team: 'rollers', json: plan()});
+    const same = await storePost(srv, kf.cookie, again, {team: 'rollers', as: sheet.plan ?? id, drawn: `rollers:${sheet.plan ?? id}`, base: srv.store.get(CID).teams.rollers.version});
+    assert.equal(same.status, 303, same.body);
+    const flash = storeFlash(same.body);
+    assert.equal(flash.text, 'Same as \'Rollers\' v1: nothing new stored.');
+    assert.equal(flash.lines[0], 'Not live: riders get nothing until you press Make live.');
+    assert.match(element(same.body, '<div class="result" data-hold-reload>'), /^<div class="result" data-hold-reload><ul class="pv-list"><li class="err">/);
+    assert.ok(element(same.body, '<div id="panel-body"').includes(makeLive(id)), same.body);
 });
 
 
@@ -651,7 +697,7 @@ test('push: the team page shows the planner name cleaned and capped', async t =>
     const srv = await serve(t, kf, {env: ENV});
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan(`Roll&#8238;ers ${'x'.repeat(100)}`))).status, 201);
     const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
-    assert.ok(page.includes(`In the planner: Rollers ${'x'.repeat(51)}… · 6 riders`), 'cleaned and capped');
+    assert.ok(page.includes(`Sent 19:25 · &#39;Rollers ${'x'.repeat(51)}…&#39; · 6 riders`), 'cleaned and capped');
     assert.equal(page.includes('‮'), false);
 });
 
@@ -745,7 +791,7 @@ test('shareOf: plan.share_link, exactly https://zwiftgopher.com/TTT/#t=<base64ur
 });
 
 
-test('push: an uploaded plan keeps its link beside the plan, never in it; the team page and the plan page open it in the planner', async t => {
+test('push: an uploaded plan keeps its link beside the plan, never in it; the team page and the plan ⋯ open it in the planner', async t => {
     const kf = makeClub();
     const srv = await serve(t, kf, {env: ENV});
     const secret = secretOf(srv);
@@ -755,7 +801,7 @@ test('push: an uploaded plan keeps its link beside the plan, never in it; the te
     assert.equal(plannerOf(plainTeam), `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'sprockets')}&plhost=paceline.example.org`);
     const sprocketsPlan = Object.values(srv.store.get(CID).sheets).find(v => v.team === 'sprockets');
     assert.equal(Object.hasOwn(sprocketsPlan, 'zgShare'), false);
-    assert.doesNotMatch(await pageOf(srv, kf.cookie, `/manage/team/sprockets/plan/${sprocketsPlan.plan}`), /Edit on ZwiftGopher/);
+    assert.doesNotMatch(plainTeam, /Edit on ZwiftGopher/);
 
     await storeOk(srv, kf.cookie, {team: 'rollers', json: withShare(LINK)});
     const [id, version] = Object.entries(srv.store.get(CID).sheets).find(([, v]) => v.team === 'rollers');
@@ -764,8 +810,9 @@ test('push: an uploaded plan keeps its link beside the plan, never in it; the te
     assert.equal(JSON.stringify(version.text ?? null).includes(SHARE.slice(0, 40)), false, 'never in the text');
     const want = `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'rollers')}&plhost=paceline.example.org#t=${SHARE}`;
     assert.equal(plannerOf(await pageOf(srv, kf.cookie, '/manage/team/rollers')), want);
-    const planPage = await pageOf(srv, kf.cookie, `/manage/team/rollers/plan/${id}`);
-    const edit = /<a class="rowlink" href="([^"]*)" target="_blank" rel="noopener noreferrer">[\s\S]*?Edit on ZwiftGopher/.exec(planPage)?.[1].replaceAll('&amp;', '&');
+    // the plan ⋯ of its block on the team page
+    const menu = element(await pageOf(srv, kf.cookie, '/manage/team/rollers'), `<section class="cp-plan live" id="plan-${version.plan ?? id}"`);
+    const edit = /<a class="menu-link" href="([^"]*)" target="_blank" rel="noopener noreferrer">[\s\S]*?Edit on ZwiftGopher/.exec(menu)?.[1].replaceAll('&amp;', '&');
     assert.equal(edit, want);
 });
 
@@ -794,10 +841,10 @@ test('push: a pushed plan brings its link to the stored version', async t => {
     assert.equal(res.status, 201);
     const [entry] = srv.store.get(CID).inbox;
     assert.equal(entry.zgShare, SHARE);
-    const stored = await post(srv, kf.cookie, `/manage/inbox/${entry.id}`, {team: 'rollers', as: 'new', live: 'on', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
-    assert.equal(stored.status, 200, stored.body);
+    const stored = await storePost(srv, kf.cookie, entry.id, {team: 'rollers', as: 'new', live: 'on', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
+    assert.equal(stored.status, 303, stored.body);
     const c = srv.store.get(CID);
-    assert.equal(c.sheets[c.teams.rollers.live].zgShare, SHARE);
+    assert.equal(c.sheets[liveId(c, 'rollers')].zgShare, SHARE);
     assert.ok(plannerOf(await pageOf(srv, kf.cookie, '/manage/team/rollers')).endsWith(`#t=${SHARE}`));
 });
 
@@ -807,7 +854,7 @@ test('push: the link never reaches a rider: not in the plan check\'s answer, not
     const srv = await serve(t, kf, {env: ENV});
     await storeOk(srv, kf.cookie, {team: 'rollers', json: withShare(LINK)});
     const c = srv.store.get(CID);
-    const id = c.teams.rollers.live;
+    const id = liveId(c, 'rollers');
     assert.equal(c.sheets[id].zgShare, SHARE);
     // in the race (Rollers 19:30, the gate has opened): the answer has the plan itself
     const res = await fetch(`${srv.base}/api/v3/rider/1001?mod=0.3.0&joined=${CID}&start=${Date.parse('2026-11-19T18:30:00Z')}&event=4567890`);
@@ -882,16 +929,9 @@ test('push: the team link takes the live version\'s ZwiftGopher link, else the n
     assert.ok(plannerOf(await pageOf(srv, kf.cookie, '/manage/team/rollers')).endsWith('#t=newer1'), 'the newest of the race');
     // the live version's own wins
     srv.store.change(CID, c => {
-        c.sheets[c.teams.rollers.live].zgShare = 'live1';
+        c.sheets[liveId(c, 'rollers')].zgShare = 'live1';
     });
     assert.ok(plannerOf(await pageOf(srv, kf.cookie, '/manage/team/rollers')).endsWith('#t=live1'), 'the live one');
-    // Back to a version copies its share id
-    const c = structuredClone(srv.store.get(CID));
-    const v2 = uploadSheet(c, {slug: 'rollers', json: planJson('Rollers fast', ROLLERS.slice(0, 4)), text: null, as: newer, type: 'fast', live: false,
-        base: c.teams.rollers.version}, {now: SETUP_AT + 120000, newId: () => randomId(6)});
-    assert.equal(Object.hasOwn(c.sheets[v2.id], 'zgShare'), false, 'v2 has none');
-    const r = backTo(c, 'rollers', {plan: newer, n: 1, version: c.teams.rollers.version}, {now: SETUP_AT + 180000, newId: () => randomId(6)});
-    assert.equal(c.sheets[r.id].zgShare, 'newer1', 'v3, a copy of v1, has v1\'s');
 });
 
 
