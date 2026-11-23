@@ -1,0 +1,52 @@
+{
+    "manifest_version": 1,
+    "name": "Paceline",
+    "description": "TTT rotation helper and team recorder.",
+    "author": "mafl",
+    "version": "0.3.5-beta.0",
+    "web_root": "pages",
+    "windows": [
+        {
+            "file": "pages/paceline.html",
+            "id": "paceline",
+            "name": "Paceline Info",
+            "description": "Plan check, front rider, your wheel and the team recorder.",
+            "overlay": true,
+            "frame": false,
+            "default_bounds": {
+                "width": 340,
+                "height": 190,
+                "x": 20,
+                "y": 200
+            }
+        },
+        {
+            "file": "pages/action.html",
+            "id": "paceline-action",
+            "name": "Paceline Action",
+            "description": "Your pull: target watts, time left and power bar; also the countdown to your pull unless the Rest window shows it.",
+            "overlay": true,
+            "frame": false,
+            "default_bounds": {
+                "width": 300,
+                "height": 130,
+                "x": 20,
+                "y": 400
+            }
+        },
+        {
+            "file": "pages/rest.html",
+            "id": "paceline-rest",
+            "name": "Paceline Rest",
+            "description": "Countdown to your pull (NEXT in the last 10 seconds) and your place in the line.",
+            "overlay": true,
+            "frame": false,
+            "default_bounds": {
+                "width": 220,
+                "height": 90,
+                "x": 20,
+                "y": 560
+            }
+        }
+    ]
+}

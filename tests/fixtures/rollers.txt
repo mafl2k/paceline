@@ -1,0 +1,7 @@
+RiderName	PullWatts	PullDurationSeconds	KitColorName	KitColorHex
+Arvid Lindqvist [KFR]	286	120	White	#FFFFFF
+Bodo Hartwig	338	60	Blue	#0000FF
+Kim S &#9733; [KFR]	238	60	Yellow	#FFF000
+Dario Brandl [KFR]	266	60	Black	#000000
+Edda Voss	319	15	Red	#CC0000
+Fritz  Ohlsen	309	15	Lime	#00CC00

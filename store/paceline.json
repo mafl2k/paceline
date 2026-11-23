@@ -1,0 +1,16 @@
+{
+    "id": "5095b00e-ca4c-4992-8fcf-384859a985a3",
+    "name": "Paceline",
+    "description": "TTT rotation helper and team recorder. It carries your team's TTT plan into the ride: who is pulling, whose wheel you are on, how long until your pull, and your target watts while you pull.",
+    "tags": [
+        "ttt",
+        "team time trial",
+        "pacing",
+        "rotation",
+        "wtrl"
+    ],
+    "homeURL": "https://github.com/mafl2k/paceline",
+    "logoURL": "https://raw.githubusercontent.com/mafl2k/paceline/main/docs/images/logo.png",
+    "authorName": "Matthew Butcher",
+    "minVersion": "2.3.0"
+}
