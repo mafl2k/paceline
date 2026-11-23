@@ -1105,9 +1105,16 @@ const parse = line => {
 // ---- taking riders out of a recording (Remove a rider) ----
 
 // The fields of a recording line that hold a Zwift ID as a number or a string: a row's and a plan
-// entry's id, the tick's selfId and watchingId, the det fields (recording.mjs DET_ID_FIELDS, gap.id)
-// and what the windows showed (shown.wheel.planned and .live, shown.next.id).
+// entry's id, the tick's selfId and watchingId, the det fields (recording.mjs DET_ID_FIELDS, gap.id,
+// the old core's det.old.puller and .frontId) and what the windows showed (shown.wheel.planned and
+// .live, shown.next.id). The turn clocks' change (det.turn.change, 23 Nov 2026) names its riders in
+// `from` and `to`: ID fields there only (TURN_ID_KEYS), since `from`/`to` elsewhere need not be IDs.
+// Their lists (det.turn.hanging and .out, det.old.out) are lists of IDs.
 const ID_KEYS = new Set(['id', 'athleteId', 'selfId', 'watchingId', 'puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue', 'planned', 'live']);
+const TURN_ID_KEYS = new Set([...ID_KEYS, 'from', 'to']);
+// Where the walk is: 'det' (a line's det), 'det.turn', 'det.turn.change'; null elsewhere.
+const scopeOf = (at, k) => at === null ? (k === 'det' ? 'det' : null) :
+    at === 'det' ? (k === 'turn' ? 'det.turn' : null) : at === 'det.turn' && k === 'change' ? 'det.turn.change' : null;
 // plan codes: six characters that could be all digits, never a rider
 const CODE_KEYS = new Set(['planSig', 'sig', 'recSig']);
 const DROP = Symbol('drop');
@@ -1120,8 +1127,8 @@ const idIn = (v, gone) => (typeof v === 'string' || typeof v === 'number') && go
 // whole value is one, as a number or a string, becomes null, and so does `selfName` next to a
 // `selfId` of theirs. Nothing else: no text is searched for an ID inside it (a team called
 // "Rollers 2" stays when rider 2 goes), plan codes stay, and so does a number under any other key.
-// The same value when nothing changed.
-export function withoutRiders(v, gone) {
+// The same value when nothing changed. `at`: where the walk is (scopeOf), for det.turn.change.
+export function withoutRiders(v, gone, at = null) {
     if (Array.isArray(v)) {
         let changed = false;
         const out = [];
@@ -1141,16 +1148,17 @@ export function withoutRiders(v, gone) {
     }
     let out = null;
     const theirs = Object.hasOwn(v, 'selfId') && idIn(v.selfId, gone);
+    const keys = at === 'det.turn.change' ? TURN_ID_KEYS : ID_KEYS;
     for (const [k, x] of Object.entries(v)) {
         let y;
         if (gone.has(k)) {
             y = DROP;
         } else if (CODE_KEYS.has(k)) {
             y = x;
-        } else if ((ID_KEYS.has(k) && idIn(x, gone)) || (theirs && k === 'selfName' && x !== null)) {
+        } else if ((keys.has(k) && idIn(x, gone)) || (theirs && k === 'selfName' && x !== null)) {
             y = null;
         } else {
-            y = withoutRiders(x, gone);
+            y = withoutRiders(x, gone, scopeOf(at, k));
         }
         if (y !== x) {
             out ??= {...v};

@@ -204,18 +204,19 @@ export function alignedPositions(nearby, ids) {
 }
 
 
-// The run of consecutive riders around me where each gap to the next is at most CHAIN_GAP_M.
-export function teamChain(positions, selfId) {
+// The run of consecutive riders around me where each gap to the next is at most gapM (default
+// CHAIN_GAP_M; the turn clocks link within 30 m).
+export function teamChain(positions, selfId, gapM = CHAIN_GAP_M) {
     const i = positions.findIndex(p => p.id === selfId);
     if (i < 0) {
         return [];
     }
     let a = i;
-    while (a > 0 && positions[a - 1].x - positions[a].x <= CHAIN_GAP_M) {
+    while (a > 0 && positions[a - 1].x - positions[a].x <= gapM) {
         a--;
     }
     let b = i;
-    while (b < positions.length - 1 && positions[b].x - positions[b + 1].x <= CHAIN_GAP_M) {
+    while (b < positions.length - 1 && positions[b].x - positions[b + 1].x <= gapM) {
         b++;
     }
     return positions.slice(a, b + 1);
@@ -633,12 +634,13 @@ export function draftRun(run, {t, ok}) {
 }
 
 
-// Plan riders seen in my chain within PRESENT_GRACE_MS count as present, so countdowns do not jump
-// when someone flickers out. seen: {id: last seen ms}. Returns the new map and the present ids.
-export function presence(seen, {now, chainIds}) {
+// Plan riders seen in my chain within graceMs (default PRESENT_GRACE_MS) count as present, so
+// countdowns do not jump when someone flickers out. seen: {id: last seen ms}. Returns the new map and
+// the present ids.
+export function presence(seen, {now, chainIds, graceMs = PRESENT_GRACE_MS}) {
     const out = {};
     for (const [id, at] of Object.entries(seen || {})) {
-        if (now - at < PRESENT_GRACE_MS) {
+        if (now - at < graceMs) {
             out[id] = at;
         }
     }
@@ -1166,6 +1168,19 @@ export function rotationStatus(st, {now, plan, selfId, live, quietStart = false}
 }
 
 
+// What the recorder keeps of the old core once the turn clocks run (spec 2026-11-23 section 4): the
+// puller and his since, the front rider of my chain, the reason (rotationStatus, without the quiet
+// start), chaos, the riders sitting out and my countdown (one decimal, `standing`), null unless the
+// view exists, is not mine and has a finite toMyPullS.
+export function shadowDet(st, {now, plan, selfId, live}) {
+    const {view, reason} = rotationStatus(st, {now, plan, selfId, live});
+    const cd = view && !view.mine && Number.isFinite(view.toMyPullS) ?
+        {t: Math.round(view.toMyPullS * 10) / 10, standing: !!view.standing} : null;
+    return {puller: st.front?.puller ?? null, since: st.front?.since ?? null, frontId: st.frontId ?? null,
+            reason, chaos: !!st.order?.chaos, out: orderOutIds(st.order), cd};
+}
+
+
 // What the recorder keeps of the learned countdown (21 Nov 2026, design 2026-11-21-paceline-beta5 §3;
 // for a check after the next TTT): `te`, the team's learned turn time E (plans up to LONG_PULL_S /
 // longer), the hand-over time H and how many values each rests on; `cdOld`, the countdown the fixed
@@ -1245,7 +1260,7 @@ function endThreshold(target) {
 
 // When I am next: 'due' (the puller has JUMP_GATE_S or less left), 'gone' (I am first in my
 // chain), else null. Only then can my own pull start.
-function startGate(view, {chainIds, selfId}) {
+export function startGate(view, {chainIds, selfId}) {
     if (!view || view.mine || view.next?.id !== selfId) {
         return null;
     }
@@ -1253,6 +1268,36 @@ function startGate(view, {chainIds, selfId}) {
         return 'due';
     }
     return earlyStartAllowed({chainIds, selfId, pullerId: view.puller.id}) ? 'gone' : null;
+}
+
+
+// The start of rotationStep (extracted unchanged for the turn clocks): my roll-off out of the pen,
+// the start lock and the end of a start. prev supplies still, rolledAt, startAt, locked, finish and
+// over; `still` is this step's stillStep result, `present` this step's present ids, `entry` my own
+// nearby entry. Returns {rolledAt, over, startAt, locked, unlocked, starting, p1}.
+export function startStep(prev, {now, live, still, present, plan, selfId, entry}) {
+    const rolledAt = live && prev.still?.still && !still.still ? now : (prev.rolledAt ?? null);
+    // The start (START_LOCK_MS): a roll-off after the pen with a plan sets the first plan rider
+    // present as the puller (startPuller); with nobody known it is a plain roll-off.
+    const rollOff = rolledAt === now && prev.rolledAt !== now && prev.still?.since != null &&
+        now - prev.still.since >= START_PEN_MS && !!plan?.riders?.length;
+    const p1 = rollOff ? startPuller(plan, {presentIds: present, selfId}) : null;
+    const starting = p1 !== null;
+    // Standing START_PEN_MS (a pen) ends the last start (audit fixes, 20 Nov 2026, M8; probe p41:
+    // startAt stayed set from the first race, so in the pen of a second race in the same session
+    // penModel did not arm plan #1; now it is null from 30 s of standing).
+    // Not while I stand after the finish line (`over`; final review, 21 Nov 2026, M-4; probe m8: plan
+    // #1 standing from 140 s after the line at 120 s got READY from 170 s on, while the gate was
+    // still open): the stand that began in finish mode keeps the start until I ride on or Sauce
+    // shows another event (an event distance or time not at its finish: the next race's pen).
+    const another = live && !!entry && entry.remainingType === 'event' && Number.isFinite(entry.remaining) &&
+        !finishMode(entry);
+    const over = still.still && !another && (!!prev.finish || !!prev.over);
+    const stood = still.still && still.since != null && now - still.since >= START_PEN_MS && !over;
+    const startAt = starting ? now : rollOff || stood ? null : prev.startAt ?? null;
+    const locked = startAt !== null && now - startAt < START_LOCK_MS;
+    const unlocked = !locked && !!prev.locked;
+    return {rolledAt, over, startAt, locked, unlocked, starting, p1};
 }
 
 
@@ -1275,33 +1320,17 @@ export function rotationStep(prev, {now, plan, riderIds, selfId, nearby, hist, d
         stillStep(prev.still, {now, speed: Number(selfEntry(nearby)?.state?.speed),
                                tracking: prev.front.puller != null}) :
         (prev.still || {still: false, since: null});
-    st.rolledAt = live && prev.still?.still && !st.still.still ? now : (prev.rolledAt ?? null);
     st.finish = finishStep(prev.finish, {live, entry: selfEntry(nearby), still: st.still.still});
     ({seen: st.seen, ids: st.present} = presence(prev.seen, {now, chainIds: st.chain.map(c => c.id)}));
+    const entry = selfEntry(nearby);
+    const {rolledAt, over, startAt, locked, unlocked, starting, p1} =
+        startStep(prev, {now, live, still: st.still, present: st.present, plan, selfId, entry});
+    st.rolledAt = rolledAt;
+    st.over = over;
+    st.startAt = startAt;
+    st.locked = locked;
     st.joiner = st.still.still ? null : joinerStep(prev, {now, frontId: st.frontId, plan, selfId});
     const trackId = st.joiner ? null : st.frontId;    // the front rider for front tracking
-    // The start (START_LOCK_MS): a roll-off after the pen with a plan sets the first plan rider
-    // present as the puller (startPuller); with nobody known it is a plain roll-off.
-    const rollOff = st.rolledAt === now && prev.rolledAt !== now && prev.still?.since != null &&
-        now - prev.still.since >= START_PEN_MS && !!plan?.riders?.length;
-    const p1 = rollOff ? startPuller(plan, {presentIds: st.present, selfId}) : null;
-    const starting = p1 !== null;
-    // Standing START_PEN_MS (a pen) ends the last start (audit fixes, 20 Nov 2026, M8; probe p41:
-    // startAt stayed set from the first race, so in the pen of a second race in the same session
-    // penModel did not arm plan #1; now it is null from 30 s of standing).
-    // Not while I stand after the finish line (`over`; final review, 21 Nov 2026, M-4; probe m8: plan
-    // #1 standing from 140 s after the line at 120 s got READY from 170 s on, while the gate was
-    // still open): the stand that began in finish mode keeps the start until I ride on or Sauce
-    // shows another event (an event distance or time not at its finish: the next race's pen).
-    const entry = selfEntry(nearby);
-    const another = live && !!entry && entry.remainingType === 'event' && Number.isFinite(entry.remaining) &&
-        !finishMode(entry);
-    st.over = st.still.still && !another && (!!prev.finish || !!prev.over);
-    const stood = st.still.still && st.still.since != null && now - st.still.since >= START_PEN_MS && !st.over;
-    st.startAt = starting ? now : rollOff || stood ? null : prev.startAt ?? null;
-    const locked = st.startAt !== null && now - st.startAt < START_LOCK_MS;
-    const unlocked = !locked && !!prev.locked;
-    st.locked = locked;
     st.climb = climbState(prev.climb, {now, grade: live && !locked ? grade : null});
     st.hill = locked ? initialHill() : hillMode(st.climb, {now, terrain: live ? terrain : undefined});
     const prevHill = prev.hill || initialHill();

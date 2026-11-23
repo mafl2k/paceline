@@ -78,6 +78,53 @@ mkdir <dir> && git -C <repo> archive v0.2.13 | tar -x -C <dir>
 
 The current engine is the repository itself (`.`).
 
+## Score the turn clocks
+
+The same `score.mjs` scores the new core (`pages/src/engine/turns.mjs`, the turn clocks) and old
+versions, so one reference judges them all:
+
+```
+node tools/race-ref/score.mjs . <reference.json> <recording.jsonl[.gz]> [--plan <SIG>=<plan.json> ...]
+        [--core rotation|turns] [--filter] [--route <getRoute.json>] [--segments <getSegments.json>]
+        [--provisional]
+```
+
+- `--core`: which adapter runs. Without it the checkout decides: one that has
+  `pages/src/engine/turns.mjs` is scored with the new core, an old one (v0.2.13, v0.3.4, ...) with
+  the old adapter, which is unchanged, so the 22 Nov numbers for those versions stand. `rotation`
+  forces the old adapter, which scores the shadow `rotation.mjs` of a new checkout; `turns` forces
+  the new one.
+- `--filter`: turns the power filter on (off in the mod; only the new core has it).
+- `--provisional`: measuring only (off in the mod; only the new core has it). After a climb, while
+  the display waits for the order (the windows' quiet `regroup`), the new core shows a provisional
+  countdown as soon as it has a clear puller, as if he were the owner. The usual figures then count
+  that view as shown (puller, countdown, my turn). The old adapter ignores the flag.
+- `--route`: the climb index for the new core, as the live mod builds it (the route's own segments
+  over climbs count). The file is the JSON of Sauce's `Common.getRoute(id)` for the race's route,
+  fetched read-only once and kept outside the repository (route data is not part of it). Without
+  it the engine goes by the live grade where the recording has no index. Recordings from this
+  version carry their index themselves (`climbs` on a tick: the last one seen so far is used), so
+  they need no route file; a recorded index wins over `--route`.
+- The new adapter steps `turns.mjs` and `gaps.mjs` per tick, as the mod does, with the distance to
+  the event's end for the end phase. It never shows chaos (`chaosInOrder` is 0), and the
+  output has `hang`, the positions shown as hanging.
+
+Three figures are new, for the turn clocks:
+
+- `hillDisp`: per reference hill window `{start, end, dispS}`, the seconds of it with a climb display on.
+- `dispOffHill`: how many display episodes (as `displayEnds`) start more than 60 s outside every
+  hill window (`DISP_NEAR_HILL_S`).
+- `belowLong`: how many runs, per rider, of more than 30 s (`BELOW_LONG_S`) of being shown below the
+  line while in the reference group, with me in it. Seconds up to 2 s apart are one run (as `flick`).
+
+And three for the provisional countdown (0 / null without `--provisional`; null for the old adapter):
+
+- `provS`: the seconds with a provisional view.
+- `provRight`: the percent of those seconds, from 5 s into a reference turn, in which the
+  provisional puller is that turn's rider.
+- `provJump`: `{med, n}`, my countdown steps of 10 s or more at the second the provisional view
+  ends (the order confirmed or replaced): their median and how many.
+
 ## Real data stays out of the repository
 
 Recordings, plans, references and reports hold real riders. Unpack the race folder outside this

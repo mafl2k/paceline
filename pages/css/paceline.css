@@ -375,6 +375,9 @@ html.pl-info.pl-vanish #pl-box > * { visibility: hidden; }
 .pl-trow.pl-pulling .pl-rot-num { color: inherit; }
 .pl-trow.pl-me, .pl-trow.pl-me .pl-rot-num { color: var(--pl-ok); }
 .pl-trow.pl-absent, .pl-trow.pl-absent .pl-rot-num { color: var(--pl-dim); }
+/* Turn clocks (23 Nov 2026): a rider hanging behind a gap or sitting out after a skip, dim in his
+   plan slot (no dashed line: he is still with the group). */
+.pl-trow.pl-hang, .pl-trow.pl-hang .pl-rot-num { color: var(--pl-dim); }
 /* Chaos (20 Nov 2026): the riders below "Order ≠ plan" are the plan's order, not the real one. */
 .pl-trow.pl-offplan, .pl-trow.pl-offplan .pl-rot-num { color: var(--pl-dim); }
 /* Captain table: the slot for the "Order ≠ plan" row, empty at the bottom outside chaos, so the
@@ -725,10 +728,11 @@ html.pl-mid-same .pl-tri-now .pl-tri-num { font-weight: 800; }
     border: 3px solid #111;
     border-radius: 4px;
     background: #fff;
-    transition: left 0.4s linear, background-color 0.3s;
+    transition: left 1s linear, background-color 0.3s;    /* glides from one 1 Hz sample to the next */
 }
-/* The marker's colour: the zone of the filtered power (median, smoothing, 2 % deadband), white at
-   the start of a pull. The dark border keeps it visible on the bar's zone of the same colour. */
+/* The marker's colour: the zone it stands in (filtered power: median, smoothing, snap; kept 1 %
+   past a zone's edge), white at the start of a pull. The dark border keeps it visible on the bar's
+   zone of the same colour. */
 .pl-bar-marker[data-zone="green"] { background: var(--pl-ok); }
 .pl-bar-marker[data-zone="amber"] { background: var(--pl-amber); }
 .pl-bar-marker[data-zone="red"] { background: var(--pl-bad); }

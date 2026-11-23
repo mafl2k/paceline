@@ -186,13 +186,13 @@ test('critical: riders let go earlier stay let go when a gap opens further ahead
 });
 
 
-test('gapView: riders far behind a later gap are not counted with the gap ahead of them', () => {
+test('gapView: riders far behind a later gap are counted with the gap ahead of them', () => {
     // Four together, #4 12 m back, two more 80 m behind him that showed up only now (never let go).
     const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
     let st = run(t => line(ids.slice(0, 4), [2, 2, 12]), {to: 20, selfId: 'a'});
     st = run(() => line(ids, [2, 2, 12, 80, 2]), {from: 21, to: 40, selfId: 'a', st});
     const v = G.gapView(st, 'a');
-    assert.deepEqual([v.id, v.n, v.critical], ['d', 1, true]);
+    assert.deepEqual([v.id, v.n, v.critical], ['d', 3, true]);
 });
 
 
@@ -595,4 +595,64 @@ test('gapView: my closing gap gives way only to a critical growing gap, not to o
     assert.equal(G.gapView(both, 'me').id, 'needed');
     const spareOnly = {frontId: 'a', riders: {me: gap(1, true, true), spare: gap(2, false)}};
     assert.deepEqual([G.gapView(spareOnly, 'me').id, G.gapView(spareOnly, 'me').closing], ['me', true]);
+});
+
+
+// ---------- who a gap cuts off: everyone behind it (user, 23 Nov 2026) ----------
+
+// Me at the front, ann 2 m back, ben 12 m behind her, cleo 2 m behind ben, dan 12 m behind cleo, eve 2 m
+// behind dan: two full gaps, the first one before ben.
+const ROW = ['me', 'ann', 'ben', 'cleo', 'dan', 'eve'];
+
+test('gapView: a full gap counts everyone behind it, also behind a second gap', () => {
+    const st = run(() => line(ROW, [2, 12, 2, 12, 2]), {to: 8});
+    assert.equal(st.riders.dan.open, true, 'both gaps are full');
+    const v = G.gapView(st, 'me');
+    assert.deepEqual([v.id, v.n, v.m], ['ben', 4, 12]);
+});
+
+
+test('gapView: a gap that just closed no longer ends the list', () => {
+    // dan's gap goes from 12 m to 4 m for 2 steps: the median is under GAP_OFF_M, but the gap is open
+    // until it has been below for GAP_CLEAR_MS.
+    const st = run(t => line(ROW, [2, 12, 2, t <= 8 ? 12 : 4, 2]), {to: 10});
+    assert.equal(st.riders.dan.open, true);
+    assert.ok(st.riders.dan.m < G.GAP_ON_M);
+    assert.equal(G.gapView(st, 'me').n, 4);
+});
+
+
+test('gapView: riders let go are not counted', () => {
+    // eve is 60 m behind dan; needed 2 makes no gap critical, so she is let go.
+    const st = run(() => line(ROW, [2, 12, 2, 12, 60]), {to: 8, needed: 2});
+    assert.equal(st.riders.eve.lost, true);
+    const v = G.gapView(st, 'me');
+    assert.deepEqual([v.id, v.n, v.critical], ['ben', 3, false]);
+});
+
+
+test('cutOff: everyone at or behind the frontmost full or let-go gap', () => {
+    const st = run(() => line(ROW, [2, 12, 2, 12, 2]), {to: 8});
+    assert.deepEqual(G.cutOff(st, 'me'), {ids: ['ben', 'cleo', 'dan', 'eve'], id: 'ben', m: 12});
+    // A rider let go counts as a cut, and so do those behind him.
+    const lost = run(() => line(ROW, [2, 2, 2, 2, 60]), {to: 8, needed: 2});
+    assert.deepEqual(G.cutOff(lost, 'me'), {ids: ['eve'], id: 'eve', m: 60});
+    // From a rider in the middle of the group ahead of the gap: the same list.
+    assert.deepEqual(G.cutOff(st, 'ann').ids, ['ben', 'cleo', 'dan', 'eve']);
+});
+
+
+test('cutOff: a full gap under 10 m cuts nobody; null when I am behind the gap or not in the group', () => {
+    // ben's gap shrinks to 8 m (smoothed), still open: under GAP_ON_M it cuts nobody.
+    const st = run(t => line(ROW, [2, t <= 8 ? 12 : 8, 2, 2, 2]), {to: 12});
+    assert.equal(st.riders.ben.open, true);
+    assert.equal(st.riders.ben.m, 8);
+    assert.equal(G.cutOff(st, 'me'), null);
+    // Me as eve: the gaps are ahead of me, nobody is hanging behind me.
+    const full = run(() => line(ROW, [2, 12, 2, 12, 2]), {to: 8, selfId: 'eve'});
+    assert.equal(G.cutOff(full, 'eve'), null);
+    assert.equal(G.cutOff(full, 'ben'), null, 'at the gap myself');
+    assert.equal(G.cutOff(full, 'x'), null, 'not in the group');
+    assert.equal(G.cutOff(null, 'me'), null);
+    assert.equal(G.cutOff(run(() => line(ROW, [2, 2, 2, 2, 2]), {to: 8}), 'me'), null, 'a tight line');
 });

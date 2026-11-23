@@ -109,6 +109,31 @@ test('detPlanOnly: the det ids name only riders of the current plan (starters an
     assert.equal(R.detPlanOnly(null, ids, '5'), null);
 });
 
+test('detPlanOnly: turn and old fields keep only plan riders and me', () => {
+    const ids = R.planIds({riders: [{id: '1'}, {id: '7'}], bench: [{id: '3'}]});
+    const det = {puller: '1', frontId: '9',
+                 turn: {change: {kind: 'skip', from: '9', to: '7'}, disp: {why: 'front', at: 5},
+                        hanging: ['1', '8', '3'], out: ['8', '7', '5']},
+                 old: {puller: '8', frontId: '3', out: ['9', '1'], view: 'rest', kind: 'next'}};
+    const out = R.detPlanOnly(det, ids, '5');
+    assert.deepEqual(out.turn.change, {kind: 'skip', from: null, to: '7'}, 'the change keeps its kind');
+    assert.deepEqual(out.turn.disp, {why: 'front', at: 5});
+    assert.deepEqual(out.turn.hanging, ['1', '3']);
+    assert.deepEqual(out.turn.out, ['7', '5'], 'me stays');
+    assert.deepEqual(out.old, {puller: null, frontId: '3', out: ['1'], view: 'rest', kind: 'next'});
+    // the input is untouched
+    assert.deepEqual(det.turn.hanging, ['1', '8', '3']);
+    assert.equal(det.turn.change.from, '9');
+    assert.equal(det.old.puller, '8');
+    // no change, no disp, a missing turn or old: as they were
+    assert.deepEqual(R.detPlanOnly({turn: {change: null, disp: null, hanging: [], out: []}}, ids, '5'),
+                     {turn: {change: null, disp: null, hanging: [], out: []}});
+    assert.deepEqual(R.detPlanOnly({turn: {change: {kind: 'first', from: null, to: '1'}}}, ids, '5'),
+                     {turn: {change: {kind: 'first', from: null, to: '1'}}});
+    assert.deepEqual(R.detPlanOnly({puller: '1'}, ids, '5'), {puller: '1'});
+    assert.deepEqual(R.detPlanOnly({old: {puller: '1'}}, ids, '5'), {old: {puller: '1'}});
+});
+
 
 test('detPlanOnly: det.order.out keeps only riders of the current plan or me', () => {
     const ids = new Set(['1', '2', '3']);

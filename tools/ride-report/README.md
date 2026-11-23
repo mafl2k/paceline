@@ -62,14 +62,24 @@ left out of checks 2, 3 and 4. The gap check needs no such rule: finish mode tur
    during his pull that holds 3 s (a brief naming the engine left again does not count; no limit
    backwards; a change across more than 15 s with nobody visible in front is not measurable);
    locks (a wrong puller held > 10 s while the front is someone
-   else), climb/descent pauses and what followed. Not judged: the start lock (60 s), finish mode,
+   else), climb/descent pauses and what followed (with the turn clocks, key `det.old` or `det.turn`,
+   a pause is only the seconds the climb display was on, `det.turn.disp`; a real hill alone is none,
+   as the rotation runs normally there; older recordings pause on every real hill, `det.hill`). Not judged: the start lock (60 s), finish mode,
    pauses, riding alone, < 10 km/h. Replay fidelity per plan: when the front rider of the replay
    differs from the live one, the recording lacks riders the live engine saw, except with
    `--plan-all` where another plan was live: there the replay runs a different plan and is not
-   comparable with live (the report says so). A run of ticks naming a puller ends at a hole of more
+   comparable with live (the report says so). The replay runs the old core (`rotation.mjs`) while it
+   exists; the turn clocks are scored with `tools/race-ref/score.mjs`. With the key `det.old` (the
+   windows run on the turn clocks) `det.puller` is the new core's and the table says "live, neuer
+   Kern"; the fidelity then compares the replay with the old core's `det.old.puller` and
+   `det.old.frontId` (ticks with `det.old` null, a failed shadow step, are left out); older
+   recordings keep the old core in the top-level `det.puller`/`det.frontId`, which the fidelity
+   reads then. A run of ticks naming a puller ends at a hole of more
    than 3 s between ticks. Chaos phases (since 0.3.4: the team does not ride the plan's order and
-   the countdown goes silent): live from `det.order.chaos` (or `det.reason` `chaos`; `det.view`
-   still says `rest`/`next` there), in the replay from the engine's order state; each with its
+   the countdown goes silent): live from `det.old.chaos` (the old core's, recorded beside the
+   windows' turn clocks since they run on `turns.mjs`; the windows' own reason never says `chaos`),
+   in older recordings from `det.order.chaos` (or `det.reason` `chaos`; `det.view` still says
+   `rest`/`next` there), in the replay from the engine's order state; each with its
    start, end and what ended it (3 changes in plan order, a new plan, finish mode, the end of the
    race). A climb in chaos does not end a phase. The seconds in chaos are judged like normal running
    (the info window shows the real puller) and counted apart. Recordings before 0.3.4 have no live
@@ -93,10 +103,11 @@ left out of checks 2, 3 and 4. The gap check needs no such rule: finish mode tur
    240/120/60/30/10 s before T0 (a look at or before my previous turn's end has no value), the
    READY lead before T0, and from 5 min after the roll-off the summary: median per look, signed and
    absolute median over all looks, the share late by more than 3 s at 10 s, the READY median. The
-   **shadow** (`det.cdOld`, recorded since beta.5) is the fixed rule's countdown recorded beside the
-   shown one; the report runs it through the windows' clock smoothing (`clock.mjs`, READY at 10 s or
+   **shadow** is the countdown recorded beside the shown one: with the turn clocks `det.old.cd`, the old
+   core's own (learned) countdown, while the windows show the fixed rule; before that `det.cdOld`
+   (since beta.5), the fixed rule's; the report runs it through the windows' clock smoothing (`clock.mjs`, READY at 10 s or
    less) wherever the window showed a countdown (not in chaos) and gives the same numbers, so the
-   learned and the fixed countdown can be compared on one ride. A recording without `det.cdOld`
+   learned and the fixed countdown can be compared on one ride. A recording without `det.old.cd` or `det.cdOld`
    has no shadow. The same measurement as the validation of 21 Nov 2026, on the recorder's view.
 5. **Gaps**: real gaps (smoothed ≥ 10 m, 15 m on a hill, for ≥ 5 s); warnings as shown
    (`det.gap`) and as the current engine gives them (replay), timed against the raw gap's 8 m,

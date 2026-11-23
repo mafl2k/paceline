@@ -9,10 +9,17 @@ export const AFTER_PAUSE_MS = 20000;   // a lock starting this soon after a paus
 export const HANDOVER_MS = 15000;
 export const RUN_HOLE_MS = 3000;       // a longer hole between ticks ends a run of one naming      // a change with a longer unseen stretch between two pulls has no lag
 
-// A pause of the rotation in the tick (a real climb or descent): det.hill, older versions det.climb.
+// A pause of the rotation in the tick. Recordings of the old core: a real climb or descent, det.hill
+// 'pause' (older versions det.climb). Since the turn clocks (23 Nov 2026; the key `old` or det.turn)
+// the rotation runs normally on a real hill and det.hill says 'pause' on every one of them: the
+// pause is then only the seconds the climb display was on (det.turn.disp, reason 'climb'/'descent';
+// after the hill 'regroup', det.turn.disp.quiet).
 export function pausedAt(det) {
     if (!det) {
         return false;
+    }
+    if (hasShadow(det) || Object.hasOwn(det, 'turn')) {
+        return !!det.turn?.disp;
     }
     return Object.hasOwn(det, 'hill') ? det.hill === 'pause' : det.climb === true;
 }
@@ -23,9 +30,31 @@ export function pausedAt(det) {
 // the real puller, so these seconds are judged here like normal running. A tick is in chaos by the
 // order state: live det.order.chaos (or det.reason 'chaos'; det.view still says 'rest'/'next'
 // there), in the replay the engine's state `order`. Recordings before 0.3.4 have no det.order:
-// no live phases then (the replay still finds them).
+// no live phases then (the replay still finds them). Since the windows run on the turn clocks
+// (23 Nov 2026) the old core's chaos is recorded in det.old.chaos, and the windows' own reason
+// never says 'chaos': with the key `old` (also null after a failed shadow step: then the chaos
+// is unknown, not false-from-reason) that is the only source. Older recordings go the old way.
 export function liveChaosAt(det) {
-    return !!det && (det.order?.chaos === true || det.reason === 'chaos');
+    if (!det) {
+        return false;
+    }
+    if (hasShadow(det)) {
+        return det.old?.chaos === true;
+    }
+    return det.order?.chaos === true || det.reason === 'chaos';
+}
+
+
+// A recording of the turn-clock version: detOf always writes the key `old` (null after a failed
+// shadow step), older recordings never have it. The key marks the shape, not its value.
+const hasShadow = det => !!det && Object.hasOwn(det, 'old');
+
+
+// The old core's fields of a tick: det.old with the turn clocks (the replay runs the old core, so
+// the fidelity compares with it), else the top-level det of an older recording, which is the old
+// core's. Null without det, and null after a failed shadow step (no old core to compare with).
+function oldCoreOf(det) {
+    return !det ? null : hasShadow(det) ? det.old : det;
 }
 
 
@@ -251,11 +280,12 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
     // lacks rows the live engine had (a stripped upload), and the replay cannot follow there.
     const fid = {};
     ticks.forEach((t, i) => {
-        if (t.det && !frames[i].skipped) {
+        if (t.det && !frames[i].skipped && oldCoreOf(t.det)) {
             const f = fid[ride.sigs[i]] ??= {sig: ride.sigs[i], n: 0, puller: 0, front: 0};
             f.n++;
-            f.puller += (t.det.puller ?? null) === rep(i) ? 1 : 0;
-            f.front += (t.det.frontId ?? null) === (frames[i].rot.frontId ?? null) ? 1 : 0;
+            const o = oldCoreOf(t.det);
+            f.puller += (o.puller ?? null) === rep(i) ? 1 : 0;
+            f.front += (o.frontId ?? null) === (frames[i].rot.frontId ?? null) ? 1 : 0;
         }
     });
     // With --plan-all the replay runs another plan than live where the live code differs: then a
@@ -273,7 +303,7 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
     const repOn = frames.map(replayChaosAt);
     const rowsOf = (on, finish, sig) => ticks.map((t, i) => (inRace(i) ? {ts: t.ts, chaos: on[i], finish: finish(i), sig: sig(i)} : null))
         .filter(Boolean);
-    const liveRecorded = ticks.some(t => t.det && Object.hasOwn(t.det, 'order'));
+    const liveRecorded = ticks.some(t => t.det && (hasShadow(t.det) || Object.hasOwn(t.det, 'order')));
     const chaosJudged = (on, pullerOf) => {
         const x = judge(ride, truth, pullerOf, {from, to, excluded: excluded.map((e, i) => e || !on[i])});
         return {s: x.judged, agreePct: pct(x.agree, x.judged)};
@@ -286,7 +316,8 @@ export function pullerCheck(ride, gt, frames, {from, to, rollOff}) {
     };
     const out = {
         judgedTicks: J.judged, excluded: why,
-        live: {agreePct: pct(J.agree, J.judged), wrongS: J.bad.length, unseenTicks: J.unseen, unseenNamedUnrecorded: J.unseenNamed,
+        live: {...(ticks.some(t => hasShadow(t.det)) ? {core: 'new'} : {}),
+               agreePct: pct(J.agree, J.judged), wrongS: J.bad.length, unseenTicks: J.unseen, unseenNamedUnrecorded: J.unseenNamed,
                // Over the whole recording: ticks whose live puller has no rows at all (stripped riders).
                unrecordedPullerTicks: ticks.filter(t => t.det?.puller != null && !ride.recorded.get(String(t.det.puller))).length,
                lagMedianS: num(median(lagS)), lagP90S: num(quantile(lagS, 0.9)), changes: lagList.length,

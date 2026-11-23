@@ -208,7 +208,9 @@ export function trafficStep(pseudo, list, keptIds, now) {
 // of a rider in no plan in the recording; the rows already keep only those riders). The rotation's
 // chain and the gap warnings follow plan riders only, but state carried over a plan change (the
 // wheel cue) can still name a rider of the plan before. `gap` keeps its numbers, without the id.
-// `order.out` (riders sitting out, 20 Nov 2026) keeps only the ids that pass.
+// `order.out` (riders sitting out, 20 Nov 2026) keeps only the ids that pass. The turn clocks' fields
+// (23 Nov 2026) follow the same rule: `turn.change.from/to`, `turn.hanging`, `turn.out` and the old
+// core's `old.puller`, `old.frontId` and `old.out`.
 export const DET_ID_FIELDS = ['puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue'];
 
 export function detPlanOnly(det, ids, selfId) {
@@ -228,6 +230,31 @@ export function detPlanOnly(det, ids, selfId) {
     }
     if (out.order && typeof out.order === 'object' && Array.isArray(out.order.out)) {
         out.order = {...out.order, out: out.order.out.filter(id => id != null && known(id))};
+    }
+    const keep = ids => ids.filter(id => id != null && known(id));
+    const t = out.turn;
+    if (t && typeof t === 'object') {
+        out.turn = {...t};
+        if (t.change && typeof t.change === 'object') {
+            out.turn.change = {...t.change, from: ok(t.change.from), to: ok(t.change.to)};
+        }
+        for (const k of ['hanging', 'out']) {
+            if (Array.isArray(t[k])) {
+                out.turn[k] = keep(t[k]);
+            }
+        }
+    }
+    const o = out.old;
+    if (o && typeof o === 'object') {
+        out.old = {...o};
+        for (const k of ['puller', 'frontId']) {
+            if (k in o) {
+                out.old[k] = ok(o[k]);
+            }
+        }
+        if (Array.isArray(o.out)) {
+            out.old.out = keep(o.out);
+        }
     }
     return out;
 }

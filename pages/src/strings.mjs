@@ -202,6 +202,7 @@ export const S = {
     noRotation: '–',
     climbPaused: 'Climb – rotation paused',
     descentPaused: 'Descent – rotation paused',
+    regroupPaused: 'Regrouping – rotation paused',
     dashClimb: '▲',
     dashDescent: '▼',
     dashUnknown: '?',

@@ -1527,6 +1527,27 @@ test('withoutRiders: rows, plan entries, ID fields and maps by ID go; numbers el
 });
 
 
+test('withoutRiders: the turn clocks\' det (det.turn, det.old) loses his ID; from/to elsewhere stay', () => {
+    const gone = new Set([HUGO]);
+    const n = Number(HUGO);
+    const det = {planSig: 'AAAAAA', puller: '1003',
+        turn: {change: {kind: 'next', from: HUGO, to: '1003'}, disp: {why: 'gap', at: 5}, hanging: [HUGO, '1001'], out: [n]},
+        old: {puller: HUGO, since: 4, frontId: n, reason: null, chaos: false, out: [HUGO], cd: {t: 12.5, standing: false}}};
+    const tick = withoutRiders({ts: 1, det}, gone);
+    assert.deepEqual(tick.det.turn, {change: {kind: 'next', from: null, to: '1003'}, disp: {why: 'gap', at: 5}, hanging: ['1001'], out: []});
+    assert.deepEqual(tick.det.old, {puller: null, since: 4, frontId: null, reason: null, chaos: false, out: [], cd: {t: 12.5, standing: false}});
+    // his change into the turn: `to` goes, as a number too
+    assert.deepEqual(withoutRiders({det: {turn: {change: {kind: 'skip', from: '1001', to: n}}}}, gone).det.turn.change,
+        {kind: 'skip', from: '1001', to: null});
+    // `from`/`to` outside det.turn.change are no ID fields: a number there stays
+    const other = {range: {from: n, to: n}, det: {change: {from: n}, turn: {from: n}}};
+    assert.equal(withoutRiders(other, gone), other);
+    // a det.turn without his ID: the very same value
+    const clean = {det: {turn: {change: {kind: 'next', from: '1001', to: '1003'}, hanging: [], out: []}}};
+    assert.equal(withoutRiders(clean, gone), clean);
+});
+
+
 test('remove rider: his own uploads go (deleted teams\' too), team-mates\' recordings are rewritten without him, others stay untouched', async t => {
     const a = archiveSetup(t);
     const at = T('2026-11-15T10:00Z');

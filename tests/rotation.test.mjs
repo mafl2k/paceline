@@ -3494,3 +3494,136 @@ test('rotationStep: the start puller\'s bonus pull and the first 120 s after the
     assert.deepEqual(at(rows, 218).st.eff.e, []);
     assert.equal(fedAt(rows)[0][0], 219);
 });
+
+
+// ---------- 23 Nov 2026: sensor helpers exported for the turn clocks (plan C, task 2) ----------
+
+test('teamChain: gapM sets the link', () => {
+    // Riders 25 m apart: one chain with a 30 m link, two with the default 20 m.
+    const pos = [{id: 'a', x: 25}, {id: 'me', x: 0, self: true}];
+    assert.deepEqual(R.teamChain(pos, 'me', 30).map(x => x.id), ['a', 'me']);
+    assert.deepEqual(R.teamChain(pos, 'me').map(x => x.id), ['me']);
+    assert.deepEqual(R.teamChain(pos, 'me', R.CHAIN_GAP_M).map(x => x.id), ['me']);
+    const back = [{id: 'me', x: 0, self: true}, {id: 'b', x: -25}];
+    assert.deepEqual(R.teamChain(back, 'me', 30).map(x => x.id), ['me', 'b']);
+    assert.deepEqual(R.teamChain(back, 'me').map(x => x.id), ['me']);
+});
+
+test('presence: graceMs', () => {
+    // B was last seen 25 s ago: present with a 30 s grace, gone with the default 20 s.
+    const seen = {B: 0};
+    assert.deepEqual(R.presence(seen, {now: 25000, chainIds: ['A'], graceMs: 30000}).ids.sort(), ['A', 'B']);
+    assert.deepEqual(R.presence(seen, {now: 25000, chainIds: ['A']}).ids, ['A']);
+    // The edge of the explicit grace: strictly less than graceMs counts.
+    assert.deepEqual(R.presence(seen, {now: 29999, chainIds: [], graceMs: 30000}).ids, ['B']);
+    assert.deepEqual(R.presence(seen, {now: 30000, chainIds: [], graceMs: 30000}).ids, []);
+});
+
+test('startStep: a roll-off after 30 s in the pen sets plan #1 and the lock; a 30 s stand ends the start, not after the finish line', () => {
+    const plan = plan5();
+    const T = 1.7e12;
+    const everyone = Object.values(ID5);
+    const base = {live: true, plan, selfId: ID5.Cleo, present: everyone, entry: null};
+    const calm = {rolledAt: null, startAt: null, locked: false, finish: false, over: false};
+    // Roll-off: standing since T - 30 s (START_PEN_MS), moving again at T. Ann (#1) has the start.
+    const pen = {...calm, still: {still: true, since: T - R.START_PEN_MS}};
+    const go = R.startStep(pen, {...base, now: T, still: {still: false, since: null}});
+    assert.deepEqual(go, {rolledAt: T, over: false, startAt: T, locked: true, unlocked: false, starting: true, p1: ID5.Ann});
+    // One second short of the pen time: a plain roll-off, no start.
+    const shortPen = R.startStep({...calm, still: {still: true, since: T - R.START_PEN_MS + 1000}},
+                                 {...base, now: T, still: {still: false, since: null}});
+    assert.deepEqual(shortPen, {rolledAt: T, over: false, startAt: null, locked: false, unlocked: false, starting: false, p1: null});
+    // No plan rider known but me: a roll-off without a start.
+    const alone = R.startStep(pen, {...base, now: T, still: {still: false, since: null}, present: [ID5.Cleo]});
+    assert.equal(alone.starting, false); assert.equal(alone.p1, null); assert.equal(alone.startAt, null);
+    // The lock ends START_LOCK_MS after the start: `unlocked` once, and prev.startAt is kept.
+    const riding = {...calm, still: {still: false, since: null}, startAt: T - R.START_LOCK_MS + 1000, locked: true, rolledAt: T - 59000};
+    const stillLocked = R.startStep(riding, {...base, now: T, still: {still: false, since: null}});
+    assert.equal(stillLocked.locked, true); assert.equal(stillLocked.unlocked, false);
+    assert.equal(stillLocked.startAt, riding.startAt); assert.equal(stillLocked.rolledAt, riding.rolledAt);
+    const ended = R.startStep(riding, {...base, now: T + 1000, still: {still: false, since: null}});
+    assert.equal(ended.locked, false); assert.equal(ended.unlocked, true);
+    assert.equal(ended.startAt, riding.startAt);
+    // M8: standing 30 s ends the last start.
+    const stand = {...calm, startAt: T - 100000, still: {still: true, since: T - R.START_PEN_MS}};
+    const stood = {still: true, since: T - R.START_PEN_MS};
+    assert.equal(R.startStep(stand, {...base, now: T, still: stood}).startAt, null);
+    assert.equal(R.startStep(stand, {...base, now: T - 1000, still: {still: true, since: T - R.START_PEN_MS}}).startAt, stand.startAt,
+                 'before the 30 s are over the start is kept');
+    // M-4: not after the finish line. prev.finish (finish mode) keeps the start while I stand ...
+    const afterLine = {...stand, finish: true};
+    const kept = R.startStep(afterLine, {...base, now: T, still: stood});
+    assert.equal(kept.over, true); assert.equal(kept.startAt, stand.startAt);
+    // ... also in later steps, when finish is off but `over` carries it on.
+    const later = R.startStep({...stand, finish: false, over: true}, {...base, now: T + 5000, still: stood});
+    assert.equal(later.over, true); assert.equal(later.startAt, stand.startAt);
+    // ... until Sauce shows another event (the next race's pen): a fresh start at once.
+    const next = {remainingType: 'event', remainingMetric: 'distance', remaining: 40000};
+    const fresh = R.startStep(afterLine, {...base, now: T, still: stood, entry: next});
+    assert.equal(fresh.over, false); assert.equal(fresh.startAt, null);
+    // Riding on (not standing) clears `over`.
+    const rode = R.startStep({...stand, over: true}, {...base, now: T, still: {still: false, since: null}});
+    assert.equal(rode.over, false);
+    // Without live data nothing rolls off and no event counts as another.
+    const dark = R.startStep(pen, {...base, live: false, now: T, still: {still: false, since: null}});
+    assert.equal(dark.rolledAt, null); assert.equal(dark.starting, false);
+});
+
+test('startStep: rotationStep takes rolledAt, over, startAt and locked from it', () => {
+    // The pen of the M8 ride and its roll-off at 60: the state carries what startStep returns.
+    const rows = penRun(go => [{idx: 1, dx: go ? 10 : 3}, {idx: 3, dx: go ? 6 : 2}, {idx: 4, dx: go ? 4 : 1}]);
+    const r = at(rows, 60), before = at(rows, 59);
+    assert.equal(r.st.rolledAt, r.now); assert.equal(r.st.startAt, r.now);
+    assert.equal(r.st.locked, true); assert.equal(r.st.over, false);
+    const s = R.startStep(before.st, {now: r.now, live: true, still: {still: false, since: null}, present: r.st.present,
+                                      plan: plan5(), selfId: ID5.Cleo, entry: null});
+    assert.deepEqual([s.rolledAt, s.over, s.startAt, s.locked], [r.st.rolledAt, r.st.over, r.st.startAt, r.st.locked]);
+    assert.equal(s.p1, ID5.Ben);
+});
+
+test('startGate: due when the puller has 10 s left, gone when I am first in my chain, else null', () => {
+    const view = {mine: false, next: {id: 'me'}, remainingS: 8, puller: {id: 'p'}};
+    assert.equal(R.startGate(view, {chainIds: ['p', 'me'], selfId: 'me'}), 'due');
+    assert.equal(R.startGate({...view, remainingS: 30}, {chainIds: ['p', 'me'], selfId: 'me'}), null);
+    assert.equal(R.startGate({...view, remainingS: 30}, {chainIds: ['me', 'x'], selfId: 'me'}), 'gone');
+    assert.equal(R.startGate({...view, next: {id: 'x'}}, {chainIds: ['p', 'me'], selfId: 'me'}), null);
+    assert.equal(R.startGate({...view, mine: true}, {chainIds: ['p', 'me'], selfId: 'me'}), null);
+    assert.equal(R.startGate(null, {chainIds: [], selfId: 'me'}), null);
+});
+
+test('shadowDet: the old core\'s puller, chaos, riders out and countdown', () => {
+    // I am Cleo (#3); Ann (#1) has pulled since T0 with Ben, Dan and Eve ahead of me in plan order.
+    const plan = plan5();
+    const rows = ride(() => ({me: {power: 200, draft: 80}, others: [{idx: 0, dx: 10}, {idx: 1, dx: 6}, {idx: 3, dx: -2}, {idx: 4, dx: -4}]}),
+                      {plan, selfIdx: 2, dur: 20,
+                       init: T0 => ({...R.initialRotation(), front: {...R.initialFront(), puller: ID5.Ann, since: T0}})});
+    const r = at(rows, 10);
+    const d = R.shadowDet(r.st, {now: r.now, plan, selfId: ID5.Cleo, live: true});
+    assert.deepEqual(Object.keys(d).sort(), ['cd', 'chaos', 'frontId', 'out', 'puller', 'reason', 'since']);
+    assert.equal(d.puller, ID5.Ann);
+    assert.equal(d.since, r.st.front.since);
+    assert.equal(d.frontId, ID5.Ann);
+    assert.equal(d.reason, null);
+    assert.equal(d.chaos, false);
+    assert.deepEqual(d.out, []);
+    // The countdown: one decimal of the view's toMyPullS, and whether it stands.
+    const view = R.rotationStatus(r.st, {now: r.now, plan, selfId: ID5.Cleo, live: true}).view;
+    assert.ok(Number.isFinite(view.toMyPullS) && !view.mine);
+    assert.deepEqual(d.cd, {t: Math.round(view.toMyPullS * 10) / 10, standing: !!view.standing});
+    assert.ok(Math.abs(d.cd.t * 10 - Math.round(d.cd.t * 10)) < 1e-9);
+    // Chaos and riders sitting out are read from the order; the reason becomes 'chaos' (the view stays).
+    const messy = {...r.st, order: {...r.st.order, chaos: true, out: {[ID5.Ben]: r.now}}};
+    const m = R.shadowDet(messy, {now: r.now, plan, selfId: ID5.Cleo, live: true});
+    assert.equal(m.chaos, true); assert.deepEqual(m.out, [ID5.Ben]); assert.equal(m.reason, 'chaos');
+    assert.equal(m.puller, ID5.Ann);
+    // The quiet start is not part of it: right after a roll-off the reason is still not 'start'.
+    const rolled = {...r.st, rolledAt: r.now - 1000};
+    assert.notEqual(R.shadowDet(rolled, {now: r.now, plan, selfId: ID5.Cleo, live: true}).reason, 'start');
+    // No live sample of mine: the reason says so and there is no countdown.
+    const dark = R.shadowDet(r.st, {now: r.now, plan, selfId: ID5.Cleo, live: false});
+    assert.notEqual(dark.reason, null); assert.equal(dark.cd, null);
+    // My own pull (a view that is mine) has no countdown either.
+    const mine = {...r.st, front: {...r.st.front, puller: ID5.Cleo}};
+    const my = R.shadowDet(mine, {now: r.now, plan, selfId: ID5.Cleo, live: true});
+    assert.equal(my.puller, ID5.Cleo); assert.equal(my.cd, null);
+});

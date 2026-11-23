@@ -348,6 +348,18 @@ test('stripForUpload: the traffic rows stay as they are', () => {
     assert.equal(out[1].trafficEpoch, 1);
 });
 
+test('stripForUpload: a tick\'s climbs stay as they are', () => {
+    // The climb index of the event (route data only, no rider), written once into the recording.
+    const head = {kind: 'paceline-recording', plan: {riders: [{id: '101'}], bench: []}};
+    const climbs = {routeId: 42, laps: 0, endM: 9000, preludeM: 600, lapM: 3400, items: [
+        {from: 1580, to: 2520, kind: 'climb', roller: false, source: 'kom', gainM: 45, lengthM: 940},
+        {from: 4980, to: 5920, kind: 'climb', roller: false, source: 'profile', gainM: 45, lengthM: 940}]};
+    const tick = {ts: 1, riders: [{id: '101', self: true, heartrate: 140}], climbs};
+    const out = U.stripForUpload(toJsonl(head, [tick])).split('\n').filter(Boolean).map(l => JSON.parse(l));
+    assert.deepEqual(out[1].climbs, climbs);
+    assert.equal(Object.hasOwn(out[1].riders[0], 'heartrate'), false, 'the tick is still stripped');
+});
+
 test('stripForUpload: without a plan only my own row stays', () => {
     const out = U.stripForUpload(toJsonl({sessionId: '1', plan: null}, [{ts: 1, watchingId: '1', riders: [
         {id: '1', self: true, watching: true, power: 1, heartrate: 99}, {id: '2', power: 2}, {id: '3', self: 'true', power: 3}]}]));

@@ -108,7 +108,7 @@ export function renderMarkdown(r) {
         L.push(`Beurteilt: ${p.judgedTicks} s mit sichtbarem Zieher. Nicht beurteilt: Startsperre ${ex.lock} s, Zielmodus ${ex.finish} s, ` +
                `Pause ${ex.pause} s, allein ${ex.alone} s, langsam ${ex.slow} s, ohne det ${ex.nodet} s, ohne Plan ${ex.noplan} s; vorne unsichtbar ${p.live.unseenTicks} s ` +
                `(davon nannte die Engine ${p.live.unseenNamedUnrecorded} s einen Fahrer ohne Daten; in der ganzen Aufzeichnung ${p.live.unrecordedPullerTicks} s).`, '');
-        L.push(table(['', 'live (det.puller)', 'heutige Engine (Replay)'], [
+        L.push(table(['', p.live.core === 'new' ? 'live, neuer Kern (det.puller)' : 'live (det.puller)', 'heutige Engine (Replay)'], [
             ['Zieher richtig', `${v(p.live.agreePct)} %`, `${v(p.replay.agreePct)} %`],
             ['Sekunden falscher Zieher', p.live.wrongS, p.replay.wrongS],
             ['Hänger > 10 s', p.live.locks.length, p.replay.locks.length],
@@ -172,8 +172,8 @@ export function renderMarkdown(r) {
             `vorzeichenbehaftet Median ${signed(x.signedMedianS)} s; |Fehler| Median ${v(x.absErrorMedianS)} s; ` +
             `zu spät (> 3 s bei −10 s) ${x.late10Pct === null ? '–' : `${x.late10Pct} %`}; READY ${v(x.readyLeadMedianS)} s vor T0 (${x.n} ${x.n === 1 ? 'Zug' : 'Züge'}).`;
         L.push('', `**Gegen T0** (0 = der Fahrer vor mir lässt nach, 85-%-Regel; Züge ab 5 min, ohne meinen ersten): ${t0Line(t0)}`);
-        L.push('', t0.shadow ? `Schatten (feste Zuschläge bis 0.3.4-beta.4, det.cdOld): ${t0Line(t0.shadow)}`
-                             : 'Schatten: entfällt (keine det.cdOld in der Aufzeichnung).');
+        L.push('', t0.shadow ? `Schatten${t0.shadow.source === 'det.old.cd' ? ': alter Kern (det.old.cd)' : ' (feste Zuschläge bis 0.3.4-beta.4, det.cdOld)'}: ${t0Line(t0.shadow)}`
+                             : 'Schatten: entfällt (keine det.old.cd oder det.cdOld in der Aufzeichnung).');
         const z = c.chaos;
         L.push('', `**Chaos (still statt Countdown):** live zeigten die Fenster ${z.liveS} s "≠" (keine Fehler); die heutige Engine wäre ` +
                `im Replay ${z.replayS} s still. Mit diesen Sekunden still: Sprünge ${c.jumps.n} → ${z.replay.jumps}, ` +

@@ -148,19 +148,26 @@ function absErrorOf(errs) {
 }
 
 
-// The shadow series: the fixed rule's countdown (det.cdOld, recorded since 0.3.4-beta.5) through
+// The shadow's countdown of a tick: det.old.cd since the windows run on the turn clocks (the old
+// core beside them), else det.cdOld (0.3.4-beta.5 to the version before).
+const shadowCd = det => det?.old?.cd ?? det?.cdOld;
+const isCd = x => !!x && typeof x === 'object';
+
+
+// The shadow series: the old core's countdown beside the windows' (det.old.cd, the learned one; before the turn
+// clocks the fixed rule's det.cdOld, recorded since 0.3.4-beta.5) through
 // the windows' clock (clock.mjs), as the windows would have shown it: [{ts, k, t}], READY ('next')
 // at WARN_S or less. Stepped only while the live window showed a countdown (shown.act.k rest or
 // next): cdOld is also recorded in chaos, where no countdown shows (the dim "≠"), so chaos ticks
 // do not count, as they do not count live (21 Nov 2026). null without any cdOld.
 function shadowSeriesOf(ride, to) {
-    if (!ride.ticks.some(t => t.det?.cdOld && typeof t.det.cdOld === 'object')) {
+    if (!ride.ticks.some(t => isCd(shadowCd(t.det)))) {
         return null;
     }
     let clk = initialClock();
     return ride.ticks.filter(t => t.ts <= to).map(t => {
         const k = t.shown?.act?.k ?? null;
-        const old = t.det?.cdOld;
+        const old = shadowCd(t.det);
         const on = COUNTING.has(k) && old && Number.isFinite(old.t);
         clk = clockStep(clk, {now: t.ts, trueS: on ? old.t : null, standing: on ? !!old.standing : false});
         if (!on) {
@@ -288,7 +295,11 @@ export function countdownCheck(ride, gt, {from, to, frames = null}) {
         }
     });
     const shadowSeries = shadowSeriesOf(ride, to);
-    const t0 = {...againstT0(series, t0Rows, from), shadow: shadowSeries ? againstT0(shadowSeries, t0Rows, from) : null};
+    // With det.old the shadow says where it comes from (the render names the old core); older
+    // recordings keep their output.
+    const shadowOld = ride.ticks.some(t => isCd(t.det?.old?.cd));
+    const t0 = {...againstT0(series, t0Rows, from),
+                shadow: shadowSeries ? {...againstT0(shadowSeries, t0Rows, from), ...(shadowOld ? {source: 'det.old.cd'} : {})} : null};
     const effVsPlan = recovery.filter(r => r.planS !== null).map(r => r.effS - r.planS);
     const out = {
         jumps: {n: jumps.length, down: down.length, up: up.length, atChange: jumps.filter(j => j.change).length,

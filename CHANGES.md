@@ -17,15 +17,33 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 ## Unreleased
 
 ### Mod
+- The power bar's marker reacts at once to a real change and smooths small wobbles: a 10 % drop shows after about a second and is gone a second after you push back (before: still showing for 3 s, then creeping back); it glides between seconds.
 - The Info window's lines start at its top edge instead of in the middle, so a taller window grows downwards.
 - With "Fields while resting" on and no Rest window, the Action window shows two of your fields and the countdown as the third, your place under it, instead of only the big countdown; the Right setting says so.
 - Recordings also note other riders near the team (anonymous: no name or Zwift ID), so the analysis can tell when other teams disturbed the line.
 - The settings window has its own Recordings section right below Clubs: the upload box comes first, with one line on why and "What is sent" for the full text, then your rides; while the plan server is off it says uploads are paused (and can't be ticked). Advanced keeps only the server address and recording without a plan.
 - Clubs is a compact table: one row per club with the teams you ride for there (for example "Cogs, Rollers") and the day you ticked it.
+- The gap warning counts every rider behind the gap ("4 riders −12 m"), not only those up to the next gap; riders already let go are not counted.
+- Climbs are known from the route profile before the start, on every lap of longer races too (a climb on the second lap is no longer missed). Their places follow Zwift's lead-in and lap length; a segment that runs over a climb (a KOM, for example) belongs to the climb, and flat parts of up to 1 km inside a climb, or before its descent, do not end it.
+- Your pull clock keeps running when someone rolls by for a moment; if the last puller takes the front back, his turn simply goes on.
+- With only two riders left, every change is a normal change: the clock starts when the rider comes to the front.
+- A rider who sat out and comes back in his planned place takes over after 3 seconds, on a climb too: the countdown no longer stalls and then jumps.
+- A rider out of turn at the front counts only after 20 seconds (the plan's next after 3); there is no more 'Order ≠ plan', the countdown goes on from the new puller.
+- The rotation table keeps the plan order: a rider cut off behind a gap stays dim in his place (the first one with the gap in metres), and only riders gone from the group for 30 seconds move below the line.
+- On a climb the rotation runs on until the order breaks (a rider out of turn in front, a gap of 15 m); then ▲ while the climb (and its descent) lasts, and after it the windows go quiet until the order is back: a rider pulling clearly and, before the last 20 minutes, the planned change after him.
+- When the countdown comes back after a climb, the puller's clock counts from his current time at the front, not from a pull before the climb or before he dropped back.
+- After a climb the planned change that brings the countdown back leaves out riders sitting out, as the rotation does.
+- The countdown counts 10 seconds per rider again (5 for a pull over 40 seconds) instead of learning it during the race.
+- On a climb ▲ starts for a gap only when it splits the group; a rider who has not joined since the start (behind the group or far ahead of it), or one already cut off, does not start it.
+- On a climb ▲ also starts for a gap right behind a rider sitting out, when riders of the line are cut off behind him.
+- A rider who takes the front while the start is still settling gets his pull clock from when he came to the front, not from the end of the start; he takes over only after his usual 3 or 20 seconds once the start has settled.
+- Without route data a rise counts as a real climb only after 45 seconds; a shorter rise keeps the rotation going.
+- When you start your pull ahead of riders who were due before you, they sit out until they pull and your countdown leaves them out; if the last puller takes the front back, they are back in the line.
 
 ### Server
 - The privacy page says that recordings also hold anonymous rows of other riders near the team (no name or Zwift ID).
 - The plan check names the teams whose current plan has the rider among its riders, so Paceline's Clubs table can show them.
+- Removing a rider also removes him from the recorded changes at the front, so no recording names him there afterwards.
 
 ## 0.3.4 (2026-11-22)
 

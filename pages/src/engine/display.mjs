@@ -1,7 +1,7 @@
 // Pure logic (no DOM, no Sauce imports): what the action window shows for a rotation view, the
 // m:ss clock, the pull target in W or W/kg, and the filter of my own power for the power-bar
 // marker.
-import {WARN_S, SMOOTH_S, powerBar} from './rotation.mjs';
+import {WARN_S, SMOOTH_S, GREEN_PCT, AMBER_PCT, powerBar} from './rotation.mjs';
 import {S, fmt} from '../strings.mjs';
 
 // A power sample older than this no longer counts (no fresh data from Zwift).
@@ -101,19 +101,36 @@ export function barTarget(rider, weight, unit) {
 
 // ---------- the power marker's filter ----------
 // User, 12 Nov 2026: within about 10 W of the target the marker should keep still, a real drop of
-// 10 % should show. Zwift's 1 Hz power has single spikes, so a median first throws them out, then
-// a short exponential smoothing, then a deadband: the marker only moves when the smoothed power is
-// more than DEADBAND_PCT of the target away from where it stands. Compared with 20 other filters
-// (16 real pulls, simulated -5/-10 % steps with their noise): 1.2 W/s marker movement (3 s mean:
-// 7.4), the wrong colour 1.2 % of the time at target power, a 10 % drop coloured after about 4 s.
-export const MEDIAN_N = 5;         // median over the last 5 samples (1 Hz)
-export const POWER_TAU_S = 4;      // then exponential smoothing over about this many samples
-export const DEADBAND_PCT = 2;     // the marker moves only beyond this (percent of the target)
+// 10 % should show. Zwift's 1 Hz power has single spikes, so a median first throws them out.
+// User, 23 Nov 2026: the bar was jumpy and late. When the rider had already pushed back, the marker
+// still showed the drop for about 3 s and crept back over 8 s, which invites pushing too hard. Now
+// the filter adapts. It smooths hard while the power is steady, but when the median is more than
+// SNAP_PCT of the target (without one, of the median itself: READY, the pen, "Power now" while I
+// rest) away from the smoothed power it jumps there at once (a real change). The marker stands at
+// that value and takes the colour of the zone it stands in; only within ZONE_HYST_PCT of a zone's
+// edge it keeps the colour it had, so it does not flicker there. Replayed on the riders' own pulls of 22 Nov 2026 (25 pulls, two recordings): a
+// 5 s dip of 10 % shows after 1 s and is gone 1 s after the rider is back (before: lowest after
+// 4 s, still there 3 s after the rider was back, about 8 s to creep back); hops of at least 4 % of
+// the bar in 21 % of steady seconds (before: 36 %).
+export const MEDIAN_N = 3;         // median over the last 3 samples (1 Hz)
+export const POWER_TAU_S = 6;      // then exponential smoothing over about this many samples
+export const SNAP_PCT = 5;         // a median this far (percent of the target) from it: jump there
+export const ZONE_HYST_PCT = 1;    // the colour changes only this far past a zone's edge (percent)
 export const PULL_SETTLE_S = 5;    // the first seconds of my pull: a neutral marker (ramping up)
 
 
 export function initialMarker() {
     return {w: null, ema: null, buf: [], at: null, pullSince: null, zone: null};
+}
+
+
+// The bar zone of `w` against `target`, kept as `prev` until `w` is ZONE_HYST_PCT past the edge.
+export function zoneWithHysteresis(w, target, prev) {
+    const pct = Math.abs(w - target) / target * 100;
+    const h = ZONE_HYST_PCT;
+    const greenEdge = GREEN_PCT + (prev === 'green' ? h : prev === 'amber' || prev === 'red' ? -h : 0);
+    const amberEdge = AMBER_PCT + (prev === 'red' ? -h : prev === 'amber' || prev === 'green' ? h : 0);
+    return pct <= greenEdge ? 'green' : pct <= amberEdge ? 'amber' : 'red';
 }
 
 
@@ -125,9 +142,9 @@ function median(xs) {
 
 
 // One power sample {at, w}. pull: {since, target} while I pull, else null. The filter starts over
-// after a gap (POWER_KEEP_MS) and at the start of each pull. `w` is the marker's power (the
-// deadband only applies with a target); `zone` its colour: the bar zone of `w`, null (neutral)
-// outside a pull, without a target and in the first PULL_SETTLE_S of a pull.
+// after a gap (POWER_KEEP_MS) and at the start of each pull. `w` is the marker's power; `zone` its
+// colour: the bar zone of `w` (zoneWithHysteresis), null (neutral) outside a pull, without a target
+// and in the first PULL_SETTLE_S of a pull.
 export function markerStep(st, {at, w, pull}) {
     if (!Number.isFinite(w) || !Number.isFinite(at)) {
         return st;
@@ -138,13 +155,12 @@ export function markerStep(st, {at, w, pull}) {
     const restart = !fresh || (!!pull && since !== s.pullSince);
     const buf = [...(restart ? [] : s.buf), w].slice(-MEDIAN_N);
     const med = median(buf);
-    const ema = restart ? med : s.ema + (med - s.ema) / POWER_TAU_S;
     const target = pull && Number.isFinite(pull.target) && pull.target > 0 ? pull.target : null;
-    const band = target === null ? 0 : DEADBAND_PCT / 100 * target;
-    const shown = restart || Math.abs(ema - s.w) > band ? ema : s.w;
+    const ref = target ?? Math.abs(med);
+    const ema = restart || Math.abs(med - s.ema) > SNAP_PCT / 100 * ref ? med : s.ema + (med - s.ema) / POWER_TAU_S;
     const settled = !!pull && at - since >= PULL_SETTLE_S * 1000;
-    return {w: shown, ema, buf, at, pullSince: since,
-            zone: settled && target !== null ? powerBar(shown, target).zone : null};
+    return {w: ema, ema, buf, at, pullSince: since,
+            zone: settled && target !== null ? zoneWithHysteresis(ema, target, restart ? null : s.zone) : null};
 }
 
 
@@ -271,7 +287,7 @@ export function pullOnlyModel(m, {watts = null} = {}) {
 //          clock.mjs: its kind and seconds) | {k: 'pull', t, over, w, pos}
 //          | {k: dash} with dash from dashKind ('none' = dim dash, 'unknown' = amber ?, 'climb', 'descent',
 //          'chaos' = dim ≠ while I rest and the order does not hold, 20 Nov 2026)
-//   meanW  my 3 s mean power (the bar marker's input), rounded
+//   meanW  my filtered power (the bar marker's, markerPower), rounded
 //   wheel  info "Wheel": {planned, live} (live only while the planned rider is missing)
 //   next   captain's "Next" (recorded whether or not the option is on): {id, planned}, or {chaos: true}
 //          while it says "Order ≠ plan"

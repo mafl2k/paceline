@@ -299,17 +299,12 @@ taller or wider and they grow (new in 0.3.4-beta.3):
 
 - While you rest it shows one big clock: the time until your pull starts, in seconds as pulls
   are called (`26s`), above 100 seconds as minutes (`5:47`). It adds up the planned pulls of the
-  riders before you, the rider at the front included, plus how much longer your team's turns take
-  than planned (new in 0.3.4-beta.5). Paceline learns that during the race, from one rider's ease-off
-  to the next rider's, over the last 12 normal turns, and starts learning 2 minutes after the
-  roll-off. Until then, and as a starting value, it counts 10 seconds per rider (5 seconds for a
-  pull over 40 seconds); in our races a turn took 2 to 11 seconds longer than planned. One turn
-  counts at most 10 seconds over or under the plan, so a single odd turn cannot swing the clock;
-  the learned value is used from the third learned turn on, and it stays within 10 seconds of the
-  starting value (10 seconds, or 5 seconds for a pull over 40 seconds). The rider
-  directly before you counts that extra time minus the changeover itself (also learned, about 5
-  seconds to start with), so the clock reaches 0 when he eases off. READY covers the
-  time until he swings off. The clock
+  riders before you plus 10 seconds for each (5 seconds for a pull over 40 seconds), the rider at
+  the front included; in our races a turn took 2 to 11 seconds longer than planned. Only the rider
+  directly before you counts his planned pull alone: near the end the clock rather reaches 0 a
+  little early, and READY covers the rest until he swings off. (0.3.4 learned the extra time
+  during the race; since 0.3.5 it is the fixed 10 or 5 seconds again, while the new way of
+  following the front is checked against our races.) The clock
   simply runs down at a normal change, without a jump when the next rider takes over. The
   countdown is only good to about 10 seconds (riders pull longer or shorter than planned); the
   handover itself is called out by voice. When the rider at the front has pulled his plan plus
@@ -339,12 +334,15 @@ taller or wider and they grow (new in 0.3.4-beta.3):
   middle, the time left of your pull in seconds on the right (`110`, `s`; amber in the last 10
   seconds, over time it runs on below zero in amber, `−4`). Below is the power
   bar: the middle line is your target, green is within 5 % of it, amber within 10 %, red beyond.
-  The marker is your filtered power: single spikes in Zwift's power are thrown out, the rest is
-  smoothed over a few seconds, and the marker only moves once that is more than 2 % (about 5 W)
-  away from where it stands. So it keeps still while you ride on target, and a real drop of 10 %
-  shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
-  while you ramp up, the marker stays white. The number in the middle is the marker's value (the
-  same filtered power, so they always agree), in the marker's colour; kept small on purpose, so the
+  The marker is your filtered power: single spikes in Zwift's power are thrown out, small wobbles
+  are smoothed over several seconds, and a real change (more than 5 % of the target) moves it at
+  once (new in 0.3.5). So it stays calm while you ride on target, a drop of 10 % shows after about
+  a second, and when you push back it is back a second later, instead of still showing the drop.
+  It glides from one second to the next. Its colour is the zone it stands in; right at a zone's
+  edge it keeps its colour until it is 1 % past the edge, so it does not flicker there. In the first seconds of
+  your pull, while you ramp up, the marker stays white. The number in the middle is the marker's
+  value (the same filtered power; the marker glides there within a second), in the marker's colour; kept small on
+  purpose, so the
   bar stays what you ride by and the number only confirms it. Without pull watts in the plan
   (neither in the JSON nor from a text export) there is no target, so you see `–` as the target,
   your power now, the time and a plain grey bar.
@@ -392,16 +390,12 @@ taller or wider and they grow (new in 0.3.4-beta.3):
   clock stands, a correction) takes the power bar's place, and READY comes up exactly where the
   countdown was. With **Fields while resting** unticked, the Action window alone shows the big
   countdown and your place as before. When there is no countdown at all (no plan yet, the start
-  pen, the finish, riding alone, a climb or descent), the left and middle fields still show, and
+  pen, the finish, riding alone, a climb or descent and the quiet after it), the left and middle fields still show, and
   the right one stays empty or shows the dim `▲` / `▼` or the amber `?` the big countdown would.
 
   <img src="docs/images/action-fields-clock.png" width="300" alt="Paceline Action alone while resting with fields on: heart rate 145 bpm on the left, your power now 2.9 in the middle, and on the right the countdown 3:48 with #6 under it; below, in amber, GAP 10 m · 1.3 s">
 
-  The one exception is when the order breaks (see "When the
-  order breaks"): then there is no countdown to show, so the fields show while you rest, with or
-  without a Rest window: the ones you picked if **Fields while resting** is ticked (the right one
-  too), otherwise
-  just your power now in the middle. (The Rest window shows the countdown only, never the fields.)
+  (The Rest window shows the countdown only, never the fields.)
 - **A gap in the line** (new in 0.2.28). Paceline watches the distance from each team rider to
   the rider ahead of him. When it is 10 m or more for 5 seconds (15 m on a real climb or
   descent), someone has lost the wheel; the warning ends when the gap has been under 6 m for 3
@@ -459,14 +453,12 @@ taller or wider and they grow (new in 0.3.4-beta.3):
   last 10 seconds before your pull) too while an Action window is open, which takes over then;
   without one it shows `READY` itself. The Paceline windows notice each other: each one leaves a
   sign of life every 2 seconds, and one not heard for 6 seconds counts as closed. In place of the
-  countdown the Rest window shows a dim `▲` or `▼` on a real climb or descent, and a dim `≠` when
-  the order breaks (see "When the order breaks").
+  countdown the Rest window shows a dim `▲` or `▼` while the order on a real climb or descent is
+  broken, and nothing after the hill until the order is back (see "Rollers and real climbs").
   While a Rest window shows the countdown, the Action window leaves it to it: it stays empty while
   you rest (not even the dash), or shows the fields you picked (see **Fields while resting**
   above), wakes up with READY in the last 10 seconds before your pull (target,
-  power now, the bar), and when your pull starts the time takes over. The one exception: when the
-  order breaks it shows its fields while you rest (the ones you picked if **Fields while resting** is
-  ticked, otherwise your power now in the middle), even with a Rest window open (see "When the order breaks"). So if the big countdown in
+  power now, the bar), and when your pull starts the time takes over. So if the big countdown in
   the middle of the screen is too much while you rest, open the Rest window and put it wherever it
   suits you, for example lower down. With no Rest window open, the Action window shows
   the countdown itself, so it is never missing (with **Fields while resting** ticked as its right
@@ -501,72 +493,77 @@ taller or wider and they grow (new in 0.3.4-beta.3):
   pull is his plan time plus 30 seconds (a 2:00 pull shows 2:30), counted from the roll-off.
   Everyone else's windows stay empty until the start puller has been in front for 3 seconds (the
   start chaos is over), at most 60 seconds. For those 60 seconds Paceline detects nothing at the
-  front, no climb either. After that it follows the front again; a rider other than the start
-  puller then has to stay in front for 15 seconds to count.
+  front, no climb either. After that it follows the front as usual (see "How Paceline decides who
+  pulls" below).
 - **Rollers and real climbs.** A hill is a climb from 4 % and a descent from -3 % (until the road
   is back below 2 % or above -2 %). In a TTT event Paceline knows the hills before you get there:
-  it loads the route's elevation profile from Sauce and finds your place on it from your altitude
-  (after the first kilometre; one-lap events). A **roller** (at most 400 m long and 15 m up or
-  down, like all hills of the 12 Nov 2026 TTT) does not stop anything: the countdown goes on, and
-  only the rider pulling or the plan's next rider can take the front, so a teammate sprinting up
-  from behind (often on descents, while the front rider drops back) is ignored. A **real climb or
-  descent** pauses the rotation: a triangle (`▲`, or `▼` for a descent; a broken order has its own
-  dim `≠` in the Rest window, see "When the order breaks"). Without the profile
-  (before your place on it is known, or on a route Sauce has no profile for) Paceline goes by the
-  grade under your wheels: a hill counts once the grade has held for 5 seconds, as a roller for
-  its first 45 seconds and as a real climb or descent after that. If the same rider is still
-  in front after a real climb, his pull time simply goes on. If another teammate is in front first and
-  the rider from before comes back to the front within a minute, his pull time goes on from
-  where the climb stopped it instead of starting at 0; the climb and the other rider's turn do
-  not count (the same after riding alone).
+  in the start pen it loads the route's elevation profile from Sauce and lists every climb and
+  descent of the profile by race distance, the lead-in once and then lap after lap up to the
+  finish, so a climb on the second lap is known too. The places follow Zwift's own lead-in and lap
+  length. A segment that runs over a climb (a KOM, for example) belongs to the climb: the climb
+  counts over the whole segment. A flat part of up to 1 km inside a climb, or between the top and
+  the descent, does not end the climb. Your place on that list is your race distance. A
+  **roller** (at most 400 m long and 15 m up or down, like all hills of the 12 Nov 2026 TTT)
+  changes nothing: the rotation and the countdown go on as on the flat. On a **real climb or
+  descent** the rotation goes on as well, as long as the team keeps its order (new in 0.3.5). Once
+  one of these happens, the order counts as broken and the windows show a triangle (`▲`, or `▼`
+  for a descent) instead of the countdown:
+  - a rider who is neither the puller nor the plan's next rider has been in front for 3 seconds
+    (not the last puller back in front before the new one is clear: that is a return, no triangle);
+  - a gap of 15 m or more opens in the line.
+
+  The puller's power does not count: on a climb teams ride level W/kg, so a puller well under his
+  planned pull power is normal climbing.
+
+  The triangle shows while the climb, and the descent after it, lasts. After the hill the windows
+  go quiet (a dim `–` in the Info window's table, no symbol in the Action and Rest windows) until
+  the order is back. Meanwhile Paceline still follows who leads (anyone in front for 3 seconds), but
+  counts no turns. The order is back only once the climb, and the descent after it, is over, with a clear
+  puller: a rider in front for at least half his planned pull and at least 20 seconds. Before the
+  last 20 minutes of the race the plan's next rider after him must then also take over (3 seconds
+  in front); the countdown goes on from that rider, his pull time counted from when he came to the
+  front. In the last 20 minutes the clear puller alone ends it; after an end that turned out wrong
+  (the rider before the puller takes the front back within the next two changes) the next end
+  waits for the plan's next rider again, and after a right end it is the clear puller alone again.
+  Without the route data (Sauce has no profile for the route, or it could not be loaded yet)
+  Paceline goes by the grade under your wheels: a hill counts once the grade has held for 5
+  seconds, and every hill counts as a real climb or descent then (without the profile there is no
+  telling a roller).
 - The Info window shows `Front: –` in these cases, or "Climb – rotation paused", "Descent –
-  rotation paused" or "Finish – rotation off".
+  rotation paused", after the hill a dim "Regrouping – rotation paused", or "Finish – rotation off".
 
-**When the order breaks** (new in 0.3.4). A wrong countdown is worse than none, so when the team
-stops riding the plan's order, Paceline stops counting and says so, until the order holds again.
+**When the order breaks** (new in 0.3.5; it replaces the quiet "Order ≠ plan" of 0.3.4). Paceline
+no longer goes quiet when the team leaves the plan's order. Every change at the front is
+counted, and the countdown goes on from the new puller: a change that was not the planned one
+moves the clock once, and that is all.
 
+- **Who takes over.** The plan's next rider in the line takes over after 3 seconds in front.
+  Anyone else needs 20 seconds, so a rider who rolls up beside the puller or shows up in front for
+  a moment during a change does not count. The new puller's time counts from when he came to the
+  front. In the first minute after the start nobody takes over; a rider in front then needs his
+  3 or 20 seconds after that minute, but his time still counts from when he came to the front.
+- **The puller comes back.** The front often eases off for riders behind, and someone rolls by.
+  When the last puller takes the front back (3 seconds in front) before the new rider has been a
+  clear puller (in front for half his planned pull, at least 20 seconds), the change is taken
+  back: his turn simply goes on, with his pull time from his own start. The same holds for your own
+  pull: your clock keeps running when someone rolls by for a moment. The way back goes one way
+  only: if the new rider takes the front again after that, it is a normal change (3 or 20 seconds,
+  his pull time from when he came to the front again). With only two riders left, every change is a
+  normal change. Your own pull start is taken back the same way (a start that turns out wrong, or
+  you ease off early and the last puller rolls by): your clock starts again when you come to the
+  front.
 - **Riders sitting out.** When a rider is passed over (the plan says Cora pulls next, but Dana
-  takes the front), Paceline takes Cora out of the countdown: she is not with the pulls any more,
-  and the line simply goes on without her. She is back in as soon as she pulls again. You are never
-  taken out yourself: you know whether you pull. If she pulls again within the same round, nobody
-  was sitting out: the team rides another order, and that counts as a break (below).
-- **When it goes quiet.** Paceline looks at the last 4 changes at the front. If 2 of them were not
-  the plan's order, the countdown stops. A rider who was passed over and pulls again within the
-  same round, but not right away, counts twice (the skip and the return), so one such change is
-  enough to make the countdown quiet. Other wrong changes count once each: the rider before the
-  puller taking the front back, or a rider who is not in the plan. Some mix-ups count only once
-  as well: a rider who is passed over and back in front within 30 seconds was a short mix-up (for
-  example a rider swinging up beside the puller during a change), and the rider before the puller
-  who is back in front for a moment without taking over. After a climb, a descent or riding
-  alone, the first puller not being the next in line also counts once. A rider caught from ahead
-  (for example one who started in the wrong group and is caught up with) is not taking the
-  front, and does not count at all. Pulls that are only longer or shorter than planned never
-  make it quiet, only the order does.
-- **What the windows show.** The Action window, while you rest, shows no countdown and no READY:
-  it shows its fields (see **Fields while resting**), with a Rest window open or not: the ones
-  you picked if **Fields while resting** is ticked in the Action window's settings, otherwise
-  your power now in the middle (in W or W/kg as you set it, with `now` under it), so the window
-  still tells you something. During your
-  own pull it works as always: your plan and your pull
-  are real whatever the others do. The Rest window shows a dim `≠`. The Info window shows who
-  really pulls, with his pull clock as always, and in the Next line (Captain mode only), dim,
-  `Order ≠ plan` instead of the plan's guess. In Captain mode the table shows the real puller in the Front row and
-  `Order ≠ plan` in the Next row; the other riders stay dim, in plan order. Gap warnings stay on:
-  the gap line shows under your power while you rest (in the Action window, a band under the
-  fields).
-- **While it is quiet** Paceline follows the front without the extra waiting of normal running
-  (the 30 seconds for the rider before the puller and the 15 seconds for a rider skipping the
-  next one): they both assume the plan's order is right. A roller does not limit who takes the
-  front either.
-- **Back to normal** after 3 changes in a row that follow the plan: the next rider in line each
-  time (a rider passed over does not hurt, but does not count towards the 3). A change that does
-  not follow the plan starts the count again. Then the countdown starts over from the real puller.
-- **Climbs, stops and new plans.** The quiet state lasts through a climb, a descent and riding
-  alone. Standing still (the start pen, a stop) or a new plan clears all of it: the quiet state,
-  the recent changes and the riders sitting out. The new plan gets a fresh start.
-- **Not counted** are the changes Paceline does not see at the front: your own pull ending, the
-  start, and the first puller after a climb, a descent or riding alone, except that he counts
-  once when he is not the next in line (see above).
+  takes the front and holds it for 20 seconds), Cora sits out: the countdown and the plan's next
+  skip her until she pulls again. You are never taken out yourself: you know whether you pull. In
+  the table she keeps her place, dimmed. When she comes back in her planned place (right after the
+  rider before her in the plan), she is the plan's next and takes over after 3 seconds, on a climb
+  too. When the change that passed her over is taken back, she is back in the line.
+- **Riders hanging behind a gap.** A rider cut off behind a full gap warning (see "A gap in the
+  line") is out of the line at once, the same as a rider sitting out. He is back in as soon as the
+  gap before him is under 10 m and he is with your group again. He counts as gone (the bottom of
+  the table) only after 30 seconds away from your group.
+- **Stops and new plans.** Standing still (a stop) clears the riders sitting out. A new plan keeps
+  the puller and his pull time when he is in it, and the riders sitting out who are.
 
 **Paceline Info** is the status box. Every line keeps its place, so the box never jumps. The text
 is narrow and bold, in Sauce's own font, and grows and shrinks with the window: make the window
@@ -592,70 +589,46 @@ below decides):
 - **Front:** who is pulling, their number and kit colour, and at the right the time left of their
   pull in seconds, as pulls are called (`12s`); over their time it runs on below zero in amber
   (`−4s`). During your own pull it says **You**. A dim `–` means no rotation right now (before the start, alone, no data).
-  When the order breaks it still shows the real puller and his clock (see "When the order breaks").
 - **Next** (captain mode): tick **Captain mode** in the Info window's settings (at the top, under "This window"), and a line
   under Front shows who pulls next with their full pull line (`#4 ■ Dana  60s@4.4`),
   ready to call out. Dimmed, it is the plan's guess: before the start it shows plan #1 (who
-  starts), on a real climb or descent, riding alone or without data the plan's next after the last puller. It
-  turns live again as soon as a puller is at the front; when the order breaks it says a dim `Order ≠ plan` instead; in finish mode (from 500 m before the line until you stop) it shows `–`. Make the Info window a little taller for it.
+  starts), while the climb triangle (`▲`/`▼`) shows or the windows wait after a climb, riding alone or without data the plan's next after the last puller. It
+  turns live again as soon as a puller is at the front; in finish mode (from 500 m before the line until you stop) it shows `–`. Make the Info window a little taller for it.
 - **The whole rotation** (before the start for everyone): one row per rider, `#3 ■ Name
   60s@4.4`, from the rider pulling (before the start from plan #1), you highlighted. Once the
   rotation runs it goes away. In **Captain mode** you can keep it: tick **and keep the whole
-  rotation listed during the ride** below it. Then it stays and turns with every change. Riders
-  dropped from the group (more than 20 m back for 20 s) move to the bottom (new in 0.2.30), dimmed, in plan order
-  below a dashed line, and come back into the rotation once they are with the group again. Riders
-  sitting out (see "When the order breaks") go there too, until they pull again. Its first two rows take the place of the Front and Next lines: the
-  rider pulling (bold, with the time left, or `▲`/`▼` while a real climb or descent pauses the
-  rotation) and the next rider, in a larger text and set apart from the rest by a small gap. Make the Info window
+  rotation listed during the ride** below it. Then it stays and turns with every change, always in
+  plan order (new in 0.3.5). A rider sitting out or hanging behind a gap (see "When the order
+  breaks") keeps his place, dimmed; the first of them hanging shows the gap in metres (`14 m`)
+  instead of his pull. Only riders gone from the group (not linked to it within 30 m for 30
+  seconds) move to the bottom, dimmed, in plan order below a dashed line, and come back into the
+  rotation once they are with the group again. Its first two rows take the place of the Front and Next lines: the
+  rider pulling (bold, with the time left, or `▲`/`▼` while the order on a real climb or descent is
+  broken, a dim `–` after the hill until the order is back) and the next rider in the line, in a larger text and set apart from the rest by a small gap. Make the Info window
   taller for it.
 - The recorder line.
 
-How Paceline decides who pulls: the puller is simply the frontmost rider of your team group
-(teammates within 20 m of each other), once they have been in front for 3 seconds. A change is taken sooner (new in 0.3.4-beta.5) when
-the puller's power drops below 80 % of his own average power in this pull (counted from 5 seconds
-into it, checked from 15 seconds into it) and, within 8 seconds, a teammate comes out of the draft
-level with him for 2 seconds. That teammate is the puller at once, and his pull counts from the
-puller's ease-off. This does not apply while you pull, on a roller, on a real climb or descent, in
-the start lock, in the finish sprint or while the order is broken. The 15 second wait for a rider
-who would skip the planned next rider and the 30 second wait for the rider who pulled just before
-(both below) still apply, counted from the ease-off. Within 30
-seconds of a change at the front (a new puller, your own pull starting or ending, the end of a
-real climb or descent) a new front rider must stay there for 15 seconds instead, so a short shuffle in
-the chaos does not count as a pull; his pull time still counts from when he got there. The same
-15 seconds apply to a teammate who would skip the planned next rider (one or two places further
-on the line), for example when he shows up at the front for a moment during a change. The rider
-who pulled just before (the one before the puller in the plan) has to be back in front for 30
-seconds to take the pull back: two riders swapping the front, or his last seconds while the new
-puller settles in, do not throw your countdown a whole round up and down (after a climb or descent
-the order is mixed up, so there the 15 seconds apply; they apply for you right after your own pull
-ended too, and in a line of two there is no such wait). Nothing is
-tracked while you stand still (below 2 km/h, e.g. in the start pen). The pull
-time counts from when they got there. Your own pull is also picked up from your riding, once
-you are the next rider and the rider in front is due (10 seconds or less of his pull left) or
-gone (nobody of the team ahead of you): it starts when you jump up in power and your draft
-drops to zero, or as soon as your draft is zero with a teammate behind you. It ends when your
-power drops below 130 W, or below 60 % of your target if that is lower (when the plan has a
-target for you), for two of three seconds, after at least 20 seconds of pulling, so swing off
-clearly when you are done. It ends only once you rode at pull power since Paceline took you as the
-puller (80 % of your target, or 130 W without one): if you stay in front at rest power and nobody
-comes past, Paceline takes you as the puller again after a while and keeps you there until a
-teammate takes the front, instead of ending your pull over and over. If you are still in front about 10 seconds later, with no draft and
-your power back at your pull, and the next rider never came past, Paceline takes the end back and
-your pull runs on with its time (a power dropout; new in 0.3.4-beta.4, only when the plan has a
-target for you). The time to your pull adds up the planned pulls of the riders before you and the
-extra time the team's turns take (learned during the race, see the Action window; new in
-0.3.4-beta.5), skipping riders who are not with the group or are sitting out (see "When the
-order breaks"). Paceline does not
-know the plan was followed: after a crash, a dropped rider or a messy changeover the display can
-be wrong for a while. Ride the
+How Paceline decides who pulls (new in 0.3.5): the front rider is the frontmost rider of your
+team group (teammates within 30 m of each other). He becomes the puller when he is the plan's next
+rider in the line and has been in front for 3 seconds, or when he is anyone else and has been in
+front for 20 seconds. His pull time counts from when he got to the front and keeps running while
+someone else is briefly in front: a turn ends only when the next puller takes over, and when the
+last puller takes the front back before the new one is a clear puller, his turn goes on (see
+"When the order breaks"). Nothing is tracked while you stand still (below 2 km/h, e.g. in the
+start pen). Your own pull is also picked up from your riding, on the flat, once you are the next
+rider and the rider in front is due (10 seconds or less of his pull left) or gone (nobody of the
+team ahead of you): it starts when you jump up in power and your draft drops to zero, or as soon
+as your draft is zero with a teammate behind you. It ends when the next rider has taken over, not
+when you ease off early (see "The puller comes back"); once you are a clear puller, waiting for
+riders behind never restarts your clock. The time to your pull
+adds up the planned pulls of the riders in the line before you, plus 10 seconds each (5 seconds
+for a pull over 40 seconds; see the Action window), skipping riders who are not with the group,
+sitting out or hanging behind a gap. Paceline does not know the plan was followed: after a
+crash, a dropped rider or a messy changeover the display can be wrong for a while. Ride the
 plan and talk on voice; use the display as a help, not as the referee.
 
 Tip: open both Paceline windows before the start. A window opened mid-race shows its own pull
-timing until the next handover. Each window also learns on its own how much longer your team's
-turns take: a window opened or reloaded mid-race starts again from the starting values (10 seconds
-per rider, 5 seconds for a pull over 40 seconds, 5 seconds for the changeover), so for the next
-few minutes its countdown can be some seconds off from a window that has been open since the start,
-until it has learned the same.
+timing until the next handover.
 
 **Demo:** to place and size the windows without Zwift, open the settings window (the tune icon
 or a click where a Paceline window sits, even when it is invisible) and press **Start demo**. For 10 minutes all windows show a
@@ -692,7 +665,9 @@ fields while resting (see "Paceline Action").
   unticked it works as before 0.2.18: it starts when you and a teammate from the plan are near
   each other and stops 120 seconds after fewer than 2 are left.) Each recorded second also notes who Paceline thought
   was pulling and what the windows showed (countdown or pull, your place, Wheel, the captain's
-  Next, a gap warning), whether the order is broken and who is sitting out, so the ride can be compared with the plan afterwards. It also notes the Zwift event you
+  Next, a gap warning), each change at the front, the climb triangle and why it came, who is
+  hanging behind a gap or sitting out, and, for comparison, the puller and countdown of 0.3.4's
+  way of following the front, so the ride can be compared with the plan afterwards. It also notes the Zwift event you
   are in (name, type, subgroup and start time) and Zwift's ride clock, so a later version can tell
   the start pen from the race.
 - If the box says "Waiting for Zwift…", Sauce does not see your own rider (for example when you
@@ -712,9 +687,10 @@ title bar. Right-click again to hide it.
 
 Paceline does not know who is pulling. It works it out every second from what Zwift tells
 Sauce: who is at the front of the group, power, draft and speed. The rules for that (how long a
-rider must be in front to count as the puller, how big a power jump starts your pull, how sharp
-a drop ends it, how far apart riders may be and still count as one group, from which gradient a
-climb pauses the rotation) were set from a few FIT files of past races. Those files have no
+rider must be in front to take over the pull (3 seconds for the plan's next rider, 20 seconds
+for anyone else), how big a power jump starts your own pull, how far apart riders may be and
+still count as one group, when the order on a real climb counts as broken and the triangle
+shows) were set from a few FIT files of past races. Those files have no
 positions in the line and no draft, so nobody has checked the rules against the data Paceline
 actually sees during a race. Your recordings do that.
 

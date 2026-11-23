@@ -1296,7 +1296,7 @@ test('score CLI: numbers the riders by the plan the reference was built on; with
             const lines = [];
             const file = path.join(outDir, `${planSig}.json`);
             fs.writeFileSync(file, JSON.stringify({...old, planSig}));
-            const code = await scoreRun([REPO, file, rec, '--plan', `P2TEST=${path.join(dir, 'plans', 'P2TEST.json')}`], {log: l => lines.push(l)});
+            const code = await scoreRun([REPO, file, rec, '--core', 'rotation', '--plan', `P2TEST=${path.join(dir, 'plans', 'P2TEST.json')}`], {log: l => lines.push(l)});
             assert.equal(code, 0);
             return JSON.parse(lines.join('\n'));
         };
@@ -1306,7 +1306,9 @@ test('score CLI: numbers the riders by the plan the reference was built on; with
         const plan = ride.plans.get('P1TEST');
         const pos = Object.fromEntries(plan.riders.map((r, i) => [String(r.id), i + 1]));
         const t0 = old.t0;
-        const out = await runEngine(REPO, ride, {N: old.N, t0, pos, plan});
+        // The old adapter: the new core scores these two plans alike on this made-up ride (the first four
+        // positions agree), which would not tell the plans apart.
+        const out = await runEngine(REPO, ride, {N: old.N, t0, pos, plan, core: 'rotation'});
         assert.deepEqual(viaP1, JSON.parse(JSON.stringify(score(old, out, {me: pos[String(ride.selfId)]}))));
         assert.notDeepEqual(viaP1, viaP2, 'the two plans number the riders differently');
         // A code that no plan file nor the recording knows is named in the error.
@@ -1427,4 +1429,321 @@ test('interjection power: the interjector\'s and the running owner\'s median ove
     const plain = buildReference(mkViews({N: 200, fronts: [[[1, 0, 59], [3, 60, 69], [2, 70, 140], [3, 141, 199]]]}));
     const bare = renderMarkdown(plain, riderFigures(plain, {views: [{gaps: []}]}));
     assert.match(bare.split(/^## /m).find(s => s.startsWith('3. ')), /\| #1 → #2 \| – \| – \| Team \|/);
+});
+
+
+// ---- Task 8 of the turn clocks: scoring the new core ----------------------------------------------
+
+const STUB_TURNS = fileURLToPath(new URL('./fixtures/race-ref/stub-turns', import.meta.url));
+const stubsOfTurns = async () => ({
+    turns: (await import('./fixtures/race-ref/stub-turns/pages/src/engine/turns.mjs')).stub,
+    gaps: (await import('./fixtures/race-ref/stub-turns/pages/src/engine/gaps.mjs')).stub,
+    terrain: (await import('./fixtures/race-ref/stub-turns/pages/src/engine/terrain.mjs')).stub,
+});
+const resetTurnsStubs = ({turns, gaps, terrain}) => {
+    Object.assign(turns, {puller: null, onlyFiltered: false, disp: false, present: [0, 1, 2], hanging: [], view: null, prov: null});
+    turns.calls.length = 0;
+    turns.status.length = 0;
+    gaps.calls.length = 0;
+    terrain.builds.length = 0;
+};
+// A route as Sauce's getRoute gives it, made up: flat for 1 km, a climb of 100 m over the next km, flat.
+const ROUTE = {distances: [0, 1000, 2000, 6000], elevations: [0, 0, 100, 100], meta: {weldDistance: 0, leadinDistance: 0}, segments: []};
+
+
+test('runEngine: core auto picks turns.mjs when the dir has it; rotation forces the old adapter', async () => {
+    const stubs = await stubsOfTurns();
+    const {stub} = await import('./fixtures/race-ref/stub-engine/pages/src/engine/rotation.mjs');
+    const {ride, opts} = engineInput();
+    resetTurnsStubs(stubs);
+    Object.assign(stubs.turns, {puller: 1, hanging: [2]});
+    const auto = await runEngine(STUB_TURNS, ride, opts);
+    assert.ok(stubs.turns.calls.length > 100, 'the new stub was stepped');
+    assert.equal(auto.pul[50], 2);
+    assert.deepEqual(auto.hang[50], [3], 'the new adapter adds hang: the positions shown hanging');
+    assert.deepEqual(auto.below[50], [4, 5], 'below = not me (#2), not present');
+    assert.deepEqual((await runEngine(STUB_TURNS, ride, {...opts, core: 'turns'})).pul[50], 2);
+    // An old checkout (no turns.mjs) is auto-detected as the old adapter, as before.
+    Object.assign(stub, STUB_QUIET);
+    const old = await runEngine(STUB, ride, opts);
+    assert.equal(old.pul[10], 1);
+    assert.equal(old.hang, undefined, 'the old adapter has no hang');
+    // 'rotation' scores the rotation.mjs of a checkout that has both: the repository's shadow core.
+    const calls = stubs.turns.calls.length;
+    const rot = await runEngine(REPO, ride, {...opts, core: 'rotation'});
+    assert.equal(rot.hang, undefined);
+    assert.ok(rot.pul.some(x => x > 0));
+    assert.equal(stubs.turns.calls.length, calls, 'nothing else was stepped');
+    // Forced to the old adapter in a dir that has turns.mjs: the stub's rotation.mjs is missing, so it cannot run.
+    await assert.rejects(runEngine(STUB_TURNS, ride, {...opts, core: 'rotation'}));
+    await assert.rejects(runEngine(STUB_TURNS, ride, {...opts, core: 'nope'}), /unknown core/);
+    resetTurnsStubs(stubs);
+});
+
+
+test('runEngine: --filter reaches turnsStep', async () => {
+    const stubs = await stubsOfTurns();
+    const {ride, opts} = engineInput();
+    resetTurnsStubs(stubs);
+    Object.assign(stubs.turns, {puller: 0, onlyFiltered: true});
+    const off = await runEngine(STUB_TURNS, ride, opts);
+    assert.ok(stubs.turns.calls.every(c => c.filter === false), 'off by default');
+    assert.ok(off.pul.every(x => x === 0), 'no puller without the filter');
+    stubs.turns.calls.length = 0;
+    const on = await runEngine(STUB_TURNS, ride, {...opts, filter: true});
+    assert.ok(stubs.turns.calls.every(c => c.filter === true));
+    assert.equal(on.pul[50], 1, 'plan #1 with the filter on');
+    resetTurnsStubs(stubs);
+});
+
+
+test('runEngine: --provisional reaches turnsStatus; prov and the shown puller, countdown and mine follow the provisional view', async () => {
+    const stubs = await stubsOfTurns();
+    const {ride, opts} = engineInput();
+    resetTurnsStubs(stubs);
+    Object.assign(stubs.turns, {puller: 0, prov: {puller: 2, toMy: 40}});
+    const off = await runEngine(STUB_TURNS, ride, opts);
+    assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === false), 'off by default');
+    assert.equal(off.prov.length, opts.N);
+    assert.ok(off.prov.every(x => x === 0));
+    assert.deepEqual([off.pul[50], off.toMy[50], off.mine[50]], [1, null, 0], 'the owner, no view');
+    stubs.turns.status.length = 0;
+    const on = await runEngine(STUB_TURNS, ride, {...opts, provisional: true});
+    assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === true));
+    assert.deepEqual([on.prov[50], on.pul[50], on.toMy[50], on.mine[50]], [1, 3, 40, 0], 'the provisional view as shown');
+    resetTurnsStubs(stubs);
+});
+
+
+test('runEngine: --provisional changes nothing for the old adapter; off it changes nothing for the new one', async () => {
+    const {ride, opts} = engineInput();
+    const {stub} = await import('./fixtures/race-ref/stub-engine/pages/src/engine/rotation.mjs');
+    Object.assign(stub, STUB_QUIET);
+    assert.deepEqual(await runEngine(STUB, ride, {...opts, provisional: true}), await runEngine(STUB, ride, opts));
+    const rot = await runEngine(REPO, ride, {...opts, core: 'rotation'});
+    assert.deepEqual(await runEngine(REPO, ride, {...opts, core: 'rotation', provisional: true}), rot);
+    assert.equal(rot.prov, undefined, 'the old adapter has no prov');
+    const turns = await runEngine(REPO, ride, {...opts, core: 'turns'});
+    assert.deepEqual(await runEngine(REPO, ride, {...opts, core: 'turns', provisional: false}), turns);
+    assert.ok(turns.prov.every(x => x === 0));
+    // On, the real core runs over the fixture (no hill there: nothing provisional).
+    const prov = await runEngine(REPO, ride, {...opts, core: 'turns', provisional: true});
+    assert.equal(prov.prov.length, opts.N);
+});
+
+
+test('score: provS, provRight (from 5 s into the reference turn) and provJump (countdown steps of 10 s or more when the provisional view ends)', () => {
+    const N = 200;
+    const turns = [{who: 1, start: 0, end: 99, kind: 'first'}, {who: 2, start: 100, end: 199, kind: 'next'}];
+    const ref = mkRef({N, n: 3, turns});
+    const prov = new Array(N).fill(0);
+    const pul = new Array(N).fill(0);
+    const toMy = new Array(N).fill(null);
+    const mine = new Array(N).fill(0);
+    // 40..59 #1 (right), 100..109 #2 (right; 100..104 not judged), 150..164 #3 (wrong), 180..184 #2, 195..197 #2.
+    for (const [a, b, who] of [[40, 59, 1], [100, 109, 2], [150, 164, 3], [180, 184, 2], [195, 197, 2]]) {
+        fill(prov, 1, a, b);
+        fill(pul, who, a, b);
+        fill(toMy, 30, a, b);
+    }
+    // The second after each: the real view's countdown. 12, 25 and 15 s jumps count; 2 s does not; nor
+    // a second without a view (198), nor one that is mine (below).
+    Object.assign(toMy, {59: 50, 60: 38, 110: 55, 164: 20, 165: 5, 184: 10, 185: 8});
+    const sc = score(ref, mkOut(N, {pul, toMy, mine, prov}), {me: 3});
+    assert.equal(sc.provS, 20 + 10 + 15 + 5 + 3);
+    assert.equal(sc.provRight, +(100 * (20 + 5 + 5 + 3) / (20 + 5 + 15 + 5 + 3)).toFixed(1));
+    assert.deepEqual(sc.provJump, {med: 15, n: 3});
+    // A provisional view that ends in my own turn: no jump (I pull, no countdown).
+    mine[165] = 1;
+    assert.deepEqual(score(ref, mkOut(N, {pul, toMy, mine, prov}), {me: 3}).provJump, {med: 25, n: 2});
+    // Nothing provisional: 0 s, no basis for the rest; without prov (an old adapter): null.
+    const none = score(ref, mkOut(N, {prov: new Array(N).fill(0)}), {me: 3});
+    assert.deepEqual([none.provS, none.provRight, none.provJump], [0, null, {med: null, n: 0}]);
+    const old = score(ref, mkOut(N), {me: 3});
+    assert.deepEqual([old.provS, old.provRight, old.provJump], [null, null, null]);
+});
+
+
+test('runEngine: the new adapter steps turnsStep then gapStep per tick as paceline.mjs will', async () => {
+    const stubs = await stubsOfTurns();
+    const {ride, opts} = engineInput();
+    resetTurnsStubs(stubs);
+    await runEngine(STUB_TURNS, ride, opts);
+    assert.equal(stubs.turns.calls.length, ride.ticks.length);
+    assert.equal(stubs.gaps.calls.length, ride.ticks.length);
+    // turnsStep gets the gap state of the step before: n counts gapStep calls so far.
+    stubs.turns.calls.forEach((c, i) => assert.equal(c.gaps.n, i));
+    const g = stubs.gaps.calls[200];
+    assert.equal(g.hill, false);
+    assert.equal(g.needed, 4, 'the plan has no minimum: the fallback');
+    assert.deepEqual(Object.keys(g.riders).sort(), ['9000001', '9000002', '9000003', '9000004']);
+    assert.deepEqual(Object.keys(g.riders['9000001']).sort(), ['age', 'power', 'speed']);
+    // The distance to the end of the event, so the end phase works.
+    const me = stubs.turns.calls[200].nearby.find(e => e.self);
+    assert.equal(me.remaining, ride.finish.endM - me.state.eventDistance);
+    assert.equal(me.remainingMetric, 'distance');
+    resetTurnsStubs(stubs);
+});
+
+
+test('runEngine: the new core over the ride-report fixture returns arrays of N, chaos all 0', async () => {
+    const {ride, opts} = engineInput();
+    for (const core of ['auto', 'turns']) {
+        const out = await runEngine(REPO, ride, {...opts, core});
+        for (const key of ['pul', 'toMy', 'mine', 'el', 'disp', 'below', 'chaos', 'seen', 'hang']) {
+            assert.ok(Array.isArray(out[key]), `${core}: ${key}`);
+            assert.equal(out[key].length, opts.N, `${core}: ${key}`);
+        }
+        assert.ok(out.chaos.every(x => x === 0), 'the new core has no chaos');
+        assert.ok(out.pul.every(x => Number.isInteger(x) && x >= 0 && x <= 5));
+        assert.ok(out.pul.slice(60, 460).filter(x => x > 0).length > 300, 'a puller most of the race');
+        assert.ok(out.mine.some(x => x === 1), 'my own turns are found');
+        assert.ok(out.hang.every(x => x === null || Array.isArray(x)));
+    }
+    // A route does not break it either (the made-up climb in the middle of the ride).
+    const out = await runEngine(REPO, ride, {...opts, core: 'turns', route: ROUTE, segments: []});
+    assert.equal(out.pul.length, opts.N);
+    // And the score runs on it, with the new figures.
+    const ref = buildReference(engineInput().input);
+    const sc = score(ref, out, {me: ref.selfPos[0]});
+    assert.ok(Array.isArray(sc.hillDisp) && typeof sc.dispOffHill === 'number' && typeof sc.belowLong === 'number');
+});
+
+
+test('runEngine: recorded climbs are the terrain; a route file builds the index when none is recorded', async () => {
+    const stubs = await stubsOfTurns();
+    const {ride, opts} = engineInput();
+    const terrains = () => stubs.turns.calls.map(c => c.terrain);
+    // Neither: the live grade (undefined).
+    resetTurnsStubs(stubs);
+    await runEngine(STUB_TURNS, ride, opts);
+    assert.ok(terrains().every(t => t === undefined));
+    assert.equal(stubs.terrain.builds.length, 0);
+    // A route: the index is built once, from the event's laps and end; its items are the terrain.
+    resetTurnsStubs(stubs);
+    const segs = [{id: 7, type: 'kom'}];
+    await runEngine(STUB_TURNS, ride, {...opts, route: ROUTE, segments: segs});
+    assert.equal(stubs.terrain.builds.length, 1);
+    assert.equal(stubs.terrain.builds[0].route, ROUTE);
+    assert.deepEqual(stubs.terrain.builds[0].segments, segs);
+    assert.deepEqual(stubs.terrain.builds[0].opts, {laps: 1, endM: ride.event.endDistance});
+    assert.ok(terrains().every(t => t.hill?.tag === 'built' || t.hill === null), 'the stub index: a hill from 0 to 100 m');
+    assert.equal(terrains()[0].hill.tag, 'built', 'a rider in the pen at 0 m is on it');
+    assert.equal(terrains().at(-1).hill, null, 'and past 100 m off it');
+    resetTurnsStubs(stubs);
+    await runEngine(STUB_TURNS, ride, {...opts, route: ROUTE});
+    assert.deepEqual(stubs.terrain.builds[0].segments, [], 'no segments file: none');
+    // Recorded climbs: from the tick that carries them, the last ones seen so far, over the route.
+    resetTurnsStubs(stubs);
+    const mk = tag => ({routeId: 1, laps: 1, endM: 5000, items: [{from: 0, to: 1e9, kind: 'climb', roller: false, tag}]});
+    ride.ticks[50] = {...ride.ticks[50], climbs: mk('first')};
+    ride.ticks[300] = {...ride.ticks[300], climbs: mk('second')};
+    await runEngine(STUB_TURNS, ride, opts);
+    let t = terrains();
+    assert.equal(t[49], undefined, 'before the recorded index: the live grade');
+    assert.equal(t[50].hill.tag, 'first');
+    assert.equal(t[299].hill.tag, 'first');
+    assert.equal(t[300].hill.tag, 'second');
+    assert.equal(stubs.terrain.builds.length, 0, 'recorded climbs need no route');
+    resetTurnsStubs(stubs);
+    await runEngine(STUB_TURNS, ride, {...opts, route: ROUTE});
+    t = terrains();
+    assert.equal(t[10].hill?.tag, 'built', 'the route until the recording has its own');
+    assert.equal(t[49].hill, null, 'off the stub\'s hill by 112 m');
+    assert.equal(t[50].hill.tag, 'first', 'the recorded one wins');
+    assert.equal(stubs.terrain.builds.length, 1);
+    resetTurnsStubs(stubs);
+});
+
+
+test('score: hillDisp per hill, dispOffHill, belowLong', () => {
+    const N = 300;
+    const turns = [{who: 1, start: 0, end: 299, kind: 'first'}];
+    const hills = [{start: 20, end: 40}, {start: 200, end: 210}];
+    const present = Array.from({length: 5}, (_, k) => new Array(N).fill(k ? 1 : 0));
+    fill(present[2], 0, 210, 250);           // I am out of the group
+    fill(present[4], 0, 150, 170);           // rider 4 is out of the group
+    const ref = mkRef({N, n: 4, turns, present});
+    ref.hills = hills;
+    // Display episodes starting at 25 (on hill 1), 100 and 140 (60 s from a hill: near), 104, 138 and 271 (off).
+    const disp = new Array(N).fill(0);
+    for (const [a, b] of [[25, 30], [100, 100], [104, 104], [138, 138], [140, 142], [271, 273]]) {
+        fill(disp, 1, a, b);
+    }
+    const below = Array.from({length: N}, () => null);
+    const show = (k, a, b, skip = []) => {
+        for (let s = a; s <= b; s++) {
+            if (!skip.includes(s)) {
+                (below[s] ??= []).push(k);
+            }
+        }
+    };
+    show(1, 130, 165, [150]);                // 35 s with a hole of one second: one long run
+    show(3, 130, 150);                       // 20 s, then
+    show(3, 153, 170);                       // a hole of two seconds: two short runs (as flick)
+    show(4, 150, 200);                       // 51 s, of which 150..170 out of the group: 29 s only
+    show(1, 210, 250);                       // I am not in the group
+    show(3, 260, 295);                       // 35 s
+    show(2, 130, 200);                       // me: never counted
+    const out = mkOut(N, {disp, below: below.map(b => b ?? []).map((b, s) => (s < 120 ? null : b))});
+    const sc = score(ref, out, {me: 2});
+    assert.deepEqual(sc.hillDisp, [{start: 20, end: 40, dispS: 6}, {start: 200, end: 210, dispS: 0}]);
+    assert.equal(sc.dispOffHill, 3, '104, 138 and 271; 100 and 140 are exactly 60 s from a hill, 25 is on one');
+    assert.equal(sc.belowLong, 2, 'rider 1 at 130..165 and rider 3 at 260..295');
+    // No hills in the reference (an older one, or a flat race): no hill figures, every display is off a hill.
+    delete ref.hills;
+    const flat = score(ref, out, {me: 2});
+    assert.deepEqual(flat.hillDisp, []);
+    assert.equal(flat.dispOffHill, 6);
+});
+
+
+test('run: --core, --filter, --route parsed; unknown options still fail', async () => {
+    const stubs = await stubsOfTurns();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'race-ref-test-'));
+    try {
+        const {input} = engineInput();
+        const rec = path.join(root, 'a.jsonl');
+        fs.writeFileSync(rec, M.makeRecording());
+        const refFile = path.join(root, 'reference.json');
+        fs.writeFileSync(refFile, JSON.stringify({...buildReference(input), t0: input.t0, planSig: 'P1TEST'}));
+        const routeFile = path.join(root, 'route.json');
+        fs.writeFileSync(routeFile, JSON.stringify(ROUTE));
+        const segFile = path.join(root, 'segments.json');
+        fs.writeFileSync(segFile, JSON.stringify([{id: 7, type: 'kom'}]));
+        const go = async extra => {
+            const lines = [];
+            const code = await scoreRun([STUB_TURNS, refFile, rec, ...extra], {log: l => lines.push(l)});
+            return {code, json: code === 0 ? JSON.parse(lines.join('\n')) : null, lines};
+        };
+        resetTurnsStubs(stubs);
+        const plain = await go([]);
+        assert.equal(plain.code, 0);
+        assert.ok(stubs.turns.calls.every(c => c.filter === false), 'by default no filter');
+        assert.ok(stubs.turns.status.every(o => o.provisional === false), 'by default no provisional view');
+        assert.equal(stubs.terrain.builds.length, 0);
+        assert.ok(Array.isArray(plain.json.hillDisp), 'the new figures are printed');
+        resetTurnsStubs(stubs);
+        const all = await go(['--core', 'turns', '--filter', '--route', routeFile, '--segments', segFile, '--provisional']);
+        assert.equal(all.code, 0);
+        assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === true));
+        assert.ok('provS' in all.json && 'provRight' in all.json && 'provJump' in all.json, 'the provisional figures are printed');
+        assert.ok(stubs.turns.calls.length > 100 && stubs.turns.calls.every(c => c.filter === true));
+        assert.deepEqual(stubs.terrain.builds[0].route, ROUTE);
+        assert.deepEqual(stubs.terrain.builds[0].segments, [{id: 7, type: 'kom'}]);
+        // --core rotation forces the old adapter: the stub has no rotation core of its own to run.
+        await assert.rejects(go(['--core', 'rotation']));
+        await assert.rejects(go(['--core', 'nope']), /--core needs rotation or turns/);
+        await assert.rejects(go(['--core']), /--core needs/);
+        await assert.rejects(go(['--route']), /--route needs a JSON file/);
+        await assert.rejects(go(['--segments']), /--segments needs a JSON file/);
+        await assert.rejects(go(['--nope']), /unknown option --nope/);
+        const usage = await go(['--core', 'turns', 'extra']);
+        assert.equal(usage.code, 2);
+        assert.match(usage.lines.join('\n'), /--core rotation\|turns\] \[--filter\] \[--route/);
+        assert.match(usage.lines.join('\n'), /\[--provisional\]/);
+    } finally {
+        fs.rmSync(root, {recursive: true, force: true});
+        resetTurnsStubs(stubs);
+    }
 });
