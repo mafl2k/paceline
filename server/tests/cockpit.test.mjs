@@ -23,6 +23,8 @@ const OVER = T('2026-11-19T20:30:00Z') + 1;          // S 18:30Z + 2 h: the race
 
 const slots = html => element(html, '<div id="panel"') + element(html, '<div id="panel-body"') + element(html, '<div id="panel-acts"');
 // the card's action bar (#panel-acts, user 23 Nov 2026), else its status bar at the card body's end
+// the card's title (user, 24 Nov 2026: the live version's LIVE tag is in it, no "LIVE · riders get this" bar)
+const titleOf = html => element(html, '<h2 class="cp-title"') ?? '';
 const barOf = html => element(element(html, '<div id="panel-acts"') ?? '', '<div class="cp-bar"') ?? element(html, '<div class="cp-bar"');
 // anything of an Undo on a page: its form, a row's, the bar's, the flash's (user, 23 Nov 2026: none)
 const undoAny = html => /\/manage\/live\/undo|data-row-undo|cp-row-undo|cp-undo|class="flash ok undo"|>Undo</.test(html ?? '');
@@ -173,7 +175,7 @@ test('a version picked: its head, the table against live, what Make live would d
 });
 
 
-test('the live version: as riders get it (no old lines), also right after its switch; its bar "LIVE · riders get this" alone, no Undo', async t => {
+test('the live version: as riders get it (no old lines), also right after its switch; its LIVE tag in the card title and no status bar, no Undo', async t => {
     await start(t);
     for (const q of ['?v=c00005', '']) {                                         // picked, and opened with nothing picked: the same card
         const body = await page(q);
@@ -184,10 +186,11 @@ test('the live version: as riders get it (no old lines), also right after its sw
         assert.deepEqual([...pb.matchAll(/<span class="pt-nm">([^<]+)<\/span>/g)].map(m => m[1]), ['Ben', 'Cleo', 'Dan', 'Eva', 'Finn', 'Gus'], q);
         assert.ok(textOf(head).includes('Riders on \'fast\' v3'), q);
         assert.match(metaOf(head), /^Plan code [0-9A-Z]{6} 0 of 6 have the plan$/, q);
-        // the bar: the status alone, no form (no Undo, user 23 Nov 2026)
-        const bar = barOf(pb);
-        assert.equal(textOf(bar).trim(), 'LIVE · riders get this', q);
-        assert.equal(bar.includes('<form'), false, q);
+        // the LIVE tag in the title, no status bar and no form (no Undo, user 23 Nov 2026; no bar, 24 Nov 2026)
+        assert.equal(titleOf(body).includes('<span class="tag">Live</span>'), true, q);
+        assert.equal(textOf(titleOf(body)).trim(), 'Riders on \'fast\' v3 Live', q);
+        assert.equal(pb.includes('cp-bar') || pb.includes('riders get this'), false, q);
+        assert.equal(pb.includes('<form'), false, q);
         assert.equal(undoAny(body), false, q);
         assert.equal(body.includes('action="/manage/live"'), false, q);
         assert.match(body, /<li class="cp-row live picked" data-sel="v:c00005">/);
@@ -197,7 +200,8 @@ test('the live version: as riders get it (no old lines), also right after its sw
     const later = await page('?v=c00005');
     const pb2 = element(later, '<div id="panel-body"');
     assert.equal(/pt-old|pt-dropped|pt-mark/.test(pb2), false);
-    assert.ok(textOf(barOf(pb2)).includes('LIVE · riders get this'));
+    assert.equal(textOf(titleOf(later)).trim(), 'Riders on \'fast\' v3 Live');
+    assert.equal(pb2.includes('cp-bar'), false);
     assert.equal(pb2.includes('<form'), false);
     assert.equal(undoAny(later), false);
 });
@@ -320,7 +324,8 @@ test('the live row links to its race\'s live pointer (?r=): a reload after anoth
     assert.match(again, /<div id="panel" data-kind="version" data-sel="v:c00004" tabindex="-1">/);
     assert.ok(textOf(element(again, '<div id="panel"')).includes('Riders on \'fast\' v2'), textOf(element(again, '<div id="panel"')));
     assert.equal(again.includes('action="/manage/live"'), false);                  // no Make live button anywhere
-    assert.ok(textOf(barOf(again)).includes('LIVE · riders get this'));
+    assert.equal(textOf(titleOf(again)).trim(), 'Riders on \'fast\' v2 Live');
+    assert.equal(again.includes('<div class="cp-bar"'), false);
     assert.match(again, /<li class="cp-row live picked" data-sel="v:c00004"><a class="cp-link" href="\/manage\/team\/rollers\?r=2026-11-19#panel"/);
     // the fragment is the page's own slots
     const frag = await (await srv.get(`${PATH}?r=2026-11-19&panel=1&tv=${VERSION_OF(srv, 'rollers')}`, cookie)).text();
@@ -537,7 +542,8 @@ test('Make live from the panel: it acts or asks as the rule says, and lands on t
     assert.equal(undoAny(got.page), false);                                     // no Undo, in the flash or the bar
     // the new live version as riders get it: no old lines against the version live before (spec §5.3b)
     assert.equal(/pt-old|pt-dropped|pt-mark|live before/.test(element(got.page, '<div class="cp">')), false);
-    assert.ok(textOf(barOf(got.page)).includes('LIVE · riders get this'));
+    assert.equal(textOf(titleOf(got.page)).trim(), 'Riders on \'slow\' v1 Live');
+    assert.equal(got.page.includes('<div class="cp-bar"'), false);
     assert.match(got.page, /<li class="cp-row live picked" data-sel="v:c00002">/);
 
     // after the gate (the clock at 19:16): 'Rollers · fast' v2 asks first
@@ -989,7 +995,8 @@ test('Store and make live: the result, the table as riders get it, no Undo; what
     assert.match(result, /<a [^>]*href="\/manage\/upload\?team=sprockets&amp;plan=c00003&amp;date=2026-11-19">Upload for Sprockets<\/a>/);
     // the new live version as riders get it: no old lines against v3 (spec §5.3b); no Undo
     assert.equal(/pt-old|pt-dropped|pt-mark|live before/.test(element(r.page, '<div id="panel-body"')), false);
-    assert.equal(textOf(barOf(r.page)).trim(), 'LIVE · riders get this');
+    assert.equal(textOf(titleOf(r.page)).trim().endsWith(' Live'), true, titleOf(r.page));
+    assert.equal(r.page.includes('<div class="cp-bar"') || r.page.includes('riders get this'), false);
     assert.equal(undoAny(r.page), false);
     assert.equal(/Wrong file|Restore|\/manage\/sheet\/delete/.test(head), false);
 });
@@ -1019,6 +1026,11 @@ test('a Store result holds the reload only while it has something to keep; an op
     assert.match(r.page, /<body class="[^"]*" data-refresh="30"/);
     assert.match(r.page, new RegExp(`<noscript><meta http-equiv="refresh" content="30;url=/manage/team/rollers\\?v=${id}"></noscript>`));
     assert.equal(holdNote(r.page), null);
+    // the message floats over the card from 1180 px (user, 24 Nov 2026): the flash and its result in one box with
+    // a close link to the page's own URL; a clean one goes by itself after 6 s
+    const note = element(r.page, '<div class="cp-note"');
+    assert.ok(note.startsWith('<div class="cp-note" data-auto-close="6000"><div class="flash ') && note.includes('<div class="result">'), note.slice(0, 120));
+    assert.match(note, new RegExp(`<a class="cp-note-x" href="/manage/team/rollers\\?v=${id}" aria-label="Close message" data-note-close><svg class="i cp-x"[^>]*>[^]*?</svg></a></div>$`));
     assert.match(r.page, new RegExp(`<div id="panel" data-kind="version" data-sel="v:${id}" tabindex="-1" data-result>`));   // a result in the head: it flows on a phone (M3)
     const again = await page(`?v=${id}`);
     assert.equal(element(again, '<div class="result"'), null);
@@ -1061,6 +1073,9 @@ test('a Store result with a team still to do, or red, holds the reload and says 
     assert.equal(r.location, '/manage/team/rollers?r=2026-11-19#panel');         // live now: the race's live pointer
     const id = liveOf();
     assert.ok(element(r.page, '<div class="result"').startsWith('<div class="result" data-hold-reload>'));
+    // a result that holds the reload stays until it is closed: no auto-close, its links inside the box
+    assert.ok(element(r.page, '<div class="cp-note"').startsWith('<div class="cp-note"><div class="flash '), element(r.page, '<div class="cp-note"').slice(0, 80));
+    assert.ok(element(r.page, '<div class="cp-note"').includes('Upload for Sprockets</a>'));
     assert.match(r.page, /<body class="[^"]*" data-refresh="30"/);              // the script holds it while the result is shown
     assert.equal(r.page.includes('http-equiv="refresh"'), false);               // without it nothing can hold a meta refresh: none
     assert.deepEqual(holdNote(r.page), ['Not updating while this result is shown · Refresh', `/manage/team/rollers?r=2026-11-19`]);
@@ -1078,6 +1093,7 @@ test('a Store result with a team still to do, or red, holds the reload and says 
         startFor: '2026-11-26', startWas: '19:30', base: VERSION_OF(srv, 'rollers')});
     assert.equal(red.flash.kind, 'err', JSON.stringify(red.flash));
     assert.ok(element(red.page, '<div class="result"').startsWith('<div class="result" data-hold-reload>'));
+    assert.ok(element(red.page, '<div class="cp-note"').startsWith('<div class="cp-note"><div class="flash err" role="status">'), 'a red message stays until closed');
     assert.equal(red.page.includes('http-equiv="refresh"'), false);
     assert.equal(holdNote(red.page)?.[0], 'Not updating while this result is shown · Refresh');
 });
@@ -1249,7 +1265,8 @@ test('the sheet\'s path is marked in the list: sel-race, sel-rows and picked; th
         const picked = element(inRows, row[0]);
         assert.ok(inRace && inRows && picked, q);
         assert.ok(inRace.length > inRows.length && inRows.length > picked.length, q);
-        assert.ok(race[0].startsWith('<div class="race cp-race') && rows[0].startsWith('<ul class="cp-rows') && row[0].startsWith('<li class="cp-row'), q);
+        // a plan not stored yet sits in the box of those, before its race's box (user, 24 Nov 2026)
+        assert.ok(race[0].startsWith(kind === 'e' ? '<section class="cp-pending' : '<div class="race cp-race') && rows[0].startsWith('<ul class="cp-rows') && row[0].startsWith('<li class="cp-row'), q);
         assert.ok(row[0].includes(`data-sel="${kind}:${q.slice(3)}"`), `${q}: ${row[0]}`);
         // the picked row is its link alone, for a version and for a plan not stored yet
         assert.match(picked, /^<li [^>]*><a class="cp-link"[^>]*>[^]*?<\/a><\/li>$/, q);
@@ -1377,7 +1394,7 @@ test('the plan code: the live version\'s in its card, before and after the gate;
 });
 
 
-test('a later race\'s fold keeps the reload while it holds no form, and holds it with one (a pin note\'s Remove event link)', async t => {   // [M9]
+test('a later race: its notes (a pin note with its form) stand in its box under its line; no fold, no riders table in the list (user, 24 Nov 2026)', async t => {   // [M9]
     const made = cockpitClub();
     const c = made.club;
     // the nearest race starts 22:30, a later one at 00:30 the next day (Fri 20 Nov) with an event link;
@@ -1390,20 +1407,23 @@ test('a later race\'s fold keeps the reload while it holds no form, and holds it
     ids = made.ids;
     cookie = made.cookie;
     srv = await serve(t, made, {now: T('2026-11-19T23:10:00Z'), env: {CODE_SECRET, PUBLIC_URL: 'https://paceline.example.org'}});
-    const fold = async () => element(await page(''), '<details class="fold race-more"');
-    const plainFold = await fold();
-    assert.ok(plainFold, 'the later race is folded');
-    assert.ok(plainFold.startsWith('<details class="fold race-more" data-keep-refresh><summary>'), plainFold.slice(0, 80));
-    assert.ok(plainFold.includes('<h2 id="riders-h-2026-11-20">'));
-    assert.ok(plainFold.includes(`<p class="plancode">Plan code <code>${codeOf(later)}</code></p>`), 'the later race\'s riders card has its code');
+    const laterBox = async () => element(await page(''), '<div class="race cp-race later"');
+    const plain = await laterBox();
+    assert.ok(plain, 'the later race\'s box');
+    // no fold and no riders card: its riders are the card of its live row
+    assert.equal(/race-more|Live plan and riders|riders-card|riders-h|<table|plancode/.test(plain), false, plain);
+    assert.ok(plain.includes('href="/manage/team/rollers?r=2026-11-20#panel"'), 'its live row opens its riders in the card');
+    assert.equal(plain.includes('action="/manage/sheet/unpin"'), false);
     srv.see('1002', '2026-11-19T23:05:00Z', {sig: codeOf(later), mod: '0.3.0', sheet: later, inEvent: true, event: 4567891});
-    const formFold = await fold();
-    assert.ok(formFold.includes('action="/manage/sheet/unpin"'), formFold);
-    assert.ok(formFold.startsWith('<details class="fold race-more"><summary>'), formFold.slice(0, 80));
+    const withNote = await laterBox();
+    // the note and its form: under the race's line, before its plans
+    const at = s => withNote.indexOf(s);
+    assert.ok(at('<p class="race">') >= 0 && at('<p class="race">') < at('action="/manage/sheet/unpin"') && at('action="/manage/sheet/unpin"') < at('<section class="cp-plan'), withNote);
+    assert.equal(/race-more|<details class="fold/.test(withNote.replace(/<details class="fold cp-older"[^]*?<\/details>/g, '')), false, withNote);
 });
 
 
-test('the phone: the card follows the nearest race, before the later races, Over and the help, the flash on top; desktop keeps its columns', () => {   // [M1]
+test('the phone: the card follows the nearest race, before the later races, Over and the help, its message under the head; desktop keeps its columns', () => {   // [M1]
     const at = APP_CSS.indexOf('@media (max-width:1179.98px){');
     const block = APP_CSS.slice(at, APP_CSS.indexOf('@media (prefers-reduced-motion', at));
     // without a selection the list's blocks and the panel's parts are the grid's own items, in this
@@ -1413,7 +1433,7 @@ test('the phone: the card follows the nearest race, before the later races, Over
         'body.cockpit:not(.has-sel) :is(.cp-list,#panel){display:contents}',
         'body.cockpit:not(.has-sel) .cp-list>*{order:3;min-width:0}',
         // (the nearest race: the list's first block, or the first after the ways' copy, user 23 Nov 2026)
-        'body.cockpit:not(.has-sel) .cp-list>:is(.cp-race:first-child,.cp-ways+.cp-race){order:1}',
+        'body.cockpit:not(.has-sel) .cp-list>:is(.cp-race:first-child,.cp-ways+.cp-race,.cp-pending:first-child,.cp-ways+.cp-pending,.cp-pending:first-child+.cp-race,.cp-ways+.cp-pending+.cp-race){order:1}',
         'body.cockpit:not(.has-sel) :is(#panel>.cp-top,#panel-body,#panel-acts){order:2}',
         'body.cockpit:not(.has-sel) :is(#panel-body,#panel-acts){margin-top:-1.25rem}',
         'body.cockpit:not(.has-sel) .cp-row.picked>.cp-link{background:none;box-shadow:inset 3px 0 0 var(--ok-icon)}',
@@ -1617,7 +1637,24 @@ test('the live card after the gate: one rider table with a Plan column, a state 
 });
 
 
-test('a later race\'s fold: the same rider table, with the Plan column once its gate is open', async t => {
+test('a later race without a live plan keeps its one status line, no notes, no fold (user, 24 Nov 2026)', async t => {
+    const made = cockpitClub();
+    const c = made.club;
+    c.teams.rollers.races[DATE].start = '22:30';
+    uploadSheet(c, {slug: 'rollers', json: plan('Rollers spare', [['1001', 60, {pull_power: 300}]]), text: null,
+        date: '2026-11-21', start: '00:30', base: c.teams.rollers.version, via: 'file', type: 'spare', as: 'new', live: false},
+    {now: T('2026-11-19T10:00:00Z'), newId: made.newId});
+    ids = made.ids;
+    cookie = made.cookie;
+    srv = await serve(t, made, {now: T('2026-11-19T22:50:00Z')});
+    const box = element(await page(''), '<div class="race cp-race later"');
+    assert.ok(box, 'the later race\'s box');
+    assert.match(box, /<p class="sevline [a-z]+ race-status">|class="sevline[^"]*race-status/, box);
+    assert.equal(/race-more|riders-card|<table|<details class="fold race-more"/.test(box), false, box);
+});
+
+
+test('a later race\'s riders: the card of its live row (?r=), the same rider table, with the Plan column once its gate is open (no fold in the list)', async t => {
     const made = cockpitClub();
     const c = made.club;
     // the nearest race at 22:30, a later one at 00:30 the next day (Fri 20 Nov) with an event link
@@ -1628,25 +1665,26 @@ test('a later race\'s fold: the same rider table, with the Plan column once its 
     ids = made.ids;
     cookie = made.cookie;
     srv = await serve(t, made, {now: T('2026-11-19T22:50:00Z')});     // 23:50: the later race's gate (00:00) is closed
-    const fold = async () => element(await page(''), '<details class="fold race-more"');
-    const closed = await fold();
-    assert.equal(count(closed, '<table class="ptable ptable-plan">'), 1, closed);
-    assert.equal(/rstate|>Plan<|<ul class="riders/.test(closed), false, closed);
-    assert.deepEqual(tableLines(closed).map(l => [l.pos, l.name, l.state]), [['1', 'Ben', null], ['2', 'Cleo', null]]);
-    assert.ok(closed.includes('<td class="n pt-pull">45 s @ 4.0</td>'), closed);
-    assert.ok(closed.includes('<p class="count">2 riders</p>'), closed);
-    assert.ok(closed.includes('<p class="hint">In ride order. Who has the plan shows from <time>Fri 20 Nov 00:00</time>, when riders get it.</p>'), closed);
+    const card = async () => await page('?r=2026-11-20');
+    const closed = await card();
+    assert.equal(/race-more|Live plan and riders/.test(closed), false);
+    const closedBody = element(closed, '<div id="panel-body"');
+    assert.equal(count(closedBody, '<table class="ptable ptable-plan">'), 1, closedBody);
+    assert.equal(/rstate|>Plan<|<ul class="riders/.test(closedBody), false, closedBody);
+    assert.deepEqual(tableLines(closedBody).map(l => [l.pos, l.name, l.state]), [['1', 'Ben', null], ['2', 'Cleo', null]]);
+    assert.ok(closedBody.includes('<td class="n pt-pull">45 s @ 4.0</td>'), closedBody);
+    assert.equal(metaOf(closed), `Plan code ${codeOf(later)} 2 riders`);
+    assert.ok(closedBody.includes('<p class="hint">In ride order. Who has the plan shows from <time>Fri 20 Nov 00:00</time>, when riders get it.</p>'), closedBody);
 
     srv.see('1002', '2026-11-19T23:05:00Z', {sig: codeOf(later), mod: '0.3.0', sheet: later, inEvent: true, event: 4567891});
     srv.clock.now = T('2026-11-19T23:10:00Z');                      // 00:10: its gate is open (see() puts the clock back first)
-    const open = await fold();
-    assert.ok(open.includes('<h2 id="riders-h-2026-11-20">'), open);
-    assert.ok(open.includes('<th class="rstate">Plan</th>'), open);
-    assert.ok(open.includes('<p class="count"><strong>0 of 2</strong> have the plan</p>'), open);
-    assert.ok(open.includes(`<p class="plancode">Plan code <code>${codeOf(later)}</code></p>`), open);
-    assert.deepEqual(tableLines(open).map(l => [l.pos, l.name, l.state]), [
+    const open = await card();
+    const openBody = element(open, '<div id="panel-body"');
+    assert.ok(openBody.includes('<th class="rstate">Plan</th>'), openBody);
+    assert.match(metaOf(open), new RegExp(`^Plan code ${codeOf(later)} 0 of 2 have the plan$`));
+    assert.deepEqual(tableLines(openBody).map(l => [l.pos, l.name, l.state]), [
         ['1', 'Ben', '– Not seen yet'], ['2', 'Cleo', '⚠︎ In event 4567891 · gets nothing 00:05']]);
-    assert.equal(/<ul class="riders|class="rider /.test(open), false);
+    assert.equal(/<ul class="riders|class="rider /.test(openBody), false);
     sameRiders(srv.store.get(CID), 'rollers', srv.clock.now);
 });
 
@@ -1680,7 +1718,7 @@ test('cockpit: #panel draws no focus ring when the swap focuses it', () => {
 // bottom. Discard · Store · Make live, Make live always the rightmost.
 const actsOf = html => element(html, '<div id="panel-acts"');
 
-test('the card\'s actions: a slot of their own after #panel-body, Discard · Store · Make live; a status stays in the card (user, 23 Nov 2026)', async t => {
+test('the card\'s actions: a slot of their own after #panel-body, Discard · Store · Make live; the live version status is the LIVE tag in its title (user, 24 Nov 2026)', async t => {
     await start(t);
     // a plan not stored yet: Discard, Store, Make live, in this order, outside #panel-body
     const entry = await page('?e=c00006');
@@ -1701,10 +1739,11 @@ test('the card\'s actions: a slot of their own after #panel-body, Discard · Sto
     assert.match(version, /^<div id="panel-acts"><div class="cp-bar"><form method="post" action="\/manage\/live"[ >]/);
     assert.equal(count(version, 'data-arm-open>Make live'), 1, version);
     assert.equal(element(await page('?v=c00004'), '<div id="panel-body"').includes('cp-bar'), false);
-    // the live version, nothing picked: no actions; its status stays at the card's end
+    // the live version, nothing picked: no actions and no status bar; its LIVE tag is in its title
     const live = await page('');
     assert.equal(actsOf(live), '<div id="panel-acts"></div>');
-    assert.ok(element(live, '<div id="panel-body"').includes('<div class="cp-bar"><p class="cp-status ok">'), element(live, '<div id="panel-body"'));
+    assert.equal(element(live, '<div id="panel-body"').includes('cp-bar'), false, element(live, '<div id="panel-body"'));
+    assert.ok(titleOf(live).includes('<span class="tag">Live</span>'), titleOf(live));
     assert.ok(element(live, '<div id="panel-body"').startsWith('<div id="panel-body"><div class="cp-body">'));
     // the fragment: the three slots, in this order
     const frag = await (await srv.get(`${PATH}?e=c00006&panel=1&tv=${VERSION_OF(srv, 'rollers')}`, cookie)).text();
@@ -1718,6 +1757,42 @@ test('the card\'s actions: a race that is over reads "Read only" in the card, no
     const body = await page('?v=c00004');
     assert.equal(actsOf(body), '<div id="panel-acts"></div>');
     assert.equal(textOf(element(element(body, '<div id="panel-body"'), '<div class="cp-bar"')).trim(), 'Read only');
+});
+
+
+test('the card\'s message stands under its head, in the same .cp-top, with its own close for every width (user, 24 Nov 2026)', async t => {
+    await start(t);
+    // a clean Store result: head (title with the sheet's close, meta line), then the message with its ×
+    const r = await followPost(srv, cookie, '/manage/inbox/c00006', storeFields());
+    const panel = element(r.page, '<div id="panel"');
+    const at = s => panel.indexOf(s);
+    assert.ok(at('<div class="cp-top">') >= 0 && at('<h2 class="cp-title"') > at('<div class="cp-top">') && at('<a class="cp-close"') > at('<h2 class="cp-title"')
+        && at('<p class="cp-meta">') > at('<a class="cp-close"') && at('<div class="cp-note"') > at('<p class="cp-meta">') && at('data-note-close') > at('<div class="cp-note"'), panel);
+    // the note is inside the head (one block), not a sibling of it
+    assert.ok(element(panel, '<div class="cp-top">').includes('<div class="cp-note"'), panel);
+    assert.equal(count(panel, 'data-note-close'), 1);
+    // a page without a message has no note and no ×
+    const calm = await page('?v=c00004');
+    assert.equal(calm.includes('cp-note'), false);
+});
+
+
+test('the card\'s title: a version not live has no LIVE tag, the live one has it, a race that is over keeps "Read only" (user, 24 Nov 2026)', async t => {
+    await start(t);
+    // v2 is not live: no tag in its title, Make live in its actions
+    const old = await page('?v=c00004');
+    assert.match(textOf(titleOf(old)).trim(), /^'fast' v2 · stored Thu 19 Nov 18:55$/);
+    assert.equal(/class="tag/.test(titleOf(old)), false, titleOf(old));
+    assert.equal(/Live|Not sent/.test(textOf(titleOf(old))), false, titleOf(old));
+    // v3 is live: the tag, once, in the title
+    assert.equal(count(titleOf(await page('?v=c00005')), 'class="tag'), 1);
+    // after the race: every card reads "Read only", the live version's too; none has a tag in its title
+    srv.clock.now = OVER;
+    for (const q of ['?v=c00004', '?v=c00005']) {
+        const body = await page(q);
+        assert.equal(/class="tag/.test(titleOf(body)), false, `${q}: ${titleOf(body)}`);
+        assert.equal(textOf(element(element(body, '<div id="panel-body"'), '<div class="cp-bar"')).trim(), 'Read only', q);
+    }
 });
 
 
@@ -1746,6 +1821,36 @@ test('the action row from 1180 px: the ways to a plan above the list, the card\'
     ]) {
         assert.ok(wide.includes(rule), rule);
     }
+    // a question of the bar's actions (user, 24 Nov 2026) floats under the buttons over the card's top from
+    // 1180 px: the bar its positioning box, the buttons stay, nothing moves; below 1180 px it takes the
+    // bar's place as before
+    for (const rule of [
+        '.cp>#panel-acts>.cp-bar form[data-arm].armed{flex-basis:auto;width:auto}',
+        '.cp>#panel-acts>.cp-bar form[data-arm].armed>[data-arm-open]{display:inline-flex}',
+        '.cp>#panel-acts>.cp-bar form.discard.armed{order:0;padding-right:.75rem}',
+        '.cp>#panel-acts>.cp-bar .arm-strip{position:absolute;z-index:5;top:calc(100% + .375rem);right:0;flex-basis:auto;width:26rem;max-width:100%;background:var(--surface);box-shadow:var(--shadow-pop)}',
+    ]) {
+        assert.ok(wide.includes(rule), rule);
+    }
+    assert.ok(APP_CSS.includes('#panel-acts>.cp-bar{position:relative;'), 'the bar is the strip\'s positioning box');
+    // the one-shot message floats over the card's top from 1180 px (user, 24 Nov 2026): the card's panel its
+    // positioning box, the box absolute on the card's width, under an open question (z-index 4 < 5); below
+    // 1180 px it flows under the card's head, with its own × at its top right
+    for (const rule of [
+        '.cp>#panel{position:relative}',
+        '.cp>#panel .cp-note{position:absolute;z-index:4;top:-.375rem;left:0;right:0;',
+        '.cp>#panel .cp-note-x{top:.5rem;right:.5rem}',
+    ]) {
+        assert.ok(wide.includes(rule), rule);
+    }
+    // the base rules (every width): the box in the flow, its × shown at its top right, the flash clear of it
+    const base = APP_CSS.slice(0, APP_CSS.indexOf('@media (min-width:1180px){'));
+    for (const rule of ['.cp-note{position:relative;margin-top:.625rem}', '.cp-note>.flash{padding-right:calc(var(--tap) + .25rem)}',
+        '.cp-note-x{display:inline-flex;position:absolute;top:0;right:0;']) {
+        assert.ok(base.includes(rule), rule);
+    }
+    assert.equal(APP_CSS.includes('.cp-note-x{display:none}'), false, 'the × shows at every width');
+    assert.ok(APP_CSS.includes('@media not all and (min-width:1180px){.cp-bar.armed>:not(.arm-strip){display:none}}'), 'the buttons give the strip their place only below 1180 px');
     assert.ok(APP_CSS.includes('.cp-ways{display:none}'), 'the copy hidden below 1180 px');
     assert.ok(wide.includes('.cp-ways{display:block'), 'shown from 1180 px');
 });

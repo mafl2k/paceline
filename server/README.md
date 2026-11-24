@@ -155,16 +155,16 @@ two from 1180 px (the list and the panel).
 
 <p>
 <img src="../docs/images/captain-teams-390-light.png" width="260" alt="The club hub of Kettenfett RC at phone width: Next race · Thu 19 Nov with Club settings beside the name, Updated 19:12, the green line Nothing to do · next race Thu 19 Nov 19:30; then Racing Thu 19 Nov, a table of Rollers ('Rollers · fast' v2, 0 of 5) and Sprockets ('Sprockets' v2, 0 of 3) at 19:30, each with an amber status icon; then the team tiles Rollers and Sprockets, 19:30 · in 18 min, with their live plan and how many riders have it, and Cogs with No start time set">
-<img src="../docs/images/captain-team-390-light.png" width="260" alt="The Rollers team page at phone width: Team settings at the top right beside the club name, the full-width primary button Plan on ZwiftGopher with the bordered button Upload a file under it, Updated 19:12; the race line Thu 19 Nov · 19:30 · in 18 min with its ⋯; the plan fast with its ⋯ and its versions v2 · 0/5 have it ending in the tags LIVE and SENDING and v1 · Ben and Gus in, Hanna out; the plan slow with its v1; then the card of the live version, Riders on 'fast' v2, its Plan code and 0 of 5 have the plan, its rider table starting below with Cleo, in the event, the plan coming at the next check">
+<img src="../docs/images/captain-team-390-light.png" width="260" alt="The Rollers team page at phone width: Team settings at the top right beside the club name, the full-width primary button Plan on ZwiftGopher with the bordered button Upload a file under it, Updated 19:12; the race ahead in a box of its own: its line Thu 19 Nov · 19:30 · in 18 min with its ⋯; the plan fast with its ⋯ and its versions v2 · 0/5 have it ending in the tags LIVE and SENDING and v1 · Ben and Gus in, Hanna out; the plan slow with its v1; then the card of the live version, its title Riders on 'fast' v2 followed by the tag LIVE (no status bar at its end), its Plan code and 0 of 5 have the plan, its rider table starting below with Cleo, in the event, the plan coming at the next check">
 <img src="../docs/images/captain-team-390-dark.png" width="260" alt="The same team page in the dark theme">
-<img src="../docs/images/captain-team-races-390-light.png" width="260" alt="The Rollers team page with two races, the whole page at phone width: the race of Thu 19 Nov 19:30 with the plans fast (v2 · Other details only, v1), spare and easy (v1 · 0/5 have it, tagged LIVE and SENDING), each with its ⋯ and its version rows; then the card of the live version, Riders on 'easy' v1, Plan code with its code and 0 of 5 have the plan, the rider table with each rider's state on a line under the row: Cleo, Dan and Eva in the event with the plan coming at the next check, Finn with an older plan (code ABC123), Hanna riding Sprockets now; under it Live since Thu 19 Nov 19:12, What do these mean? and at the card's bottom LIVE · riders get this; then the race Sun 22 Nov · 18:00 · in 3 days · opens 17:30 · Event 5123456 with its ⋯, the plans sunday B and the live sunday, and the closed fold Live plan and riders; at the end the help fold How races work">
+<img src="../docs/images/captain-team-races-390-light.png" width="260" alt="The Rollers team page with two races, the whole page at phone width: the race of Thu 19 Nov 19:30 in a box with the plans fast (v2 · Other details only, v1), spare and easy (v1 · 0/5 have it, tagged LIVE and SENDING), each with its ⋯ and its version rows; then the card of the live version, its title Riders on 'easy' v1 followed by the tag LIVE, Plan code with its code and 0 of 5 have the plan, the rider table with each rider's state on a line under the row: Cleo, Dan and Eva in the event with the plan coming at the next check, Finn with an older plan (code ABC123), Hanna riding Sprockets now; under it Live since Thu 19 Nov 19:12 and What do these mean?; then the race Sun 22 Nov · 18:00 · in 3 days · opens 17:30 · Event 5123456 in a box of its own, with its ⋯, the plans sunday B and the live sunday (no fold under it: its live row opens its riders in the card); at the end the help fold How races work">
 <img src="../docs/images/captain-race-menu-390-light.png" width="260" alt="The ⋯ of the race on Sun 22 Nov open at phone width, in the page flow under the race line Sun 22 Nov · 18:00 · in 3 days · opens 17:30 · Event 5123456: Date and time with the race date 22.11.2026, the start time 18:00 and Save date and time…; then Event link: Event link 5123456 (yours): the plans go only to riders in that event, an empty link field, Save event link and Remove event link">
-<img src="../docs/images/captain-plan-menu-390-light.png" width="260" alt="The ⋯ of the plan 'Rollers · sunday B' open at phone width, under its label sunday B in the Sunday race: Type with the hint The plan reads as the team's name plus this type, in every version, the field holding sunday B and Rename; Delete plan… in red (no Make live); below it the plan's version row v1 · Other details only, the plan sunday with v1 tagged LIVE, the closed fold Live plan and riders and the help fold How races work">
+<img src="../docs/images/captain-plan-menu-390-light.png" width="260" alt="The ⋯ of the plan 'Rollers · sunday B' open at phone width, under its label sunday B in the Sunday race: Type with the hint The plan reads as the team's name plus this type, in every version, the field holding sunday B and Rename; Delete plan… in red (no Make live); below it the plan's version row v1 · Other details only, the plan sunday with v1 tagged LIVE, and the help fold How races work">
 <img src="../docs/images/captain-cockpit-version-390-light.png" width="260" alt="A version picked on a phone, the sheet: the title 'easy' v2 · stored Thu 19 Nov 19:12 with the close link ✕ at its right, the version's Plan code and the caption Against live v1 under it; the rider table #, Rider, Pull @ W/kg with Ben marked NEW, Cleo, Dan, Eva and Finn at 60 s, and Hanna 5 crossed out as dropped; the warning lines Ben moves from Sprockets to Rollers. and Still to do: Sprockets.; under a line the primary button Make live">
 <img src="../docs/images/captain-cockpit-store-390-light.png" width="260" alt="A plan not stored yet picked on a phone, the Store sheet: the title Received 19:12 · 'Rollers' · 3 riders with ✕ and the caption Against live 'easy' v1; the rider table with Ben marked NEW, Cleo and Dan, and Eva, Finn and Hanna crossed out; under it the form: the fold Other team; Store as with New version of 'Rollers · easy' (live · v1 · 2 of 3 riders the same), of 'Rollers · fast' and of 'Rollers · spare', and New plan, none chosen yet; the red line Pick a plan.; then the action bar with Discard, Store and Make live in that order at its right end; last the line Not updating while the Store form is open · Refresh">
 </p>
 <p>
-<img src="../docs/images/captain-cockpit-version-1280-light.png" width="780" alt="The Rollers team page at 1280 px with a version picked: the sidebar with Rollers (1 new plan, 0 of 5 riders have the plan), Sprockets and Cogs; the title line Rollers with Updated 19:12 raised beside it and Team settings at its right end; under it Plan on ZwiftGopher and Upload a file at the left and, above the card at the right, Make live; in the left column the race line Thu 19 Nov · 19:30 · in 18 min · 19:30 · in 18 min on one line, Not stored yet (Received 19:12 · 'Rollers' · 3 riders), the plans fast (v2 · Other details only, v1 · Ben and Gus in, Hanna out), spare, and easy with the picked row v2 · not live and Make live beside it, and v1 · 0/5 have it tagged LIVE and SENDING, then How races work; in the right column one framed card: 'easy' v2 · stored Thu 19 Nov 19:12, its Plan code and Against live v1, the rider table with Ben NEW and Hanna crossed out, the warning lines Ben moves from Sprockets to Rollers. and Still to do: Sprockets., and no button bar in the card (its Make live is in the row above)">
+<img src="../docs/images/captain-cockpit-version-1280-light.png" width="780" alt="The Rollers team page at 1280 px with a version picked: the sidebar with Rollers (1 new plan, 0 of 5 riders have the plan), Sprockets and Cogs; the title line Rollers with Updated 19:12 raised beside it and Team settings at its right end; under it Plan on ZwiftGopher and Upload a file at the left and, above the card at the right, Make live; in the left column two boxes, the first starting on the card's top line: Not stored yet (headed like a race's line, with Received 19:12 · 'Rollers' · 3 riders), then the race's box with its line Thu 19 Nov · 19:30 · in 18 min, the plans fast (v2 · Other details only, v1 · Ben and Gus in, Hanna out), spare, and easy with the picked row v2 · not live and v1 · 0/5 have it tagged LIVE and SENDING; under them How races work; in the right column one framed card: 'easy' v2 · stored Thu 19 Nov 19:12, its Plan code and Against live v1, the rider table with Ben NEW and Hanna crossed out, the warning lines Ben moves from Sprockets to Rollers. and Still to do: Sprockets., and no button bar in the card (its Make live is in the row above)">
 </p>
 
 - **Club hub** (`/manage`): the club, its next race ("Next race · Thu 19 Nov") with Club settings
@@ -242,9 +242,11 @@ two from 1180 px (the list and the panel).
   the list (a copy at the list's top; the head's give way), and at its right end, above the card's
   column with its right edge on the card's, the card's actions: for a plan not stored yet Discard ·
   Store · Make live, for a version not live Make live alone, Make live always the rightmost; none for
-  the live version, a race that is over or nothing to act on (their "LIVE · riders get this" or "Read
-  only" stays at the card's end). The row keeps its height with or without actions; Make live's
-  question opens in it, in the buttons' place, and pushes the card down while open, never the list.
+  the live version, a race that is over or nothing to act on (a race that is over keeps "Read only" at
+  the card's end; the live version's LIVE tag is in its card's title, user, 24 Nov 2026). The row keeps its height with or without actions; The question
+  of Make live and of Discard opens as a panel floating under its button over the card's top (its right
+  edge on the card's, the buttons stay where they are; user, 24 Nov 2026): the card, the list and the
+  row do not move. Esc and Cancel close it; a click outside does not.
   The card then ends with its body (its warnings last). The stale line ("Not updated since …", with
   Try again), when shown, is a line of its own under the head. From 1180 px the page has two columns, **the list** on the left and **the panel**
   on the right; narrower, the list is the page and the panel opens as a sheet (Phone, below).
@@ -254,7 +256,9 @@ two from 1180 px (the list and the panel).
   in 2 days · opens Sun 22 Nov 17:30 · Event 5123456"; the nearest before its gate "Thu 19 Nov ·
   19:30 · in 3 h · opens 19:00"; once its live version's row says the race's phase, the line leaves
   it out: "Thu 19 Nov · 19:30 · in 18 min" while sending, "Thu 19 Nov · 19:30" once started, and
-  without a live version that is sent it keeps "open since 19:00" and "started"); the nearest race then has what needs fixing and its callouts. Under **"Not
+  without a live version that is sent it keeps "open since 19:00" and "started"); the nearest race then has what needs fixing and its callouts. Each race ahead is
+  a box of its own (user, 24 Nov 2026), and the plans not stored yet are one more box **above their
+  race's box**, headed like a race's line, starting on the card's top line from 1180 px. Under **"Not
   stored yet"** come the plans received from ZwiftGopher and the uploads not stored yet, newest
   first, one row each ("Received 19:12 · 'Rollers slow' · 4 riders", "Uploaded 19:05 · 6 riders"): a
   pushed plan sits with the nearest race, an upload with the race it was made for. Then the race's
@@ -276,14 +280,15 @@ two from 1180 px (the list and the panel).
   bar, like every version's); another plan of the race gets no such notice (a variant kept as a backup must not ask to
   be made live), and a version the captain stepped back from says nothing in the list (its card:
   "Was live 18:57"). A later
-  race keeps its live plan's notes and riders in the closed fold "Live plan and riders" (a later race
-  without a live plan shows its status instead). The races that are over sit in the fold "Over (1)"
+  race has its notes and its no-start callout under its line when it has a live plan, as the nearest
+  race does (no fold: its live row opens its riders in the card, user 24 Nov 2026), else its status
+  line. The races that are over sit in the fold "Over (1)"
   at the end: each race's day with its plans and versions, without a race ⋯; their versions open read
   only ("This race is over: nothing can be changed."), and their plans' ⋯ has Delete only. Last comes
   the help fold "How races work".
   **The panel** is one card in every state (from 1180 px the right column): its head (the title,
   then one line with the plan code and the table's caption or the riders' count), the rider table, a
-  slot of its warnings, and its status ("LIVE · riders get this", "Read only") or below 1180 px its
+  slot of its warnings, and its status ("Read only"; the live version has none, its LIVE tag is in its title) or below 1180 px its
   **action bar** at its bottom (from 1180 px the actions stand in the row under the title, above),
   in the same place, frame, paddings and column widths whatever is picked, so the page does not jump
   between them. The actions are a slot of their own (`#panel-acts`, after `#panel-body`), swapped
@@ -302,8 +307,8 @@ two from 1180 px (the list and the panel).
   "In event … · gets nothing"; – "Not seen yet", "Checked 19:05 · not in the event yet", "In the event
   · plan comes at the next check"), with the time of the rider's last check; the rows stay in ride
   order. In the right column from 1180 px (too narrow for four columns) and on a phone the state is a
-  line under the rider's row, so pull @ target keeps its column. The action bar says "LIVE · riders
-  get this". A race with plans and nothing live shows "Nothing live for Thu 19 Nov yet" and "Pick a
+  line under the rider's row, so pull @ target keeps its column. The live card's title ends in the LIVE
+  tag ("Not sent" without a start time), as its row in the list, and the card has no status bar. A race with plans and nothing live shows "Nothing live for Thu 19 Nov yet" and "Pick a
   version to see it and make it live."; a race without plans has no card (its empty card in the list
   says it). **A version picked** (`?v=`) takes the card's place, also after the gate (the live
   version's row then says "4/6 have it", the same count, so it stays in sight): "'fast' v2
@@ -326,7 +331,7 @@ two from 1180 px (the list and the panel).
   in every state.
   The live version is always the plan as riders get it, no old lines, also right after a switch.
   There is **no Undo** (user, 23 Nov 2026): the flash of a switch ("'Rollers · fast' v3 is live for
-  Rollers.") is its text alone, the live card's bar says "LIVE · riders get this" alone, and no row
+  Rollers.") is its text alone, the live card has no status line (its title holds the LIVE tag), and no row
   offers one; a wrong switch is taken back by opening the version that was live (its card says "Was
   live …") and pressing its Make live, which asks first once the gate is open, as any Make live. A
   version of a race that is over: "This race is over: nothing can be changed." and "Read only" in the
@@ -357,7 +362,7 @@ two from 1180 px (the list and the panel).
   watts is no change.
 - **Phone: the sheet** (below 1180 px): the list is the page, the card of the live version (its
   riders) follows the nearest race (before the later races, "Over" and "How races work"), its row
-  marked live, not picked, and a flash on top of the page. A picked row
+  marked live, not picked, and a flash under the card's head. A picked row
   opens the panel as a sheet over the page, the same sheet for a version and for a plan not stored
   yet (the list gone in both): the close link ✕ at the right of its title, then for a version the
   table and Make live, for a plan not stored yet the table, the Store form, its warnings (when any), Store and
@@ -503,8 +508,12 @@ two from 1180 px (the list and the panel).
 - **After a POST** the server answers 303 to the page the form came from, which shows what was done
   once (the flash). It is kept in memory for 5 minutes, bound to the club and the path, and only
   its id travels in the `__Host-pl_flash` cookie, so a restart loses at most a message. On the team
-  page the flash stands right above the card (on a phone with nothing picked, on top of the page);
-  Store's carries what the Store did (Upload and Store,
+  page the flash stands under the card's head (the title with the sheet's ✕, the plan code line; user, 24 Nov 2026), in the
+  flow, with a close × of its own and no auto-close; from 1180 px it floats over the card's top instead (user, 24 Nov 2026: a box of its own, `.cp-note`, right under the
+  action row, on the card's width, below an open question), so the card and the list never move, with a
+  close × (a 44 px link to the page's own URL, which the script turns into removing the box and
+  focusing the card; a clean message goes by itself after 6 s, a red one or one that holds the reload
+  stays until closed; an action opening its question closes it); Store's carries what the Store did (Upload and Store,
   below). The rider-code page, the confirm pages (the no-script path of every action that asks
   first) and refusals are direct answers.
 - **Reload.** The hub and the team pages reload themselves every 30 seconds from 90 minutes
@@ -695,8 +704,9 @@ button (it asks first in the race window while another plan is live); into a
 race with nothing live the flash says in red "Stored as v1 of 'Rollers · sunday'. Not live: riders
 get nothing until you press Make live." and Make live is the primary button. There is no "Wrong file?" and no Undo: a wrong file made live is undone with Make
 live of the version live before (its card says "Was live …"). While the flash's result has something
-to keep (a red line, a warning, a team still to do) the page does not reload itself and says so; a
-clean result goes with the next reload. A plan whose content and event link equal its newest version
+to keep (a red line, a warning, a team still to do) the page does not reload itself and says so (closing
+the message releases it); a
+clean result goes with the next reload (from 1180 px after 6 s). A plan whose content and event link equal its newest version
 (a new version's type is its plan's) stores nothing ("Same as 'Rollers · fast' v2: nothing new
 stored."); Make live still makes that version live. A refusal (a race already over, a special team's plan without a date or start time, an
 empty or taken type, a cap) answers 400 with the team page, the entry picked and its form as
@@ -1743,7 +1753,7 @@ Make live and Store also work without it. `server/tests/smoke-captain.mjs` check
 CDP (Node 22's `WebSocket`, no puppeteer); it also checks that the public pages load without a
 script, fit 390 px and have 44 px targets, that `/` with the club cookie opens `/manage`, and with
 two clubs in the cookie that the captain footer switches between them. Check group 11 covers the
-races: a team page with two races (the later race folded), the race's ⋯ and a plan's ⋯ at 390 px,
+races: a team page with two races (the later race without a fold), the race's ⋯ and a plan's ⋯ at 390 px,
 Esc and a click outside, the guarded reload held while a ⋯ is open, "Save date and time…" asking in
 its place and moving the race (with the script, and without it through the server's question page),
 Rename in a plan's ⋯ and Make live from the panel (no Undo of it anywhere, no form on any row), a race that is over under "Over" with Delete
@@ -1754,7 +1764,7 @@ the gate, the live row's "4/6 have it" after it; the card in the same place and 
 version, a version and a plan not stored yet, its table header the same distance from its top; the
 action row under the title: the ways to a plan at its left above the list, the card's actions at its
 right on the card's right edge (Make live alone, Discard · Store · Make live, none for the live
-version), Make live's question opening there and pushing only the card down, at 1100 px the actions
+version), the question of Make live and Discard floating under its button over the card's top without moving anything, at 1100 px the actions
 at the card's bottom in the same order, at 390 the head's pair side by side when it fits; the race
 head one line, the list's height and rows the same whatever is picked; the live row's `?r=`), a row swapping the panel in place (one request with `panel=1`, no page load, the last of two quick clicks
 winning), Back and Forward, a stale page loading in full, the guarded reload keeping `?v=` and

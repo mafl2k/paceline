@@ -440,7 +440,7 @@ export function raceView(club, slug, date, {now, seen = {}}) {
     // every plan of the live version's race: a rider may hold any of their versions (spec §5.6)
     const racePlansOf = open ? plansOf(club, slug).filter(p => p.date === sheet.date) : [];
     const stateOf = r => (open ? riderState(club, slug, sheet, S, entryOf(r), racePlansOf) : null);
-    // in ride order: the live card draws them in the rider table (cockpit-panel.mjs, a later race's cockpit-page.mjs ridersCard)
+    // in ride order: the live card draws them in the rider table (cockpit-panel.mjs)
     const riders = plan.riders.map((r, i) => ({id: r.id, name: r.name, pos: i + 1, state: stateOf(r)}));
     const count = riders.length;
     const has = open ? riders.filter(r => isHas(r.state)).length : null;

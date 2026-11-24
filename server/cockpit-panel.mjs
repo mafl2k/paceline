@@ -14,13 +14,13 @@
 import {esc, t} from './pages.mjs';
 import {ic} from './icons.mjs';
 import {liveQuestion, atLabel, quote, dateDay} from './team-view.mjs';
-import {makeLiveHtml} from './team-page.mjs';
+import {makeLiveHtml, liveTag} from './team-page.mjs';
 import {th} from './ui.mjs';
 import {tableModel, planTable, raceBase} from './plan-table.mjs';
 import {entryOf} from './club.mjs';
 import {planOfId, versionName} from './plans.mjs';
 import {isDate, localLabel} from './time.mjs';
-import {storeForm, flashHtml, warnLines} from './store-form.mjs';
+import {storeForm, flashHtml, warnLines, resultHolds} from './store-form.mjs';
 
 
 // The anchor of the race block of `date` in the list ('#race-<date>'), '' when the list has no block
@@ -28,6 +28,23 @@ import {storeForm, flashHtml, warnLines} from './store-form.mjs';
 export function raceAnchor(view, date) {
     const blocks = [...view.lists.filter(l => l.date !== null && !(l === view.lists[0] && view.regular)), ...view.overLists];
     return blocks.some(l => l.date === date) ? `#race-${date}` : '';
+}
+
+
+// The card's one-shot message (the flash, or a Store result with its lines and links) in one box,
+// `.cp-note`: from 1180 px it floats over the card's top, so the card never moves (user, 24 Nov
+// 2026), with a close ×: a link to the page's own URL (`here`: it draws the page without the
+// one-shot message), which the script turns into removing the box. A clean message ("is live", a
+// result that holds nothing) goes by itself after 6 s (data-auto-close, ms); a red one, or one that
+// holds the page's reload, stays until closed. Below 1180 px it is the flash as it was (the stylesheet
+// hides the ×). '' for none.
+function noteHtml(flash, here) {
+    const html = flashHtml(flash);
+    if (html === '') {
+        return '';
+    }
+    const auto = flash.kind === 'ok' && !resultHolds(flash) ? ' data-auto-close="6000"' : '';
+    return `<div class="cp-note"${auto}>${html}<a class="cp-note-x" href="${esc(here)}" aria-label="${esc(t('cp-note-close'))}" data-note-close>${ic('close', 'cp-x')}</a></div>`;
 }
 
 
@@ -44,25 +61,27 @@ const codeSpan = sig => (sig ? `<span class="plancode">${th('cp-code', {sig: `<c
 
 
 // The card's top: the title (markup) with `close`, then one line of `meta` parts (markup, the empty
-// ones left out; none: no line). The flash stands above it, outside the card (`flash`). No title: the
-// close link alone.
+// ones left out; none: no line), then the one-shot message (`flash`, noteHtml: below 1180 px under the
+// head, in the flow, with its own ×; from 1180 px it floats over the card's top, wherever it stands in
+// the markup; user, 24 Nov 2026). No title: the close link alone.
 function topHtml(flash, title, close, meta = []) {
     const parts = meta.filter(Boolean);
     const line = parts.length ? `<p class="cp-meta">${parts.join('')}</p>` : '';
     const h = title === '' ? '' : `<h2 class="cp-title" id="panel-h">${title}</h2>`;
-    return `${flash}<div class="cp-top"><div class="cp-head">${h}${close}</div>${line}</div>`;
+    return `<div class="cp-top"><div class="cp-head">${h}${close}</div>${line}${flash}</div>`;
 }
 
 
 // The card's body: the rider table (markup), a received plan's Store form (`form`, markup: its fields
-// in .cp-form, under the table), the slot of its warnings, then its status (`status`: "LIVE · riders
-// get this", "Read only", markup) in a bar at its end, or none when the card has actions (`acts`:
-// they stand in #panel-acts, .has-acts: below 1180 px the card's bottom is theirs).
+// in .cp-form, under the table), the slot of its warnings, then its status (`status`: "Read only",
+// markup) in a bar at its end, or none when the card has actions (`acts`: they stand in #panel-acts,
+// .has-acts: below 1180 px the card's bottom is theirs) or nothing to say (the live version: its LIVE
+// tag is in its title, user 24 Nov 2026).
 const bodyHtml = (table, what, status, form = '', acts = '') => `<div class="cp-body${acts === '' ? '' : ' has-acts'}">${table}${form === '' ? '' : `<div class="cp-form">${form}</div>`}`
-    + `<div class="cp-what">${what}</div>${acts === '' ? `<div class="cp-bar">${status}</div>` : ''}</div>`;
+    + `<div class="cp-what">${what}</div>${acts === '' && status !== '' ? `<div class="cp-bar">${status}</div>` : ''}</div>`;
 
 
-// A status in the action bar ("LIVE · riders get this", "Read only"), with its icon.
+// A status in the action bar ("Read only"), with its icon.
 const statusHtml = (cls, icon, text) => `<p class="cp-status ${esc(cls)}">${ic(icon)}<span>${esc(text)}</span></p>`;
 
 
@@ -120,14 +139,14 @@ function liveParts(rv) {
 // version while the race is ahead, else "'Rollers · fast' v2 · stored 18:55"), its plan code (once:
 // a flash that names it stands for it) and the caption of its table against its race's live version
 // (the live version: none, the plan as riders get it; its count instead, and after the gate its
-// riders' states); what Make live would do and the button, or "LIVE · riders get this", or for a
-// race that is over "Read only".
+// riders' states); what Make live would do and the button, or for the live version its LIVE tag in
+// the title, or for a race that is over "Read only".
 // A received plan picked needs its Store form's `choices` (assignChoices', or a refused Store's) and
 // `preview` (manage-cockpit.mjs entryDraw): its title is the row's line; the body its table against
 // the live version of the race the form has chosen (team cockpit spec §5.3: never the nearest race's;
 // no team or date chosen: nothing to compare), the form's fields under it, its warning lines (when any), then Store
 // and Discard. Nothing live in the nearest race: "Nothing live for Thu 19 Nov yet".
-export function panelParts(club, view, {now, path, flash = null, choices = null, preview = null}) {
+export function panelParts(club, view, {now, path, here = path, flash = null, choices = null, preview = null}) {
     const {panel, slug} = view;
     const anchor = raceAnchor(view, view.lists[0]?.date ?? null);
     if (panel.kind === 'version') {
@@ -135,10 +154,13 @@ export function panelParts(club, view, {now, path, flash = null, choices = null,
         const at = Date.parse(s.at);
         const live = panel.isLive && !panel.over && panel.rv !== null;
         const name = versionName(s.type, s.n);
+        // the live version of a race ahead: its LIVE tag in the title, as its row has it ("Not sent"
+        // without a start time), instead of a "LIVE · riders get this" line at the card's end (user, 24 Nov 2026)
+        const tag = panel.isLive && !panel.over ? ` ${liveTag({sent: panel.rv?.live?.sent ?? true, over: false}).trim()}` : '';
         const title = esc(live ? t('cp-head-live', {name})
             // with its day always (user, 23 Nov 2026: the card stands for the version, "stored 18:55" alone
             // does not say which day)
-            : t('cp-head-version', {name, at: Number.isFinite(at) ? localLabel(at, club.tz) : '–'}));
+            : t('cp-head-version', {name, at: Number.isFinite(at) ? localLabel(at, club.tz) : '–'})) + tag;
         // the code once: a flash that names it (Store and make live, "… Plan code RE5CFQ.") stands for it
         const named = typeof flash?.text === 'string' && Boolean(s.sig) && flash.text.includes(t('cp-code', {sig: s.sig}));
         const model = tableModel(club, s, panel.base, {now});
@@ -146,7 +168,7 @@ export function panelParts(club, view, {now, path, flash = null, choices = null,
         const cap = live ? `<span class="count">${lp.count}</span>` : `<span class="cp-cap" title="${esc(model.caption)}">${esc(model.caption)}</span>`;
         // nothing picked: no sheet is open, so no close link (on a phone the card follows the list)
         const close = panel.dflt ? '' : closeLink(path, raceAnchor(view, panel.date));
-        const head = topHtml(flashHtml(flash), title, close, [named ? '' : codeSpan(s.sig), cap]);
+        const head = topHtml(noteHtml(flash, here), title, close, [named ? '' : codeSpan(s.sig), cap]);
         const table = planTable(model, {states: lp?.states ?? null, caption: false});
         let what;
         let status = '';
@@ -156,7 +178,6 @@ export function panelParts(club, view, {now, path, flash = null, choices = null,
             status = statusHtml('neutral', 'info', t('cp-read-only'));
         } else if (panel.isLive) {
             what = lp?.what ?? '';
-            status = statusHtml('ok', 'checkCircle', t('pt-live'));
         } else {
             ({what, bar: acts} = liveAction(club, slug, panel.id, s, now));
         }
@@ -175,16 +196,16 @@ export function panelParts(club, view, {now, path, flash = null, choices = null,
         const plan = team !== null && typeof as === 'string' && as !== 'new' ? planOfId(club, team, as)?.id ?? null : null;
         const base = team !== null && isDate(date) ? raceBase(club, team, date) : {kind: 'none', id: null};
         const model = tableModel(club, {json: e.json, text: e.text, team, date, plan}, base, {now});
-        const head = topHtml(flashHtml(flash), esc(pendingLine(p)), closeLink(path, anchor), [`<span class="cp-cap" title="${esc(model.caption)}">${esc(model.caption)}</span>`]);
+        const head = topHtml(noteHtml(flash, here), esc(pendingLine(p)), closeLink(path, anchor), [`<span class="cp-cap" title="${esc(model.caption)}">${esc(model.caption)}</span>`]);
         return {kind: 'entry', sel: `e:${e.id}`, head, body: bodyHtml(planTable(model, {caption: false}), form.what, '', form.form, form.actions), acts: form.actions};
     }
     if (panel.kind === 'gone') {
-        const head = topHtml(flashHtml(flash), '', closeLink(path, anchor));
+        const head = topHtml(noteHtml(flash, here), '', closeLink(path, anchor));
         return {kind: 'gone', sel: '', head, body: bodyHtml('', `<p class="cp-gone">${esc(t(panel.what === 'version' ? 'cp-gone-version' : 'club-entry-gone'))}</p>`, ''), acts: ''};
     }
     if (panel.kind === 'none') {
-        const head = topHtml(flashHtml(flash), esc(t('cp-none-live', {day: dateDay(panel.date, club.tz)})), panel.close ? closeLink(path, raceAnchor(view, panel.date)) : '');
+        const head = topHtml(noteHtml(flash, here), esc(t('cp-none-live', {day: dateDay(panel.date, club.tz)})), panel.close ? closeLink(path, raceAnchor(view, panel.date)) : '');
         return {kind: 'none', sel: '', head, body: bodyHtml('', '', `<p class="cp-status neutral"><span>${esc(t('cp-none-pick'))}</span></p>`), acts: ''};
     }
-    return {kind: '', sel: '', head: flashHtml(flash), body: '', acts: ''};
+    return {kind: '', sel: '', head: noteHtml(flash, here), body: '', acts: ''};
 }

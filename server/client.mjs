@@ -385,10 +385,47 @@ if (typeof document !== 'undefined') {
     // the menu open
     menus();
     arms();
+    notes();
     submitOnce();
     copyButtons();
     panel();
     rhythmChoice();
+}
+
+
+// The card's one-shot message (.cp-note, user 24 Nov 2026): from 1180 px it floats over the card's
+// top (the stylesheet). Its × (a link to the page's own URL without a script) removes the box and
+// puts the focus on the card: no reload. A clean one (data-auto-close, ms) goes by itself on a
+// computer; a red one or one that holds the page's reload stays until closed. Removing a message
+// that held the reload releases it (the page asks [data-hold-reload] at every tick) and takes its
+// note "Not updating while this result is shown" along when nothing else holds. An action opening
+// its question (arms) closes it too.
+const wideCard = () => typeof matchMedia === 'function' && matchMedia('(min-width:1180px)').matches;
+function dropNote(note, {focus = false} = {}) {
+    note.remove();
+    if (document.querySelector('[data-hold-reload]') === null) {
+        document.querySelector('#panel-acts .cp-hold')?.remove();
+    }
+    if (focus) {
+        document.getElementById('panel')?.focus({preventScroll: true});
+    }
+}
+function notes() {
+    document.addEventListener('click', e => {
+        const x = e.target instanceof Element ? e.target.closest('a[data-note-close]') : null;
+        const note = x?.closest('.cp-note') ?? null;
+        if (note !== null) {
+            e.preventDefault();
+            dropNote(note, {focus: true});
+        }
+    });
+    for (const note of document.querySelectorAll('.cp-note[data-auto-close]')) {
+        setTimeout(() => {
+            if (note.isConnected && wideCard()) {
+                dropNote(note);
+            }
+        }, Number(note.dataset.autoClose) || 6000);
+    }
 }
 
 
@@ -641,6 +678,12 @@ function arms() {
             close(false);
         }
         fill(f);
+        if (wideCard()) {
+            // its question floats over the card's top, where the message is
+            for (const note of document.querySelectorAll('.cp-note')) {
+                dropNote(note);
+            }
+        }
         f.classList.add('armed');
         host(f)?.classList.add('armed');
         strip(f).hidden = false;
@@ -842,7 +885,7 @@ function panel() {
         row.querySelector(':scope > a.cp-link')?.setAttribute('aria-current', 'true');
         if (sheet) {
             row.closest('ul.cp-rows')?.classList.add('sel-rows');
-            row.closest('.cp-race')?.classList.add('sel-race');
+            row.closest('.cp-race, .cp-pending')?.classList.add('sel-race');
         }
         // the races that are over: their fold is open while it holds the pick, as the server draws it
         const over = row.closest('details.over');

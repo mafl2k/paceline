@@ -19,12 +19,11 @@ import {ic} from './icons.mjs';
 import {refreshDue, WAITING_REFRESH_S, plannerHref, teamShare} from './team-view.mjs';
 import {
     cockpitPath, switchBar, raceHead, notesHtml, noStartHtml, headActs, emptyHtml, racesHelpHtml, planMenu,
-    liveTag, phaseTag, racePhase, planCode,
+    liveTag, phaseTag, racePhase,
 } from './team-page.mjs';
 import {cockpitView} from './cockpit-view.mjs';
 import {panelParts, pendingLine} from './cockpit-panel.mjs';
-import {tableModel, planTable, tableBase} from './plan-table.mjs';
-import {versionName, shownType} from './plans.mjs';
+import {shownType} from './plans.mjs';
 import {resultHolds} from './store-form.mjs';
 import {localHHMM, dstChangedRecently} from './time.mjs';
 
@@ -63,7 +62,9 @@ function holdNote(view, path, kind) {
 // would reload (`reloads`), #panel-acts ends with holdNote (under the card at every width: below
 // 1180 px after the bar at the card's bottom, from 1180 px in the row under the card).
 function slotsOf(club, view, {now, path, flash, choices, preview, reloads}) {
-    const parts = panelParts(club, view, {now, path, flash, choices, preview});
+    // the page's own URL for what it draws (as its data-here): the message's close link
+    const here = view.panel.kind === 'entry' ? `${path}?e=${view.panel.id}` : `${path}${selQuery(view.sel)}`;
+    const parts = panelParts(club, view, {now, path, here, flash, choices, preview});
     const hold = parts.kind === 'entry' || resultHolds(flash);
     const note = hold && reloads ? holdNote(view, path, parts.kind) : '';
     return {
@@ -112,7 +113,8 @@ function pendingHtml(list, path, sfx) {
     }
     const items = list.pending.map(p => `<li class="cp-row${p.picked ? ' picked' : ''}" data-sel="e:${esc(p.id)}">`
         + `<a ${linkAttrs(`${path}?e=${p.id}#panel`, p.picked)}><span class="cp-what">${esc(pendingLine(p))}</span>${chev()}</a></li>`);
-    return `<section class="cp-pending" aria-labelledby="pending-h${esc(sfx)}"><h3 class="cp-sub" id="pending-h${esc(sfx)}">${esc(t('cp-pending'))}</h3>`
+    const sel = list.pending.some(p => p.sheet) ? ' sel-race' : '';
+    return `<section class="cp-pending${sel}" aria-labelledby="pending-h${esc(sfx)}"><h3 class="cp-sub" id="pending-h${esc(sfx)}">${esc(t('cp-pending'))}</h3>`
         + `${rowsList(items, list.pending.some(p => p.sheet))}</section>`;
 }
 
@@ -132,33 +134,26 @@ function planHtml(club, slug, p, {path, now, planner, sent, phase = null, over =
 }
 
 
-const holdsPick = list => list.pending.some(p => p.sheet) || list.plans.some(p => [...p.shown, ...p.older].some(r => r.sheet));
+const holdsPick = list => list.plans.some(p => [...p.shown, ...p.older].some(r => r.sheet));
 
 
-// A race ahead: its line with its ⋯; the nearest race its notes, its no-start callout and its empty
-// card as on the team page; then the plans not stored yet and the plans. A later race keeps its fold
-// with its notes and riders card (closed; it keeps the reload while it holds no form), or its
-// status without a live plan. `rv` is the race's raceView, `first` the nearest race.
+// A race ahead: its line with its ⋯, its notes and its no-start callout as on the team page (the
+// nearest race also its empty card), then its plans. The plans not stored yet for it come first, in a
+// box of their own before the race's box (user, 24 Nov 2026: they belong to no plan yet). A later
+// race has its notes and callout too when it has a live plan (its riders are the card of its live
+// row, `?r=`; user, 24 Nov 2026: no fold repeats them), else its one status line. `rv` is the
+// race's raceView, `first` the nearest race.
 function raceHtml(club, view, list, rv, {first, path, now, planner, plannerLink}) {
     const sfx = first ? '' : `-${list.date}`;
     const id = list.date === null || (first && view.regular) ? '' : ` id="race-${esc(list.date)}"`;
     const cls = `race cp-race${first ? '' : ' later'}${holdsPick(list) ? ' sel-race' : ''}`;
     const sent = rv.live ? rv.live.sent : true;
     const plans = list.plans.map(p => planHtml(club, view.slug, p, {path, now, planner, sent, phase: racePhase(rv, now)}));
-    const top = first ? `${notesHtml(club, rv, now)}${noStartHtml(club, rv, now)}${emptyHtml(rv, now, plannerLink)}` : '';
-    let more = '';
-    if (!first) {
-        if (rv.live) {
-            const inner = `<div class="cols">${notesHtml(club, rv, now, sfx)}${noStartHtml(club, rv, now, sfx)}${ridersCard(club, rv, now, {sfx})}</div>`;
-            const keep = /<form\b/.test(inner) ? '' : ' data-keep-refresh';
-            const n = rv.notes.length;
-            more = `<details class="fold race-more"${keep}><summary>${esc(n ? t('tp-race-more-fix', {n}) : t('tp-race-more'))}</summary>${inner}</details>`;
-        } else {
-            more = sevLine(rv.status.sev, rv.status.icon, rv.status.text, 'race-status');
-        }
-    }
-    return `<div class="${cls}"${id}>
-    ${raceHead(club, rv, now)}${top}${pendingHtml(list, path, sfx)}
+    const top = first ? `${notesHtml(club, rv, now)}${noStartHtml(club, rv, now)}${emptyHtml(rv, now, plannerLink)}`
+        : rv.live ? `${notesHtml(club, rv, now, sfx)}${noStartHtml(club, rv, now, sfx)}` : '';
+    const more = first || rv.live ? '' : sevLine(rv.status.sev, rv.status.icon, rv.status.text, 'race-status');
+    return `${pendingHtml(list, path, sfx)}<div class="${cls}"${id}>
+    ${raceHead(club, rv, now)}${top}
     ${plans.join('\n    ')}${more}
   </div>`;
 }
@@ -179,42 +174,6 @@ function overHtml(club, view, {path, now, planner}) {
     return `<details class="fold over" id="over" data-keep-refresh${open ? ' open' : ''}><summary>${esc(t('tp-over', {n: view.overLists.length}))}</summary>
     ${races.join('\n    ')}
   </details>`;
-}
-
-
-// A later race's riders card, in its fold (team cockpit spec §7 amended 22 Nov 2026): the live
-// version of that race (`view`, its raceView) in the rider table, as riders get it (tableBase: no
-// marks), the live version's plan code under the head. Before the gate the head counts the riders
-// and the hint says from when the states show; after it (view.open) the table has the Plan column,
-// each rider's state, the head says "4 of 6 have the plan" and the help fold says what the states
-// mean (it holds no form, so an open one keeps the reload). `sfx` follows the heading's id
-// ('-<date>'). '' without a live plan. (The nearest race's is the panel's card: cockpit-panel.mjs.)
-function ridersCard(club, view, now, {sfx = ''} = {}) {
-    if (!view.live) {
-        return '';
-    }
-    const live = view.live.id;
-    const model = tableModel(club, club.sheets[live], tableBase(club, view.slug, live), {now});
-    const n = view.count;
-    let count;
-    let states = null;
-    let hint;
-    if (view.open) {
-        const has = `<strong>${esc(t('tp-has-count', {has: view.has, n}))}</strong>`;
-        count = th(n === 1 ? 'tp-has-one' : 'tp-has', {count: has});
-        states = new Map(view.riders.map(r => [r.id, r.state]));
-        hint = `<details class="help" data-keep-refresh><summary>${ic('info')}${esc(t('tp-help'))}</summary><p class="hint">${esc(t('tp-help-text'))}</p></details>`;
-    } else {
-        count = esc(n === 1 ? t('tp-riders-one') : t('tp-riders-n', {n}));
-        hint = view.live.sent ? `<p class="hint">${th('tp-plan-hint', {at: `<time>${esc(view.opens)}</time>`})}</p>`
-            : `<p class="hint">${esc(t(view.special ? 'tp-no-start-hint-special' : 'tp-no-start-hint'))}</p>`;
-    }
-    return `<section class="card riders-card" aria-labelledby="riders-h${esc(sfx)}">
-      <div class="card-head"><h2 id="riders-h${esc(sfx)}">${esc(t('tp-riders-on', {name: versionName(view.live.type, view.live.n)}))}</h2><p class="count">${count}</p></div>
-      ${planCode(view.live.sig)}
-      ${planTable(model, {states})}
-      ${hint}
-    </section>`;
 }
 
 

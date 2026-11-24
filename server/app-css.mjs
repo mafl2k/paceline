@@ -337,11 +337,13 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 p.race{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem;font-size:1.125rem;font-weight:650}
 p.race .in{font-weight:500;color:var(--muted)}
 /* the team page's races (races spec §4b): the team's rhythm in the head, then each race ahead (its
-   line, its plans), a later race's live plan and riders in a fold, the races that are over at the end */
+   line, its plans), a later race's notes and its live row (its riders: the card), the races that are over at the end */
 div.race{display:grid;gap:.75rem;align-content:start;min-width:0;scroll-margin-top:5rem}
 div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
-.race-more .cols{margin-top:.25rem}
-.cols{display:grid;gap:1rem;align-content:start;min-width:0}
+/* the team page's list (user, 24 Nov 2026): the plans not stored yet and each race ahead in a box of
+   their own */
+.cp-list>:is(div.cp-race,.cp-pending){background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:.875rem 1rem 1rem}
+.cp-list>div.cp-race.later{padding-top:.875rem}
 /* the team cockpit (team cockpit spec §5, §5.3b): its slots #panel (the flash and the card's top),
    .cp-list and #panel-body (the card's body) in one grid, stacked below 1180 px; an empty slot takes
    no room. The card is one framed box in every state (.cp-top over .cp-body): its head, the rider
@@ -370,7 +372,15 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 /* the Store form in the card, under the rider table (user, 23 Nov 2026): its fields spaced */
 .cp-form{margin-top:1rem;min-width:0}
 .cp-form form{display:grid;gap:1rem}
-#panel>:is(.flash,.result){margin-bottom:.75rem}
+/* the one-shot message in its box (.cp-note), at the end of the card's head (.cp-top: under the title, the
+   sheet's ×, the plan code line; user, 24 Nov 2026): in the flow below 1180 px with its own ×, no auto-close
+   there; from 1180 px it floats over the card's top (below) */
+.cp-note{position:relative;margin-top:.625rem}
+.cp-note>:is(.flash,.result){margin:0 0 .5rem}
+.cp-note>.result:empty{display:none}
+.cp-note>.flash{padding-right:calc(var(--tap) + .25rem)}
+.cp-note-x{display:inline-flex;position:absolute;top:0;right:0;align-items:center;justify-content:center;min-width:var(--tap);min-height:var(--tap);border-radius:var(--r2);color:inherit}
+.cp-note-x:hover{background:var(--surface-2)}
 /* (the card's slot only: a list row's text has the class too and stays centred in its row) */
 .cp-body>.cp-what{margin-top:.75rem}
 /* the opened version's "Live since …" / "Was live …" under its table, apart from what happens */
@@ -392,8 +402,9 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 #panel-acts>.cp-bar::before{content:"";position:absolute;top:0;left:1.25rem;right:1.25rem;border-top:1px solid var(--border)}
 /* the ways to a plan at the list's top: from 1180 px only (the head has them below that) */
 .cp-ways{display:none}
-/* the Store form's Make live asking first (user, 23 Nov 2026): its strip takes the bar's place */
-.cp-bar.armed>:not(.arm-strip){display:none}
+/* the Store form's Make live asking first (user, 23 Nov 2026): its strip takes the bar's place (below
+   1180 px; from there the strip floats under the buttons, which stay, user 24 Nov 2026) */
+@media not all and (min-width:1180px){.cp-bar.armed>:not(.arm-strip){display:none}}
 .cp-status{display:flex;align-items:center;gap:.5rem;min-height:var(--btn);margin:0;font-weight:650}
 .cp-status.ok{color:var(--ok-fg)}.cp-status.ok .i{color:var(--ok-icon)}
 .cp-status.neutral{color:var(--muted)}.cp-status.neutral .i{color:var(--neutral-icon)}
@@ -408,6 +419,8 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 .cp-refresh{display:inline-flex;align-items:center;min-height:var(--tap);font-weight:600}
 .cp-list{display:grid;gap:1.25rem;align-content:start}
 .cp-sub{font-size:.75rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+/* the box of the plans not stored yet: its heading as a race's line (user, 24 Nov 2026) */
+.cp-pending>.cp-sub{min-height:var(--tap);font-size:1.125rem;font-weight:650;letter-spacing:0;text-transform:none;color:var(--text)}
 .cp-pending,.cp-plan{display:grid;gap:.125rem;min-width:0}
 .cp-plan-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 .375rem;min-height:var(--tap);padding-block:.375rem;font-size:1.0625rem}
 .cp-plan-head .label{font-weight:750}
@@ -646,22 +659,40 @@ a.tile:hover{border-color:var(--control)}
   /* one action row under the title (user, 23 Nov 2026): the ways to a plan at its left, at the list's
      top (the head's give way), the card's actions at its right end above the card, its right edge on
      the card's; the row keeps its height without any action. #panel-acts gives its parts to the grid:
-     the bar to that row (a question opening under its buttons pushes the card down, never the list),
-     the hold note under the card. The card ends with its body, framed */
+     the bar to that row, the hold note under the card. A question of the bar's actions (Make live,
+     Discard) opens as a panel floating under the buttons over the card's top, its right edge on the
+     card's: nothing moves, the buttons stay where the mouse is (user, 24 Nov 2026). The card ends
+     with its body, framed */
   .cp>#panel{grid-row:2}
   .cp>#panel-body{grid-row:3}
   .cp>#panel-acts{display:contents}
   .cp>#panel-acts>.cp-bar{grid-column:2;grid-row:1;align-self:start;justify-content:flex-end;margin:0 0 .75rem;padding:0;border:0;border-radius:0;background:none}
   .cp>#panel-acts>.cp-bar::before{display:none}
+  .cp>#panel-acts>.cp-bar form[data-arm].armed{flex-basis:auto;width:auto}
+  .cp>#panel-acts>.cp-bar form[data-arm].armed>[data-arm-open]{display:inline-flex}
+  .cp>#panel-acts>.cp-bar form.discard.armed{order:0;padding-right:.75rem}
+  /* the one-shot message ("is live", a Store result) floats over the card's top, right under the action
+     row, on the card's width, below an open question (z-index 5), with a close ×: the card, the list and
+     the row do not move (user, 24 Nov 2026) */
+  .cp>#panel{position:relative}
+  .cp>#panel .cp-note{position:absolute;z-index:4;top:-.375rem;left:0;right:0;margin:0;display:grid;gap:.5rem;padding:.5rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);box-shadow:var(--shadow-pop)}
+  .cp>#panel .cp-note>:is(.flash,.result){margin:0}
+  .cp>#panel .cp-note>.result{padding:0 .5rem .25rem}
+  .cp>#panel .cp-note-x{top:.5rem;right:.5rem}
+  .cp>#panel-acts>.cp-bar .arm-strip{position:absolute;z-index:5;top:calc(100% + .375rem);right:0;flex-basis:auto;width:26rem;max-width:100%;background:var(--surface);box-shadow:var(--shadow-pop)}
+  .cp>#panel-acts>.cp-bar .arm-btns{justify-content:flex-end}
+  /* the row's buttons as small as the ways to a plan beside them (user, 24 Nov 2026: one size on the line) */
+  .cp>#panel-acts>.cp-bar{min-height:var(--tap)}
+  .cp>#panel-acts>.cp-bar>.btn,.cp>#panel-acts>.cp-bar form>[data-arm-open]{min-height:var(--tap);padding:.5rem .875rem;font-size:.9375rem}
   .cp>#panel-acts>.cp-hold{grid-column:2;grid-row:4}
   .cp-body.has-acts{border-bottom:1px solid var(--border);border-radius:0 0 var(--r3) var(--r3)}
-  .cp-ways{display:block;margin-bottom:-.5rem}
+  /* as high as the action row over the card (less the list's gap), so the list's first box and the
+     card start on one line (user, 24 Nov 2026) */
+  .cp-ways{display:block;height:calc(var(--btn) + .75rem);margin-bottom:-1.25rem}
   .cp-ways>.headacts{flex-direction:row;align-items:center;gap:.5rem}
   .app .cockpit>.pagehead>.headacts{display:none}
   .cp-close{display:none}
-  .cp-list p.race{font-size:1rem}
-  /* a later race's fold in the list's column: one column */
-  .cockpit .cols{grid-template-columns:minmax(0,1fr)}
+  .cp-list p.race,.cp-list .cp-pending>.cp-sub{font-size:1rem}
 }
 /* the cockpit on phones and narrow windows (team cockpit spec §5.5): the list is the page; with a
    selection the panel is a sheet, a page mode of the body's classes (no overlay, no :has()), so it
@@ -688,17 +719,16 @@ a.tile:hover{border-color:var(--control)}
   /* the Store bar (Make live, Store, Discard) on one line down to 360 px (user, 23 Nov 2026) */
   .cp-bar .btn{padding-inline:.875rem}
   /* nothing picked: the list's blocks and the panel's parts are the grid's own items (the list's box
-     goes, its region name stays), so the flash stays on top and the card (the nearest race's live
+     goes, its region name stays), so the card (its head with the message under it; the nearest race's live
      version, its riders) follows the nearest race, before the later races, Over and the help (M1);
      its row is marked as live, not as picked: no sheet is open. From 1180 px the list is one item in
      the left column */
   body.cockpit:not(.has-sel) .cp{gap:1.25rem}
   body.cockpit:not(.has-sel) :is(.cp-list,#panel){display:contents}
   body.cockpit:not(.has-sel) .cp-list>*{order:3;min-width:0}
-  body.cockpit:not(.has-sel) .cp-list>:is(.cp-race:first-child,.cp-ways+.cp-race){order:1}
+  body.cockpit:not(.has-sel) .cp-list>:is(.cp-race:first-child,.cp-ways+.cp-race,.cp-pending:first-child,.cp-ways+.cp-pending,.cp-pending:first-child+.cp-race,.cp-ways+.cp-pending+.cp-race){order:1}
   body.cockpit:not(.has-sel) :is(#panel>.cp-top,#panel-body,#panel-acts){order:2}
   body.cockpit:not(.has-sel) :is(#panel-body,#panel-acts){margin-top:-1.25rem}
-  body.cockpit:not(.has-sel) #panel>:is(.flash,.result){margin:0}
   body.cockpit:not(.has-sel) .cp-row.picked>.cp-link{background:none;box-shadow:inset 3px 0 0 var(--ok-icon)}
   body.cockpit:not(.has-sel) .cp-row.picked>.cp-link:hover{background:var(--surface-2)}
 }

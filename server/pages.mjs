@@ -474,8 +474,6 @@ export const T = {
     // the team's rhythm in the head; each race's event; a later race's fold; the races that are over
     // (races spec §4, §4b)
     'tp-race-event': ' · Event {id}',
-    'tp-race-more': 'Live plan and riders',
-    'tp-race-more-fix': 'Live plan and riders · {n} to fix',
     'tp-over': 'Over ({n})',
     'tp-no-start-time': 'no start time',
     'tp-fix': '{n} to fix',
@@ -944,6 +942,7 @@ export const T = {
     'cp-row-has': '{has}/{n} have it',
     'cp-row-has-one': '{has}/{n} has it',
     'cp-close': 'Close',
+    'cp-note-close': 'Close message',
     'cp-over': 'This race is over: nothing can be changed.',
     'cp-gone-version': 'This version no longer exists.',
     'cp-list': 'Plans and versions',

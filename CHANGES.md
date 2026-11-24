@@ -58,6 +58,12 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 - Team page: a plan without a type is called "Plan" (its heading in the list, its card "Riders on 'Plan' v4", "Against live 'Plan' v3", "Store as"); riders still see the team's name. A new plan's Type is filled in from the plan's own name: "Rollers slow" for the team Rollers gives "slow" (you can change or clear it before storing).
 - Club settings and Team settings on a computer use the whole width like the team page: their boxes stand side by side in columns instead of one long column, at the same text and button size as the team page.
 - Settings pages tidied: Team settings shows the team's name as its title; hints are one line, with "More" for the details; the ZwiftGopher link sits next to Delete team; Club settings lists the common time zones first, shows "Who gets your plans" only when private clubs are possible, and puts Remove a rider after the records.
+- Team page: the list is in boxes, "Not stored yet" (headed like a race's line, above the race it belongs to) and each race ahead in a box of its own, and from 1180 px the first box starts on the card's top line; the live version's card shows its LIVE tag (or "Not sent") in its title instead of a "LIVE · riders get this" bar at its end.
+- Team page on a computer: the question of Make live and of Discard opens under its button over the plan, so the plan and the list do not move and the button stays under the mouse.
+- Team page on a computer: the message after Make live or Store floats over the plan with a close button (a clean one goes by itself after a few seconds), so the plan does not move.
+- Team page on a phone: the message after Make live or Store sits under the plan's title (the sheet's title and its close button stay on top) with a close button of its own; it no longer goes by itself there.
+- Team page on a computer: the buttons on the row under the team's name (Plan on ZwiftGopher, Upload a file, Discard, Store, Make live) all have one size.
+- Team page: a later race no longer has a "Live plan and riders" fold; its warnings stand in its box, and its live row opens the riders in the card.
 
 ## 0.3.4 (2026-11-22)
 
