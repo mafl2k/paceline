@@ -29,9 +29,10 @@ export function restClock(s) {
 }
 
 
-// My power now for the Action window: the marker's smoothed watts in the target's unit and with
-// the same weight (W/kg with one decimal, else whole watts), null without power, so the number and
-// the marker always agree (expert panel, 13 Nov 2026).
+// My power now for the Action window: watts in the target's unit and with the same weight (W/kg
+// with one decimal, else whole watts), null without power. The number is my power as Zwift sends it,
+// or 5 s smoothed (powerNow); only the marker is filtered (user, 24 Nov 2026: "bar marker needs
+// filter, but the number should be raw or 5 s", as O101's live data shows it).
 export function nowValue(watts, weight, unit) {
     if (!Number.isFinite(watts)) {
         return null;
@@ -305,11 +306,14 @@ export function shownModel({m, dash, meanW = null, wheel = null, next = null}) {
 // nothing (an open Rest window has the countdown) or the big countdown (without one the countdown
 // is the right field, user, 23 Nov 2026), and in chaos (no countdown) always.
 
-// The slot choices (the settings' select values) and the slots' defaults: my power now in the
-// middle, left and right empty (user, 20 Nov 2026).
-export const FIELD_KINDS = ['off', 'now', 'powerW', 'powerWkg', 'draft', 'speed', 'cadence', 'heartrate', 'grade'];
-export const FIELD_DEFAULTS = {left: 'off', mid: 'now', right: 'off'};
-const FIELD_UNIT = {now: 'powerLabel', powerW: 'wattUnit', powerWkg: 'wkgUnit', draft: 'draftUnit',
+// The slot choices (the settings' select values) and the slots' defaults: my power in the middle,
+// left and right empty (user, 20 Nov 2026). One power field in Paceline's unit (user, 24 Nov 2026:
+// "nobody wants to see his pull in W/kg and recovery in watts"); the earlier Power now, Power W and
+// Power W/kg are read as it (OLD_POWER_KINDS, fieldKind).
+export const FIELD_KINDS = ['off', 'power', 'draft', 'speed', 'cadence', 'heartrate', 'grade'];
+export const FIELD_DEFAULTS = {left: 'off', mid: 'power', right: 'off'};
+export const OLD_POWER_KINDS = ['now', 'powerW', 'powerWkg'];
+const FIELD_UNIT = {power: 'powerLabel', draft: 'draftUnit',
                     speed: 'kmhUnit', cadence: 'rpmUnit', heartrate: 'bpmUnit', grade: 'gradeUnit'};
 export const SMOOTH5_MS = 5000;
 
@@ -325,24 +329,34 @@ function whole(x) {
 }
 
 
+// A stored slot choice as one of FIELD_KINDS: an earlier power choice is 'power', anything unknown
+// null.
+export function fieldKind(v) {
+    return OLD_POWER_KINDS.includes(v) ? 'power' : FIELD_KINDS.includes(v) ? v : null;
+}
+
+
+// My power for the number (pull and recovery alike): the 5 s power when "5 s smoothed power" is on
+// and there is one (smooth5), else my power as Zwift sends it; null without either.
+export function powerNow({raw, smooth5W = null}) {
+    return finite(smooth5W) ?? finite(raw);
+}
+
+
 // One field as {num, unit}: num the text (null: no value, the window shows the dim "–"), unit the
 // line under it. data: my nearby state (power, draft, speed km/h, cadence, heartrate, grade as a
-// fraction). unit: Paceline's target unit ('W' | 'Wkg'); weight in kg; nowW my power as the pull's
-// "now" shows it (markerPower), so "Power now" has the same kind and smoothing in recovery and in the
-// pull; smooth5W my 5 s power (smooth5; null: raw power for W and W/kg).
+// fraction). unit: Paceline's target unit ('W' | 'Wkg'); weight in kg; smooth5W my 5 s power
+// (smooth5; null: raw power). Power is the number the pull shows (nowValue of powerNow), so it keeps
+// its kind and unit when my pull starts.
 // Zwift sends 0 for a heart rate without a strap, and a cadence of 0 for a trainer without cadence
 // while I pedal: both count as missing (a cadence of 0 without power is me coasting).
-export function fieldValue(kind, data, {unit = 'W', weight = null, nowW = null, smooth5W = null} = {}) {
+export function fieldValue(kind, data, {unit = 'W', weight = null, smooth5W = null} = {}) {
     const d = data || {};
-    const watts = finite(smooth5W) ?? finite(d.power);
     const kg = pickWeight(weight);
     let num = null;
-    if (kind === 'now') {
-        num = nowValue(finite(nowW), kg, unit);
-    } else if (kind === 'powerW') {
-        num = whole(watts);
-    } else if (kind === 'powerWkg') {
-        num = watts === null || kg === null ? null : (watts / kg).toFixed(1);
+    if (kind === 'power') {
+        const w = powerNow({raw: d.power, smooth5W});
+        num = w === null ? null : nowValue(w, kg, unit);
     } else if (kind === 'draft' || kind === 'speed') {
         num = whole(d[kind]);
     } else if (kind === 'heartrate') {
@@ -360,8 +374,10 @@ export function fieldValue(kind, data, {unit = 'W', weight = null, nowW = null, 
 
 // The three fields [left, mid, right]; an Off (or unknown) slot is null: empty, keeping its place.
 export function recoveryFields(slots, data, opts) {
-    return [slots?.left, slots?.mid, slots?.right].map(k =>
-        k && k !== 'off' && FIELD_KINDS.includes(k) ? fieldValue(k, data, opts) : null);
+    return [slots?.left, slots?.mid, slots?.right].map(k => {
+        const kind = fieldKind(k);
+        return kind && kind !== 'off' ? fieldValue(kind, data, opts) : null;
+    });
 }
 
 
@@ -371,7 +387,7 @@ export function fieldSlots(s = {}) {
     if (!s || s.recFields !== true) {
         return {...FIELD_DEFAULTS};
     }
-    const pick = (v, d) => FIELD_KINDS.includes(v) ? v : d;
+    const pick = (v, d) => fieldKind(v) ?? d;
     return {left: pick(s.recLeft, FIELD_DEFAULTS.left), mid: pick(s.recMid, FIELD_DEFAULTS.mid),
             right: pick(s.recRight, FIELD_DEFAULTS.right)};
 }
@@ -513,7 +529,7 @@ export function demoBadge({demo, vanish}) {
 }
 
 
-// My 5 s power for the W and W/kg fields with "5 s smoothed" on (null when off): Sauce's own
+// My 5 s power for the power number with "5 s smoothed" on (null when off): Sauce's own
 // (stats.power.smooth['5'] of my nearby entry) when it has one, else the mean of my samples
 // {t, w} of the last SMOOTH5_MS (null without any).
 export function smooth5({on, sauce, hist, now}) {

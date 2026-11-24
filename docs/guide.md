@@ -271,9 +271,10 @@ or wider and they grow.
   is smoothed over a few seconds, and the marker only moves once that is more than 2 % (about 5 W)
   away from where it stands. So it keeps still while you ride on target, and a real drop of 10 %
   shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
-  while you ramp up, the marker stays white. The number in the middle is the marker's value, in the
-  marker's colour. It is the same filtered power, so the two always agree. It is kept small on
-  purpose, so the bar stays what you ride by and the number only confirms it. Without pull watts in
+  while you ramp up, the marker stays white. The number in the middle is your power as Zwift sends
+  it, once a second, like other live-data windows, in the marker's colour. Tick **5 s smoothed
+  power** to see the average of the last 5 seconds instead. The number moves more than the marker:
+  ride by the bar, the number only tells you what you push. It is kept small on purpose. Without pull watts in
   the plan, neither in the JSON nor from a text export, there is no target. You then see `–` as the
   target, your power now, the time and a plain grey bar.
 - **Smaller middle field**: the middle number is drawn a little smaller than the two at the sides.
@@ -322,26 +323,23 @@ one shows:
 | Choice | Shows | Unit line |
 |---|---|---|
 | **Off** | an empty field, it keeps its place | |
-| **Power now** | your power as in your pull: W/kg or W as you set **Pull target**, smoothed the same way | `power` |
-| **Power W** | your power in whole watts | `W` |
-| **Power W/kg** | your power with one decimal | `W/kg` |
+| **Power** | your power, the same number as in your pull: W/kg with one decimal or whole watts as you set **Pull target** | `power` |
 | **Draft** | the watts of your draft, whole number | `draft` |
 | **Speed** | km/h, no decimals | `km/h` |
 | **Cadence** | your cadence, whole number | `rpm` |
 | **Heart rate** | your heart rate, whole number | `bpm` |
 | **Grade** | one decimal, `0.0` for flat | `%` |
 
-By default the middle field is **Power now** and the left and right ones are **Off**, so the number
-does not change its kind or jump when your pull starts. **Power W** and **Power W/kg** are your
-power right now. Tick **5 s smoothed power** for the average of the last 5 seconds. **Power now** is
-smoothed as in your pull and ignores that box. A value Paceline does not have shows a dim `–`, for
-example no heart rate or cadence from a power-only trainer, or no weight for W/kg. There is no
-countdown to pick: with a Rest window open, the countdown is the Rest window's. The fields show
+By default the middle field is **Power** and the left and right ones are **Off**, so the number
+does not change its kind when your pull starts. It is your power as Zwift sends it, or the average
+of the last 5 seconds with **5 s smoothed power** ticked, as in your pull. Without a weight it shows
+watts. A value Paceline does not have shows a dim `–`, for example no heart rate or cadence from a
+power-only trainer. There is no countdown to pick: with a Rest window open, the countdown is the Rest window's. The fields show
 until READY, the last 10 seconds before your pull. From then on the window shows READY and your pull
 as always. A climb or descent (the Rest window shows `▲` or `▼`) does not change them, and they keep
 showing live values.
 
-<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, Fields while resting ticked with Heart rate on the left, Power now in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown), and the 5 s smoothed power box">
+<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, the 5 s smoothed power box, Fields while resting ticked with Heart rate on the left, Power in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown)">
 
 Without a Rest window, or with one that has no countdown yet, the countdown is the right field. The
 number is on top and your place under it (`13` over `#2`, `3:59` over `#6`). While the clock stands

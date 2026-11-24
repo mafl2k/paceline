@@ -558,15 +558,15 @@ test('restGapBand: in chaos the gap the rest line calls out goes into the band, 
 
 test('fieldValue: formats as in the spec table, units from strings.mjs', async () => {
     const {S} = await import('../pages/src/strings.mjs');
-    assert.deepEqual(D.fieldValue('powerWkg', {power: 361}, {weight: 78.5}), {num: '4.6', unit: S.wkgUnit});
+    assert.deepEqual(D.fieldValue('power', {power: 361}, {unit: 'Wkg', weight: 78.5}), {num: '4.6', unit: S.powerLabel});
     assert.deepEqual(D.fieldValue('speed', {speed: 43.4}), {num: '43', unit: 'km/h'});
     assert.deepEqual(D.fieldValue('draft', {draft: 107.4}), {num: '107', unit: 'draft'});
     assert.deepEqual(D.fieldValue('cadence', {cadence: 91.6, power: 180}), {num: '92', unit: 'rpm'});
     assert.deepEqual(D.fieldValue('heartrate', {heartrate: 151.2}), {num: '151', unit: 'bpm'});
-    assert.deepEqual(D.fieldValue('powerW', {power: 247.6}), {num: '248', unit: S.wattUnit});
+    assert.deepEqual(D.fieldValue('power', {power: 247.6}, {unit: 'W', weight: 80}), {num: '248', unit: S.powerLabel});
     assert.equal(D.fieldValue('grade', {grade: 0.0312}).unit, '%');
     // the recovery field says what it is; the pull's middle field keeps its "now" (user, 22 Nov 2026)
-    assert.equal(D.fieldValue('now', {}, {unit: 'W', nowW: 300}).unit, 'power');
+    assert.equal(D.fieldValue('power', {power: 300}, {unit: 'W'}).unit, 'power');
     assert.equal(S.nowLabel, 'now');
 });
 
@@ -579,54 +579,79 @@ test('fieldValue: grade one decimal from Sauce\'s fraction, "-0.0" shown as "0.0
 });
 
 
-test('fieldValue: power now as the pull\'s now, in Paceline\'s unit (Review Focus 1)', () => {
-    assert.equal(D.fieldValue('now', {}, {unit: 'Wkg', weight: 80, nowW: 320}).num, '4.0');
-    assert.equal(D.fieldValue('now', {}, {unit: 'W', weight: 80, nowW: 320}).num, '320');
-    // The same number the pull shows (nowValue of the marker's power), whatever state.power says.
-    assert.equal(D.fieldValue('now', {power: 999}, {unit: 'Wkg', weight: 80, nowW: 320}).num, D.nowValue(320, 80, 'Wkg'));
+test('fieldValue: power is the pull\'s number, raw, in Paceline\'s unit (Review Focus 1; user, 24 Nov 2026)', () => {
+    assert.equal(D.fieldValue('power', {power: 320}, {unit: 'Wkg', weight: 80}).num, '4.0');
+    assert.equal(D.fieldValue('power', {power: 320}, {unit: 'W', weight: 80}).num, '320');
+    // The same number the pull shows: nowValue of powerNow (Zwift's power, no filter).
+    assert.equal(D.fieldValue('power', {power: 327}, {unit: 'Wkg', weight: 80}).num,
+                 D.nowValue(D.powerNow({raw: 327}), 80, 'Wkg'));
     // No weight: watts, as the pull does then.
-    assert.equal(D.fieldValue('now', {}, {unit: 'Wkg', weight: null, nowW: 320}).num, '320');
-    assert.equal(D.fieldValue('now', {power: 300}, {unit: 'W', nowW: null}).num, null);
+    assert.equal(D.fieldValue('power', {power: 320}, {unit: 'Wkg', weight: null}).num, '320');
+    assert.equal(D.fieldValue('power', {}, {unit: 'W'}).num, null);
 });
 
 
-test('fieldValue: the 5 s smoothed power for W and W/kg when given', () => {
-    assert.equal(D.fieldValue('powerW', {power: 400}, {smooth5W: 251.4}).num, '251');
-    assert.equal(D.fieldValue('powerWkg', {power: 400}, {weight: 80, smooth5W: 256}).num, '3.2');
-    assert.equal(D.fieldValue('powerW', {power: 400}, {smooth5W: null}).num, '400');
-    assert.equal(D.fieldValue('powerW', {power: 0}).num, '0');    // coasting is a real 0
+test('fieldValue: the 5 s smoothed power when given, in either unit', () => {
+    assert.equal(D.fieldValue('power', {power: 400}, {unit: 'W', smooth5W: 251.4}).num, '251');
+    assert.equal(D.fieldValue('power', {power: 400}, {unit: 'Wkg', weight: 80, smooth5W: 256}).num, '3.2');
+    assert.equal(D.fieldValue('power', {power: 400}, {unit: 'W', smooth5W: null}).num, '400');
+    assert.equal(D.fieldValue('power', {power: 0}, {unit: 'W'}).num, '0');    // coasting is a real 0
+    assert.equal(D.fieldValue('power', {power: 0}, {unit: 'Wkg', weight: 80}).num, '0.0');
+});
+
+
+test('powerNow: the 5 s power when there is one, else Zwift\'s power as sent; null without either', () => {
+    assert.equal(D.powerNow({raw: 287}), 287);
+    assert.equal(D.powerNow({raw: 287, smooth5W: 262.5}), 262.5);
+    assert.equal(D.powerNow({raw: 287, smooth5W: null}), 287);
+    assert.equal(D.powerNow({raw: 0}), 0);
+    assert.equal(D.powerNow({raw: undefined}), null);
+    assert.equal(D.powerNow({raw: NaN, smooth5W: NaN}), null);
+});
+
+
+test('fieldKind: the earlier Power now, Power W and Power W/kg are the one Power field', () => {
+    for (const k of ['now', 'powerW', 'powerWkg', 'power']) {
+        assert.equal(D.fieldKind(k), 'power', k);
+    }
+    assert.equal(D.fieldKind('draft'), 'draft');
+    assert.equal(D.fieldKind('off'), 'off');
+    assert.equal(D.fieldKind('gear'), null);
+    assert.equal(D.fieldKind(undefined), null);
+    assert.deepEqual(D.FIELD_KINDS.filter(k => k.startsWith('power')), ['power']);
 });
 
 
 test('fieldValue: a missing value is null, never NaN or a made-up 0 (Review Focus 2)', () => {
-    assert.equal(D.fieldValue('powerWkg', {power: 361}, {weight: null}).num, null);
-    assert.equal(D.fieldValue('powerWkg', {power: 361}, {weight: 0}).num, null);
+    // W/kg without a weight is watts (as the pull), never a W/kg made up from nothing.
+    assert.equal(D.fieldValue('power', {power: 361}, {unit: 'Wkg', weight: null}).num, '361');
+    assert.equal(D.fieldValue('power', {power: 361}, {unit: 'Wkg', weight: 0}).num, '361');
     assert.equal(D.fieldValue('heartrate', {}, {}).num, null);
     // Zwift sends 0 without a heart rate strap: no real heart rate.
     assert.equal(D.fieldValue('heartrate', {heartrate: 0}).num, null);
     // A cadence of 0 while pedalling (power) is a trainer without cadence; with no power I coast.
     assert.equal(D.fieldValue('cadence', {cadence: 0, power: 210}).num, null);
     assert.equal(D.fieldValue('cadence', {cadence: 0, power: 0}).num, '0');
-    for (const k of ['powerW', 'powerWkg', 'draft', 'speed', 'cadence', 'heartrate', 'grade']) {
+    for (const k of ['power', 'draft', 'speed', 'cadence', 'heartrate', 'grade']) {
         assert.equal(D.fieldValue(k, {}, {weight: 80}).num, null, k);
         assert.equal(D.fieldValue(k, null, {weight: 80}).num, null, k);
         assert.equal(D.fieldValue(k, {power: NaN, draft: NaN, speed: NaN, cadence: NaN, heartrate: NaN, grade: NaN},
                                   {weight: 80}).num, null, k);
     }
-    assert.equal(D.fieldValue('now', {}, {unit: 'W', nowW: NaN}).num, null);
 });
 
 
 test('recoveryFields: three slots, Off keeps its place as null', () => {
     const data = {power: 250, draft: 96, speed: 42.6, cadence: 88, heartrate: 142, grade: 0.012};
-    const opts = {unit: 'Wkg', weight: 80, nowW: 248, smooth5W: null};
-    const f = D.recoveryFields({left: 'off', mid: 'now', right: 'off'}, data, opts);
+    const opts = {unit: 'Wkg', weight: 80, smooth5W: null};
+    const f = D.recoveryFields({left: 'off', mid: 'power', right: 'off'}, data, opts);
     assert.equal(f.length, 3);
     assert.equal(f[0], null);
-    assert.deepEqual(f[1], D.fieldValue('now', data, opts));
+    assert.deepEqual(f[1], D.fieldValue('power', data, opts));
     assert.equal(f[1].num, '3.1');
     assert.equal(f[2], null);
-    assert.deepEqual(D.recoveryFields({left: 'powerWkg', mid: 'now', right: 'draft'}, data, opts).map(x => x && x.num),
+    // An earlier power choice shows as Power.
+    assert.deepEqual(D.recoveryFields({left: 'powerW', mid: 'now', right: 'draft'}, data, opts).map(x => x && x.num),
                      ['3.1', '3.1', '96']);
     // An unknown choice (an older or broken setting) is an empty slot, not an error.
     assert.deepEqual(D.recoveryFields({left: 'gear', mid: undefined, right: 'heartrate'}, data, opts).map(x => x && x.num),
@@ -662,16 +687,19 @@ test('clockField: the number on top, my place under it, no "s" (user, 23 Nov 202
 });
 
 
-test('fieldSlots: the slots set while the option is on, the defaults (off, now, off) otherwise', () => {
-    assert.deepEqual(D.fieldSlots({}), {left: 'off', mid: 'now', right: 'off'});
-    assert.deepEqual(D.fieldSlots({recFields: false, recLeft: 'powerWkg', recMid: 'speed', recRight: 'draft'}),
-                     {left: 'off', mid: 'now', right: 'off'});
-    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'powerWkg', recMid: 'speed', recRight: 'draft'}),
-                     {left: 'powerWkg', mid: 'speed', right: 'draft'});
+test('fieldSlots: the slots set while the option is on, the defaults (off, power, off) otherwise', () => {
+    assert.deepEqual(D.fieldSlots({}), {left: 'off', mid: 'power', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: false, recLeft: 'power', recMid: 'speed', recRight: 'draft'}),
+                     {left: 'off', mid: 'power', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'power', recMid: 'speed', recRight: 'draft'}),
+                     {left: 'power', mid: 'speed', right: 'draft'});
+    // A setting saved before 0.3.6 (Power now, Power W, Power W/kg) is Power.
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'powerWkg', recMid: 'now', recRight: 'powerW'}),
+                     {left: 'power', mid: 'power', right: 'power'});
     // Unset or unknown values fall back to each slot's default.
-    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'draft'}), {left: 'draft', mid: 'now', right: 'off'});
+    assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'draft'}), {left: 'draft', mid: 'power', right: 'off'});
     assert.deepEqual(D.fieldSlots({recFields: true, recLeft: 'gear', recMid: '', recRight: null}),
-                     {left: 'off', mid: 'now', right: 'off'});
+                     {left: 'off', mid: 'power', right: 'off'});
 });
 
 
@@ -788,10 +816,10 @@ test('fieldsShown in chaos: resting shows the fields with or without a Rest wind
     // My pull in chaos: the pull.
     const pull = D.actionModel({mine: true, remainingS: 30, me: {watts: 254}}, 250, 'green', {chaos: true});
     assert.equal(D.fieldsShown({recFields: true, restOpen: true, model: pull, reason: 'chaos'}), false);
-    // recFields off in chaos: the default slots, my power now in the middle in Paceline's unit.
+    // recFields off in chaos: the default slots, my power in the middle in Paceline's unit.
     const f = D.recoveryFields(D.fieldSlots({recFields: false, recLeft: 'draft'}), {power: 400},
-                               {unit: 'W', weight: 80, nowW: 300});
-    assert.deepEqual(f.map(x => x && x.num), [null, '300', null]);
+                               {unit: 'Wkg', weight: 80});
+    assert.deepEqual(f.map(x => x && x.num), [null, '5.0', null]);
     assert.equal('chaosModel' in D, false);
 });
 
