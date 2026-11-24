@@ -728,11 +728,10 @@ html.pl-mid-same .pl-tri-now .pl-tri-num { font-weight: 800; }
     border: 3px solid #111;
     border-radius: 4px;
     background: #fff;
-    transition: left 1s linear, background-color 0.3s;    /* glides from one 1 Hz sample to the next */
+    transition: left 0.4s linear, background-color 0.3s;
 }
-/* The marker's colour: the zone it stands in (filtered power: median, smoothing, snap; kept 1 %
-   past a zone's edge), white at the start of a pull. The dark border keeps it visible on the bar's
-   zone of the same colour. */
+/* The marker's colour: the zone of the filtered power (median, smoothing, 2 % deadband), white at
+   the start of a pull. The dark border keeps it visible on the bar's zone of the same colour. */
 .pl-bar-marker[data-zone="green"] { background: var(--pl-ok); }
 .pl-bar-marker[data-zone="amber"] { background: var(--pl-amber); }
 .pl-bar-marker[data-zone="red"] { background: var(--pl-bad); }

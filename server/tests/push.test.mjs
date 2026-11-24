@@ -78,16 +78,16 @@ test('push: the team page links to the planner with a fresh token; the upload pa
     upload(kf.club, 'sprockets', {riders: ROLLERS.slice(0, 4), at: SETUP_AT});
     const srv = await serve(t, kf, {env: ENV});
     const secret = secretOf(srv);
-    // a team without plans: the empty card's main button, "Upload a file instead" after it (races spec §4)
+    // a team without plans: the empty card's main button, "Upload a file" after it (races spec §4)
     const body = await pageOf(srv, kf.cookie, '/manage/team/rollers');
     const href = plannerOf(body);
     assert.equal(href, `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'rollers')}&plhost=paceline.example.org`);
-    assert.match(body, /<section class="card empty"[\s\S]*?<\/p>\s*<a class="btn primary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">[\s\S]*?Plan on ZwiftGopher<\/a><a class="btn quiet small" href="\/manage\/upload\?team=rollers">[\s\S]*?Upload a file instead<\/a>\s*<\/section>/);
+    assert.match(body, /<section class="card empty"[\s\S]*?<\/p>\s*<a class="btn primary block" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[0-9a-f]{40}&amp;plhost=paceline\.example\.org" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)">[\s\S]*?Plan on ZwiftGopher<\/a><a class="btn secondary small" href="\/manage\/upload\?team=rollers">[\s\S]*?Upload a file<\/a>\s*<\/section>/);
     // no second pair in the head: the empty card has them
     assert.ok(!body.includes('class="headacts'), body);
-    // a team with plans: in the head, "Upload a file instead" under it (races spec §4)
+    // a team with plans: in the head, "Upload a file" under it (races spec §4)
     const other = await pageOf(srv, kf.cookie, '/manage/team/sprockets');
-    assert.match(other, /<section class="headacts planner"><a class="btn primary small" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[^"]*" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)"><svg[^>]*>[\s\S]*?<\/svg>Plan on ZwiftGopher<\/a><a class="btn quiet small" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a file instead<\/a><\/section>/);
+    assert.match(other, /<section class="headacts planner"><a class="btn primary small" href="https:\/\/zwiftgopher\.com\/TTT\/\?paceline=[^"]*" target="_blank" rel="noopener noreferrer" aria-label="Plan on ZwiftGopher \(opens a new tab\)"><svg[^>]*>[\s\S]*?<\/svg>Plan on ZwiftGopher<\/a><a class="btn secondary small" href="\/manage\/upload\?team=sprockets">[\s\S]*?Upload a file<\/a><\/section>/);
     assert.ok(!other.includes('uplink'), 'no links under the plans any more');
     assert.equal(plannerOf(other), `https://zwiftgopher.com/TTT/?paceline=${tokenFor(secret, 'sprockets')}&plhost=paceline.example.org`);
     assert.notEqual(new URL(plannerOf(other)).searchParams.get('paceline'), new URL(href).searchParams.get('paceline'));
@@ -390,7 +390,7 @@ test('push: the team page lists every received plan, newest first; picker and si
     const pending = element(page, '<section class="cp-pending"');
     assert.deepEqual([...pending.matchAll(/data-sel="e:([^"]+)"><a class="cp-link" href="([^"]+)"/g)].map(m => [m[1], m[2]]),
         [up.id, second.id, first.id].map(id => [id, `/manage/team/rollers?e=${id}#panel`]));
-    assert.match(textOf(pending), /Not stored yet Uploaded 19:25 · 'Rollers' · 1 rider Sent 19:20 · 'Rollers slow' · 4 riders Sent 19:05 · 'Rollers & <b>fast<\/b>' · 6 riders/);
+    assert.match(textOf(pending), /Not stored yet Uploaded 19:25 · 'Rollers' · 1 rider Received 19:20 · 'Rollers slow' · 4 riders Received 19:05 · 'Rollers & <b>fast<\/b>' · 6 riders/);
     assert.match(pending, /&#39;Rollers &amp; &lt;b&gt;fast&lt;\/b&gt;&#39;/, 'the name is escaped');
     // the rows: the sidebar (and switcher) of every page, and the picker's tile
     assert.equal(count(page, '<span class="newplans">2 new plans</span>'), 2, 'switcher and sidebar');
@@ -412,21 +412,22 @@ test('push: the team page lists every received plan, newest first; picker and si
 });
 
 
-test('push: the Store form says where it came from and starts with Make live off', async t => {
+test('push: the Store form says where it came from; a pushed plan and an upload get the same Make live and Store (user, 23 Nov 2026)', async t => {
     const kf = makeClub();
     const srv = await serve(t, kf, {env: ENV});
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 201);
     const [entry] = srv.store.get(CID).inbox;
     const page = await pageOf(srv, kf.cookie, `/manage/team/rollers?e=${entry.id}`);
-    assert.match(textOf(element(page, '<div id="panel"')), /Sent 19:25 · 'Rollers fast' · 6 riders/);
-    assert.match(page, /<input type="checkbox" name="live" value="on">/, 'the box is off');
-    assert.doesNotMatch(page, /name="live" value="on" checked/);
-    // the same plan uploaded: the box starts on (Rollers has nothing live)
+    assert.match(textOf(element(page, '<div id="panel"')), /Received 19:25 · 'Rollers fast' · 6 riders/);
+    // no box: the bar's Make live and Store, as for an upload (the old "received plans start off" rule went)
+    const bar = html => element(html, '<div class="cp-bar"').replace(/store-[0-9a-hjkmnp-tv-z]{6}/g, 'store-ID').replace(/discard-[0-9a-hjkmnp-tv-z]{6}|inbox\/[0-9a-hjkmnp-tv-z]{6}/g, 'X');
+    assert.doesNotMatch(page, /name="live" value="on"(?! aria-label)/);
+    assert.match(page, new RegExp(`<button class="btn primary" type="submit" form="store-${entry.id}" name="live" value="on" aria-label="Store and make live" data-submit="live">Make live</button>`));
     const id = await intake(srv, kf.cookie, {team: 'rollers', json: plan()});
     const up = await pageOf(srv, kf.cookie, `/manage/team/rollers?e=${id}`);
     assert.match(textOf(element(up, '<div id="panel"')), /Uploaded 19:25 · 'Rollers fast' · 6 riders/);
-    assert.match(up, /name="live" value="on" checked/);
-    // ticked and stored, it goes live
+    assert.equal(bar(up).replace(/riders \([^)]*\)/g, ''), bar(page).replace(/riders \([^)]*\)/g, ''));
+    // Make live (Rollers has nothing live: no question): stored and live
     const stored = await storePost(srv, kf.cookie, entry.id, {team: 'rollers', as: 'new', live: 'on', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
     assert.equal(stored.status, 303, stored.body);
     const c = srv.store.get(CID);
@@ -434,15 +435,15 @@ test('push: the Store form says where it came from and starts with Make live off
 });
 
 
-test('push: assignChoices starts a received entry with the box off where an upload has it on', () => {
+test('push: assignChoices has no Make live box, for a received entry as for an upload', () => {
     const {club: c} = makeClub();
     const json = planJson('Rollers', ['1001', '1002']);
-    for (const [source, on] of [['upload', true], ['receive', false]]) {
+    for (const source of ['upload', 'receive']) {
         const entry = {id: 'h00001', at: new Date(NOW).toISOString(), source, team: 'rollers', forPlan: null, via: null, json, text: null, warnings: []};
         const choices = assignChoices(c, entry, new URLSearchParams(), NOW);
-        assert.deepEqual([choices.as, choices.liveKind, choices.live], ['new', 'none', on], source);
-        // ticked by the captain, it stays ticked through a redraw
-        assert.equal(assignChoices(c, entry, new URLSearchParams({drawn: 'rollers:new', as: 'new', live: 'on'}), NOW).live, true);
+        assert.equal(choices.as, 'new', source);
+        assert.deepEqual(['live', 'liveKind', 'liveVars'].filter(k => Object.hasOwn(choices, k)), [], source);
+        assert.equal(assignChoices(c, entry, new URLSearchParams({drawn: 'rollers:new', as: 'new', live: 'on', touched: 'live'}), NOW).touched, '', source);
     }
 });
 
@@ -454,7 +455,7 @@ test('push: a pushed plan stored not live is red at once, days before its race (
     const srv = await serve(t, kf, {env: ENV, now: sat});
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan())).status, 201);
     const [entry] = srv.store.get(CID).inbox;
-    // stored as the box starts (off): not live
+    // Store (not Make live): not live
     const stored = await storePost(srv, kf.cookie, entry.id, {team: 'rollers', as: 'new', drawn: 'rollers:new', base: srv.store.get(CID).teams.rollers.version});
     assert.equal(stored.status, 303, stored.body);
     const c = srv.store.get(CID);
@@ -464,8 +465,8 @@ test('push: a pushed plan stored not live is red at once, days before its race (
     assert.deepEqual([storeFlash(stored.body).kind, storeFlash(stored.body).text], ['err', 'Stored as v1 of \'Rollers\'. Not live: riders get nothing until you press Make live.']);
     // (5 days before the gate it does not ask first: a plain form, primary while the race has nothing live)
     const makeLive = sid => `action="/manage/live"><input type="hidden" name="club" value="${CID}"><input type="hidden" name="team" value="rollers"><input type="hidden" name="sheet" value="${sid}">`;
-    const body = element(stored.body, '<div id="panel-body"');
-    assert.ok(body.includes(makeLive(id)) && body.includes('<button class="btn primary" type="submit">Make v1 live</button>'), body);
+    const body = element(stored.body, '<div id="panel-acts"');
+    assert.ok(body.includes(makeLive(id)) && body.includes('<button class="btn primary" type="submit">Make live<span class="sr"> v1 of &#39;Rollers&#39;</span></button>'), body);
     // the team page, the picker row and the hub: red, with the hub's "Make a plan live"
     assert.deepEqual(teamView(c, 'rollers', {now: sat}).status, {sev: 'err', kind: 'none-live', icon: 'noPlan', text: 'No live plan: riders get nothing'});
     const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
@@ -483,7 +484,7 @@ test('push: a pushed plan stored not live is red at once, days before its race (
     assert.equal(flash.text, 'Same as \'Rollers\' v1: nothing new stored.');
     assert.equal(flash.lines[0], 'Not live: riders get nothing until you press Make live.');
     assert.match(element(same.body, '<div class="result" data-hold-reload>'), /^<div class="result" data-hold-reload><ul class="pv-list"><li class="err">/);
-    assert.ok(element(same.body, '<div id="panel-body"').includes(makeLive(id)), same.body);
+    assert.ok(element(same.body, '<div id="panel-acts"').includes(makeLive(id)), same.body);
 });
 
 
@@ -697,7 +698,7 @@ test('push: the team page shows the planner name cleaned and capped', async t =>
     const srv = await serve(t, kf, {env: ENV});
     assert.equal((await push(srv, tokenFor(secretOf(srv), 'rollers'), plan(`Roll&#8238;ers ${'x'.repeat(100)}`))).status, 201);
     const page = await pageOf(srv, kf.cookie, '/manage/team/rollers');
-    assert.ok(page.includes(`Sent 19:25 · &#39;Rollers ${'x'.repeat(51)}…&#39; · 6 riders`), 'cleaned and capped');
+    assert.ok(page.includes(`Received 19:25 · &#39;Rollers ${'x'.repeat(51)}…&#39; · 6 riders`), 'cleaned and capped');
     assert.equal(page.includes('‮'), false);
 });
 

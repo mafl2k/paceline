@@ -9,7 +9,7 @@ import {gzipSync, gunzipSync} from 'node:zlib';
 import {planJson, sheet, T, CODE_SECRET, rows as dbRows, refuseWrites, liveId, race} from './helpers.mjs';
 import {
     CID, DATE, NOW, SETUP_AT, ROLLERS, makeClub, secondClub, upload, serve, textOf, count, flashOf, post, followPost,
-    postUpload, storeOk, storePost, storeFlash, intake, uploadPageOf, formOf, VERSION_OF, sheetsOf, storedClub, CLUB_FIELD, armOf, armHas, undoOf, element,
+    postUpload, storeOk, storePost, storeFlash, intake, uploadPageOf, formOf, VERSION_OF, sheetsOf, storedClub, CLUB_FIELD, armOf, armHas, element,
 } from './manage-helpers.mjs';
 import {setRiderCode, uploadSheet, setRace, setStart, receiveEntry, addEntry} from '../club.mjs';
 import {newRiderCode, riderCodeHash, formatRiderCode, tokenHash, randomId} from '../ids.mjs';
@@ -117,14 +117,19 @@ async function assignOf(srv, id, query = '') {
     return {status: res.status, headers: res.headers, body: await res.text()};
 }
 
-// The texts of the "What happens" lines of the Store form, in order (the text of each line's own
-// <span>; the diff summary is not one of them since the team cockpit: the rider table shows it).
-const whatHappens = body => [...section(body, '<section class="as-what"')
+// The texts of the Store form's warning lines above its action bar, in order (the text of each
+// line's own <span>; user, 23 Nov 2026: no "What happens" heading, no routine line; the diff summary
+// is none of them: the rider table shows it); [] without any.
+const whatHappens = body => [...(element(element(body, '<div id="panel-body"') ?? '', '<div class="cp-what"') ?? '')
     .matchAll(/<li class="(?:ok|info|warn|err)"><svg[^>]*>[\s\S]*?<\/svg><span>([^<]*)<\/span>/g)].map(m => textOf(m[1]).trim());
 
-// The checked radios of a group and the live box.
+// The checked radios of a group.
 const checkedOf = (body, name) => [...body.matchAll(new RegExp(`<input type="radio" name="${name}" value="([^"]*)" checked>`, 'g'))].map(m => m[1]);
-const liveChecked = body => body.includes('<input type="checkbox" name="live" value="on" checked>');
+// The Store form's action bar (user, 23 Nov 2026): Make live (primary) then Store (quiet), and no Make
+// live box anywhere on the page.
+// (Discard · Store · Make live, Make live the rightmost: user, 23 Nov 2026)
+const barButtons = body => /<button class="btn secondary" type="submit" form="store-[^"]+" data-submit="store">Store<\/button><button class="btn primary" type="submit" form="store-[^"]+" name="live" value="on" aria-label="Store and make live"(?: data-arm-open)? data-submit="live">Make live<\/button>/.test(body)
+    && !body.includes('type="checkbox" name="live"');
 
 // The plan id of stored version `id`, and the back link of a page's back bar: [href, text].
 const planIdOf = (srv, id) => srv.store.get(CID).sheets[id].plan;
@@ -157,7 +162,7 @@ test('upload page: the file only, with the plan it was opened for', async t => {
     const f = formOf(page);
     assert.ok(f.includes('<input type="hidden" name="team" value="rollers">'), f);
     assert.ok(f.includes(`<input type="hidden" name="forPlan" value="${live}">`), f);
-    assert.ok(f.includes('<label class="field">Planner JSON<input id="json-in" type="file" name="json" accept=".json,application/json"></label>'), f);
+    assert.ok(f.includes('<label class="field">ZwiftGopher JSON export<input id="json-in" type="file" name="json" accept=".json,application/json"></label>'), f);
     assert.match(f, /<details class="fold"><summary>Paste the JSON instead<\/summary>[\s\S]*?<textarea name="paste"/);
     // the JSON only (races Task 7: the text upload went); only the paste is folded
     assert.ok(!f.includes('name="text"') && !textOf(f).includes('Text export'), f);
@@ -189,15 +194,16 @@ test('upload page: the file only, with the plan it was opened for', async t => {
 });
 
 
-test('upload page: the plan ⋯\'s New version opens it for that plan; a `from` is ignored, the way back is the team page', async t => {
+test('upload page: opened for a plan (a link already handed out); a `from` is ignored, the way back is the team page', async t => {
     const c = makeClub();
     const live = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-15T14:00:00Z')});
     const sp = upload(c.club, 'sprockets', {riders: ['1009'], at: T('2026-11-15T14:05:00Z')});
     const srv = await serve(t, c, {now: T('2026-11-16T09:00:00Z')});
     const plan = planIdOf(srv, live);
-    // the plan ⋯ on the team page: New version, without a from
+    // the plan ⋯ on the team page draws no New version any more (user, 23 Nov 2026), nor a from; the
+    // upload page still takes `plan=` (a hole's link, links already handed out)
     const team = await (await srv.get('/manage/team/rollers')).text();
-    assert.ok(team.includes(`<a class="menu-link" href="/manage/upload?team=rollers&amp;plan=${plan}">`), team);
+    assert.equal(team.includes(`/manage/upload?team=rollers&amp;plan=${plan}`), false, team);
     assert.equal(team.includes('from=plan'), false);
     // a link from before the team cockpit (from=plan, from=cockpit), a plan of another team, an unknown
     // plan, no plan: the team page, and the action carries no from
@@ -336,7 +342,7 @@ test('upload: an old page\'s fields are accepted and ignored', async t => {
 });
 
 
-test('assign page: the same file as a stored version names that version, and says it goes live', async t => {
+test('assign page: the same file as a stored version stores nothing new, and Make live makes it live', async t => {
     // final review M-3: v1 live, v2 stored not live, v2's file again: there is no v3
     const c = makeClub();
     const v1 = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
@@ -347,16 +353,12 @@ test('assign page: the same file as a stored version names that version, and say
     assert.equal(liveId(srv.store.get(CID), 'rollers'), v1);
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: v1, json});
     const {body} = await assignOf(srv, id);
-    assert.ok(body.includes('<label><input type="checkbox" name="live" value="on" checked> Make live: riders get v2 at once instead of v1</label>'), body);
-    // 19:25, past the gate: riders in the event get it within a minute (UI panel, 19 Nov 2026)
-    assert.deepEqual(whatHappens(body).slice(0, 1), ['Same as v2: nothing new would be stored, but v2 goes live for Thu 19 Nov 19:30. Riders in the event get it within a minute.']);
+    // nothing to warn about but the file's own (user, 23 Nov 2026: no "What happens"; v1 stays live
+    // meanwhile, so Store alone warns nothing)
+    assert.deepEqual(whatHappens(body), ['No pull watts in this plan: export it from ZwiftGopher with pull power.']);
     assert.ok(!textOf(body).includes('v3'), textOf(body));
-    // unticked: nothing happens, and the label still names v2
-    const off = (await assignOf(srv, id, `?team=rollers&as=${v1}&type=fast&drawn=rollers:${v1}&touched=live`)).body;
-    assert.ok(off.includes('<label><input type="checkbox" name="live" value="on"> Make live: riders get v2 at once instead of v1</label>'), off);
-    assert.deepEqual(whatHappens(off).slice(0, 1), ['Same as v2: nothing new would be stored.']);
-    // Store makes v2 live
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: v1, type: 'fast', live: 'on', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${v1}`});
+    // Make live (its strip's confirm: the gate is open and v1 is live) makes v2 live
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: v1, type: 'fast', live: 'on', confirm: '1', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${v1}`});
     assert.equal(res.status, 303, res.body);
     assert.equal(liveId(srv.store.get(CID), 'rollers'), v2);
     assert.equal(sheetsOf(srv, 'rollers').length, 2, 'nothing new stored');
@@ -365,8 +367,8 @@ test('assign page: the same file as a stored version names that version, and say
     // the live version's file again: riders have it already
     const again = await intake(srv, c.cookie, {team: 'rollers', forPlan: v1, json});
     const live = (await assignOf(srv, again)).body;
-    assert.ok(live.includes('> Make live: riders have v2 already</label>'), live);
-    assert.deepEqual(whatHappens(live).slice(0, 1), ['Same as v2: nothing new would be stored.']);
+    // nothing to warn about but the file's own (user, 23 Nov 2026: no "What happens")
+    assert.deepEqual(whatHappens(live), ['No pull watts in this plan: export it from ZwiftGopher with pull power.']);
     assert.ok(!textOf(live).includes('v3'), textOf(live));
 });
 
@@ -385,7 +387,7 @@ test('Store form: the planner\'s roster shows nowhere; the row and the table cou
 });
 
 
-test('Store form: preselected, the box in words, never reloads, changes nothing', async t => {
+test('Store form: preselected, Make live and Store, never reloads, changes nothing', async t => {
     const c = makeClub();
     const live = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS.slice(0, 7), at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c);
@@ -397,7 +399,8 @@ test('Store form: preselected, the box in words, never reloads, changes nothing'
     assert.equal(storedClub(srv), file, 'a GET changes nothing');
     assert.equal(VERSION_OF(srv, 'rollers'), version);
     assert.equal(inboxOf(srv).length, 1);
-    assert.ok(body.includes(`<form id="store-${id}" method="post" action="/manage/inbox/${id}" data-assign data-hold-reload>`), body);
+    // (data-arm: past the gate, with v1 live, Make live asks first)
+    assert.ok(body.includes(`<form id="store-${id}" method="post" action="/manage/inbox/${id}" data-assign data-hold-reload data-arm>`), body);
     const text = textOf(body);
     assert.match(textOf(element(body, '<div id="panel"')), /Uploaded \d\d:\d\d · 'Rollers other' · 8 riders/);
     // the team: Rollers, the other team in a fold
@@ -410,27 +413,29 @@ test('Store form: preselected, the box in words, never reloads, changes nothing'
     assert.deepEqual(checkedOf(body, 'as'), [live]);
     assert.ok(text.includes('New version of \'Rollers · fast\' live · v1 · 15:00 · 7 of 8 riders the same New plan'), text);
     // a version keeps its plan's type: the page asks for none (and has no suggestions or hint for it)
-    const form = element(body, '<div class="cp-pick"');
+    const form = element(body, '<div class="cp-form"');
     assert.ok(!form.includes('name="type"') && !form.includes('id="types"') && !text.includes('Optional, e.g. fast'), form);
-    // the box's label says what ticking it does; no sentence beside it that follows the default
-    assert.ok(body.includes('<label><input type="checkbox" name="live" value="on" checked> Make live: riders get v2 at once instead of v1</label>'), body);
-    assert.equal(count(text, 'instead of v1'), 1, text);
-    // what happens: the outcome first
-    // past the gate (19:00) riders in the event get it within a minute (UI panel, 19 Nov 2026)
-    assert.match(whatHappens(body)[0], /^v2 of 'Rollers · fast', live for Thu 19 Nov 19:30\. Riders in the event get it within a minute\.$/);
-    assert.ok(form.includes('<input type="date" value="2026-11-19" readonly><span class="hint">The plan&#39;s date</span>'), 'a version takes the plan\'s date, in the date\'s place');
-    assert.ok(!form.includes('name="date"'));
+    // no Make live box (user, 23 Nov 2026)
+    assert.ok(!form.includes('name="live"') && !form.includes('type="checkbox"'), form);
+    // only what warns above the bar (user, 23 Nov 2026: no "What happens", no routine line)
+    assert.deepEqual(whatHappens(body), ['No pull watts in this plan: export it from ZwiftGopher with pull power.']);
+    assert.equal(/What happens|Make live:|Store:/.test(textOf(element(body, '<div id="panel-body"'))), false);
+    // a version takes its plan's race (user, 23 Nov 2026): no date, time or link fields, no race fold
+    assert.ok(!/name="(date|start|event)"|as-race|type="date"/.test(form), form);
     // no redraw button: the script redraws the form by itself (decision 13)
     assert.ok(!body.includes('data-redraw') && !body.includes('formmethod') && !text.includes('Update preview'), body);
-    assert.ok(body.includes(`<button class="btn primary" type="submit" form="store-${id}" data-submit>Store and make live</button>`), body);
+    assert.ok(body.includes(`<button class="btn secondary" type="submit" form="store-${id}" data-submit="store">Store</button>`
+        + `<button class="btn primary" type="submit" form="store-${id}" name="live" value="on" aria-label="Store and make live" data-arm-open data-submit="live">Make live</button>`), body);
     assert.ok(body.includes(`<input type="hidden" name="drawn" value="rollers:${live}">`), body);
     assert.ok(body.includes(`<input type="hidden" name="base" value="${version}">`), body);
     assert.ok(body.includes('<input type="hidden" name="touched" value="">'), body);
-    // Discard, after Store
+    // Discard, before Store and Make live (Make live the rightmost: user, 23 Nov 2026)
     const discard = body.indexOf(`<form class="discard" method="post" action="/manage/inbox/${id}/discard" data-arm>`);
-    assert.ok(discard > body.indexOf('data-submit'), body);
-    // one word for one action (UI panel wave 3): "Discard…" as on the team page, the riders for screen readers
-    assert.ok(textOf(body.slice(discard)).includes('Discard…') && !body.includes('Discard this plan'), textOf(body.slice(discard)));
+    assert.ok(discard > 0 && discard < body.indexOf('data-submit'), body);
+    // one word for one action (UI panel wave 3): "Discard" as on the team page (no "…", user 23 Nov
+    // 2026), the riders for screen readers
+    assert.match(body.slice(discard), /data-arm-open><svg[^>]*>[\s\S]*?<\/svg>Discard<span class="sr">/);
+    assert.ok(!body.includes('Discard…') && !body.includes('Discard this plan'), textOf(body.slice(discard)));
     // an open form: no meta refresh (the script holds the reload while the form is there)
     assert.ok(!body.includes('http-equiv'));
     // race day near the start: still no meta refresh
@@ -450,12 +455,13 @@ test('assign page: the preview equals the stored result', async t => {
     assert.ok(lines.includes('Ben moves from Sprockets to Rollers.'), lines.join('\n'));
     assert.ok(lines.includes('Still to do: Sprockets'), lines.join('\n'));
     assert.ok(lines.indexOf('Ben moves from Sprockets to Rollers.') < lines.indexOf('Still to do: Sprockets'));
-    // the diff is the rider table's caption (the team cockpit: no diff line in What happens)
+    // the diff is the rider table itself (Ben NEW): no diff line in What happens, and the table's
+    // caption only names what it is held against (user, 23 Nov 2026)
     assert.ok(!lines.includes('Ben in'), lines.join('\n'));
-    assert.match(element(page.body, '<div id="panel"'), /<span class="cp-cap" title="[^"]*">[^<]* · Ben in<\/span>/);
+    assert.match(element(page.body, '<div id="panel"'), /<span class="cp-cap" title="Against live [^"]*">Against live [^<·]*<\/span>/);
     // Store as a new version, no date posted (as the page posts it)
     // a date sent with a version (a stale field) does not move the moves and holes off the plan's race
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: live, live: 'on', type: 'fast', date: '2026-11-26', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: '', event: ''});
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: live, live: 'on', confirm: '1', type: 'fast', date: '2026-11-26', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: '', event: ''});
     assert.equal(res.status, 303, res.body);
     const text = storeFlash(res.body).all;
     assert.ok(text.includes('Ben moves from Sprockets to Rollers.'), text);
@@ -478,7 +484,7 @@ test('Store: a version keeps its plan\'s type whatever the POST says', async t =
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: live, json: planJson('Rollers other', ROLLERS)});
     const res = await storePost(srv, c.cookie, id, {
-        team: 'rollers', as: live, live: 'on', type: 'quick', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: 'type', event: '',
+        team: 'rollers', as: live, live: 'on', confirm: '1', type: 'quick', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: 'type', event: '',
     });
     assert.equal(res.status, 303, res.body);
     const club = srv.store.get(CID);
@@ -496,7 +502,7 @@ test('assign page: the team hint comes first', async t => {
     const id = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers new', ROLLERS)});
     const lines = whatHappens((await assignOf(srv, id)).body);
     assert.equal(lines[0], 'It looks like Sprockets (7 of 8 riders)');
-    assert.match(lines[1], /^New plan 'Rollers', live for Thu 19 Nov 19:30\./);
+    assert.equal(lines.some(l => l.startsWith('Make live:')), false, lines.join('\n'));
     // the planner name of another team
     const named = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Sprockets', ['1010'])});
     assert.equal(whatHappens((await assignOf(srv, named)).body)[0], 'This plan says Sprockets');
@@ -518,18 +524,18 @@ test('assign page: two plans in the race and no forPlan → no plan checked', as
     const id = await intake(srv, c.cookie, fields);
     const {body} = await assignOf(srv, id);
     assert.deepEqual(checkedOf(body, 'as'), []);
-    assert.equal(liveChecked(body), false);
-    assert.ok(body.includes('<label><input type="checkbox" name="live" value="on"> Make live (pick a plan first)</label>'), body);
-    assert.ok(textOf(body).includes('New version of \'Rollers · fast\' live · v1 · 15:00 · 8 of 8 riders the same'), textOf(body));
-    assert.ok(textOf(body).includes('New version of \'Rollers · slow\' v1 · 15:10 · 6 of 8 riders the same'), textOf(body));
-    assert.ok(textOf(body).includes('New version of \'Rollers · next\' v1 · 15:30 · 4 of 8 riders the same · race Thu 26 Nov'), textOf(body));
-    // a row's race as the rows write it (' · race Thu 26 Nov'); the sidebar's "Next regular race Thu
-    // 19 Nov" of Sprockets (spec §8) is no row
-    assert.ok(!textOf(body).includes(' · race Thu 19 Nov'), 'rows of the page\'s race show no day');
-    assert.match(body, /<button class="btn primary" type="submit" form="store-[^"]+" data-submit>Store<\/button>/);
+    assert.ok(barButtons(body), body);
+    // the one line above the bar: what is missing (user, 23 Nov 2026: refusals and red lines stay)
+    assert.deepEqual(whatSev(body), [['err', 'Pick a plan.']]);
+    assert.ok(textOf(body).includes('New version of \'Rollers · fast\' Thu 19 Nov · live · v1 · 15:00 · 8 of 8 riders the same'), textOf(body));
+    assert.ok(textOf(body).includes('New version of \'Rollers · slow\' Thu 19 Nov · v1 · 15:10 · 6 of 8 riders the same'), textOf(body));
+    // plans of more than one race: every row starts with its race's day, nearest race first
+    // (controller ruling 23 Nov 2026)
+    assert.ok(textOf(body).includes('New version of \'Rollers · next\' Thu 26 Nov · v1 · 15:30 · 4 of 8 riders the same'), textOf(body));
+    assert.ok(textOf(body).indexOf('Thu 19 Nov · live · v1') < textOf(body).indexOf('Thu 26 Nov · v1'), textOf(body));
     // Store without a plan
     const sheets = Object.keys(srv.store.get(CID).sheets).length;
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', live: 'on', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:'});
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', live: 'on', confirm: '1', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:'});
     assert.equal(res.status, 400, res.body);
     assert.deepEqual(flashOf(res.body), {kind: 'err', text: 'Pick a plan.'});
     assert.ok(res.body.includes('data-assign'), 'the Store form');
@@ -562,43 +568,42 @@ test('assign page: the touched fields go on through a refused Store and a redraw
     assert.deepEqual(checkedOf(body, 'as'), ['new']);
     assert.equal(typeOf(body), 'tempo');
     assert.equal(touchedOf(body), 'type');
-    // only type and live, sorted; anything else is dropped
-    assert.equal(touchedOf((await assignOf(srv, id, '?touched=type%2Cx%2Clive%2C%3Cb%3E')).body), 'live,type');
+    // only the type (no Make live box any more, user 23 Nov 2026); anything else is dropped
+    assert.equal(touchedOf((await assignOf(srv, id, '?touched=type%2Cx%2Clive%2C%3Cb%3E')).body), 'type');
     // a Store for a choice the page was not drawn for (the drawn guard's redraw) carries it too
     const guard = await storePost(srv, c.cookie, id, {
         team: 'rollers', as: 'new', type: 'tempo', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:', touched: 'live,type',
     });
     assert.equal(guard.status, 400, guard.body);
     assert.deepEqual(flashOf(guard.body), {kind: 'err', text: 'Check the choices: the preview was for another team or plan.'});
-    assert.equal(touchedOf(guard.body), 'live,type');
+    assert.equal(touchedOf(guard.body), 'type');
     assert.equal(typeOf(guard.body), 'tempo');
 });
 
 
-test('assign page: a preview of a Store that is not live while nothing in its race is live is red (spec §8)', async t => {
+test('assign page: what Store alone does into a race with nothing live is a warning (spec §8; user, 23 Nov 2026)', async t => {
     const c = makeClub();
     upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c);
-    // Sprockets has nothing live: a new plan with the box off says so in red before Store
+    // Sprockets has nothing live: the warning about Store alone (no line about Make live, user 23 Nov 2026)
     const id = await intake(srv, c.cookie, {team: 'sprockets', json: planJson('Sprockets', ['1009'])});
     const off = (await assignOf(srv, id, '?team=sprockets&as=new&drawn=sprockets:new')).body;
-    assert.equal(liveChecked(off), false);
-    const first = /<li class="(\w+)"><svg[^>]*>[\s\S]*?<\/svg><span>([^<]*)<\/span>/.exec(section(off, '<section class="as-what"'));
-    assert.deepEqual([first[1], textOf(first[2]).trim()], ['err', 'New plan \'Sprockets\', not live. Riders get no plan for this race yet.']);
-    // a new version of Rollers' plan with the box off: Rollers keeps its live plan, so not red
+    const store = whatSev(off).find(([, text]) => text.startsWith('Store:'));
+    assert.deepEqual(store, ['warn', 'Store: new plan \'Sprockets\', not live. Riders get no plan for this race yet.']);
+    assert.equal(whatSev(off).some(([, text]) => text.startsWith('Make live:')), false);
+    // a new version of Rollers' plan: Rollers keeps its live plan, so no warning
     const rid = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers fast', ROLLERS.slice(1))});
     const plan = Object.keys(srv.store.get(CID).sheets)[0];
     const kept = (await assignOf(srv, rid, `?team=rollers&as=${plan}&drawn=rollers:${plan}&type=fast`)).body;
-    const keptFirst = /<li class="(\w+)"><svg[^>]*>[\s\S]*?<\/svg><span>([^<]*)<\/span>/.exec(section(kept, '<section class="as-what"'));
-    assert.deepEqual([keptFirst[1], textOf(keptFirst[2]).trim()], ['info', 'Stored as v2 of \'Rollers · fast\', not live. Riders keep \'Rollers · fast\' v1.']);
+    assert.equal(whatSev(kept).some(([, text]) => text.startsWith('Store:')), false, JSON.stringify(whatSev(kept)));
 });
 
 
-// The "What happens" lines as [sev, text], in order.
-const whatSev = body => [...section(body, '<section class="as-what"')
+// The warning lines as [sev, text], in order.
+const whatSev = body => [...(element(element(body, '<div id="panel-body"') ?? '', '<div class="cp-what"') ?? '')
     .matchAll(/<li class="(ok|info|warn|err)"><svg[^>]*>[\s\S]*?<\/svg><span>([^<]*)<\/span>/g)].map(m => [m[1], textOf(m[2]).trim()]);
 
-test('assign page and result: the same file again, not live, while nothing in its race is live is red too (spec §8)', async t => {
+test('assign page and result: the same file again, not live, while nothing in its race is live warns too (spec §8)', async t => {
     const c = makeClub();
     upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c);
@@ -607,13 +612,13 @@ test('assign page and result: the same file again, not live, while nothing in it
     const plan = sheet.plan ?? sid;
     const id = await intake(srv, c.cookie, {team: 'sprockets', json: planJson('Sprockets', ['1009'])});
     const preview = (await assignOf(srv, id, `?team=sprockets&as=${plan}&drawn=sprockets:${plan}`)).body;
-    assert.equal(liveChecked(preview), false);
-    assert.deepEqual(whatSev(preview).slice(0, 2), [['info', 'Same as v1: nothing new would be stored.'], ['err', 'Not live: riders get nothing until you press Make live.']]);
+    assert.deepEqual(whatSev(preview)[0], ['warn', 'Store: same as v1, not live. Riders get no plan for this race yet.']);
+    assert.equal(whatSev(preview).some(([, text]) => text.startsWith('Make live:')), false);
     // Rollers keeps its live plan: the same file of it, not live, says nothing red
     const [[rid, rsheet]] = sheetsOf(srv, 'rollers');
     const rentry = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers fast', ROLLERS)});
     const kept = (await assignOf(srv, rentry, `?team=rollers&as=${rsheet.plan ?? rid}&drawn=rollers:${rsheet.plan ?? rid}&type=fast`)).body;
-    assert.ok(!whatSev(kept).some(([sev]) => sev === 'err'), JSON.stringify(whatSev(kept)));
+    assert.ok(!whatSev(kept).some(([sev, text]) => sev === 'err' || (sev === 'warn' && text.startsWith('Store:'))), JSON.stringify(whatSev(kept)));
 });
 
 
@@ -623,7 +628,9 @@ test('assign page and result: a race without any start time is not promised a pl
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'cranks', json: planJson('Cranks', ['1012'])});
     const preview = (await assignOf(srv, id, `?team=cranks&as=new&drawn=cranks:new`)).body;
-    assert.deepEqual(whatSev(preview)[0], ['err', 'New plan \'Cranks\', not live. Riders get no plan for this race yet.']);
+    assert.deepEqual(whatSev(preview).slice(0, 2), [['warn', 'Store: new plan \'Cranks\', not live. Riders get no plan for this race yet.'],
+        ['err', 'Cranks has no start time: riders on this plan get nothing.']]);
+    assert.ok(!whatHappens(preview).join(' ').includes('Riders get it') && !whatHappens(preview).join(' ').includes('within a minute'), whatHappens(preview).join('\n'));
     const body = await storeOk(srv, c.cookie, {team: 'cranks', json: planJson('Cranks', ['1012'])}, {live: '', date: DATE});
     const {kind, text} = storeFlash(body);
     assert.ok(kind === 'err' && text === 'Stored as v1 of \'Cranks\'. Not live, and the race has no start time: riders get nothing until it has one and a plan is live.', text);
@@ -632,28 +639,27 @@ test('assign page and result: a race without any start time is not promised a pl
     const again = await intake(srv, c.cookie, {team: 'cranks', json: planJson('Cranks', ['1012'])});
     const [[cid, cs]] = sheetsOf(srv, 'cranks');
     const same = (await assignOf(srv, again, `?team=cranks&as=${cs.plan ?? cid}&drawn=cranks:${cs.plan ?? cid}`)).body;
-    assert.deepEqual(whatSev(same).slice(0, 2), [['info', 'Same as v1: nothing new would be stored.'], ['err', 'Not live, and the race has no start time: riders get nothing until it has one and a plan is live.']]);
+    assert.deepEqual(whatSev(same)[0], ['warn', 'Store: same as v1, not live. Riders get no plan for this race yet.']);
+    assert.ok(!whatHappens(same).join(' ').includes('until you press Make live'));
 });
 
 
-test('assign page: redraw keeps or re-applies the box by drawn', async t => {
+test('assign page: a redraw keeps the plan drawn, and re-applies another team\'s defaults', async t => {
     const c = makeClub();
     const live = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: live, json: planJson('Rollers fast', ROLLERS.slice(1))});
-    assert.equal(liveChecked((await assignOf(srv, id)).body), true, 'the default');
-    // the same team and plan as drawn, the box left off: it stays off
+    // the same team and plan as drawn: kept, with both buttons
     const kept = (await assignOf(srv, id, `?team=rollers&as=${live}&drawn=rollers:${live}&type=fast`)).body;
     assert.deepEqual(checkedOf(kept, 'as'), [live]);
-    assert.equal(liveChecked(kept), false);
-    assert.match(kept, /<button class="btn primary" type="submit" form="store-[^"]+" data-submit>Store<\/button>/);
-    assert.match(whatHappens(kept)[0], /^Stored as v2 of 'Rollers · fast', not live\. Riders keep 'Rollers · fast' v1\.$/);
-    // another team: its defaults (Sprockets has no plan: a new plan, live)
+    assert.ok(barButtons(kept), kept);
+    assert.deepEqual(whatHappens(kept), ['No pull watts in this plan: export it from ZwiftGopher with pull power.']);
+    // another team: its defaults (Sprockets has no plan: a new plan); nothing live there, so its
+    // Make live asks nothing
     const other = (await assignOf(srv, id, `?team=sprockets&as=${live}&drawn=rollers:${live}`)).body;
     assert.deepEqual(checkedOf(other, 'team'), ['sprockets']);
     assert.deepEqual(checkedOf(other, 'as'), ['new']);
-    assert.equal(liveChecked(other), true);
-    assert.ok(other.includes('<label><input type="checkbox" name="live" value="on" checked> Make live: riders get this plan; this race has no live plan yet</label>'), other);
+    assert.ok(barButtons(other) && !other.includes('data-arm-open data-submit="live"'), other);
     assert.ok(other.includes('<input type="hidden" name="drawn" value="sprockets:new">'));
     assert.ok(other.includes('<input type="date" name="date" value="2026-11-19">'), 'a new plan has a date field');
 });
@@ -684,7 +690,7 @@ test('assign page: the preview counts against the parse budget', async t => {
     assert.deepEqual(flashOf(body), {kind: 'err', text: BUDGET});
     assert.equal(inboxOf(srv).length, 1);
     // Store does not count: it still works
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
     assert.equal(res.status, 303, res.body);
     // ten minutes later: allowed again
     srv.clock.now = NOW + 10 * 60000;
@@ -704,7 +710,7 @@ test('assign page: the type field, its suggestions, and never the JSON name', as
     assert.ok(body.includes('<label class="field">Type <input name="type" maxlength="30" value="" list="types" autocomplete="off"></label>'), body);
     assert.ok(body.includes('<datalist id="types"><option value="fast"><option value="slow"></datalist>'), body);
     // never the JSON name in the form (the row above it names the planner's team, team cockpit spec §5.2)
-    assert.ok(!element(body, '<div class="cp-pick"').includes('Rollers Thunder'), 'never the JSON name');
+    assert.ok(!element(body, '<div class="cp-form"').includes('Rollers Thunder'), 'never the JSON name');
     assert.ok(textOf(body).includes('Optional, e.g. fast, slow. Add one now if a second plan may follow. No rider names.'), textOf(body));
     // a typeless plan in the race: a new plan needs a type
     const typeless = await storeOk(srv, c.cookie, {team: 'rollers', json: planJson('Rollers Thunder', ROLLERS.slice(0, 5))}, {as: 'new', live: '', type: '', date: DATE});
@@ -725,10 +731,10 @@ test('assign page: the type field, its suggestions, and never the JSON name', as
     assert.ok(textOf(res.body).includes('Stored as v2 of \'Rollers\', not live.'), textOf(res.body));
     // a taken type, in other letters
     const third = await intake(srv, c.cookie, fields);
-    res = await storePost(srv, c.cookie, third, {team: 'rollers', as: 'new', type: 'FAST', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
+    res = await storePost(srv, c.cookie, third, {team: 'rollers', as: 'new', type: 'FAST', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
     assert.equal(res.status, 400);
     assert.deepEqual(flashOf(res.body), {kind: 'err', text: 'Rollers already has a plan \'FAST\' for Thu 19 Nov: choose another type.'});
-    res = await storePost(srv, c.cookie, third, {team: 'rollers', as: 'new', type: 'steady', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
+    res = await storePost(srv, c.cookie, third, {team: 'rollers', as: 'new', type: 'steady', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
     assert.equal(res.status, 303, res.body);
     assert.match(storeFlash(res.body).text, /'Rollers · steady' v1 is live for Thu 19 Nov 19:30\. Plan code [A-Z0-9]{6}\./);
     assert.ok(!element(res.body, '<div id="panel"').includes('Rollers Thunder'));
@@ -763,12 +769,11 @@ test('store: a refusal keeps the entry', async t => {
     // the refusal page shows what was posted: no plan, though the entry came from fast's page
     const from = await intake(srv, c.cookie, {team: 'rollers', forPlan: fast, json: planJson('Rollers slow', ROLLERS.slice(3))});
     assert.deepEqual(checkedOf((await assignOf(srv, from)).body, 'as'), [fast], 'preselected on the page');
-    const none = await storePost(srv, c.cookie, from, {team: 'rollers', live: 'on', type: 'fast', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:'});
+    const none = await storePost(srv, c.cookie, from, {team: 'rollers', live: 'on', confirm: '1', type: 'fast', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:'});
     assert.equal(none.status, 400);
     assert.deepEqual(flashOf(none.body), {kind: 'err', text: 'Pick a plan.'});
     assert.deepEqual(checkedOf(none.body, 'as'), []);
-    assert.equal(liveChecked(none.body), false);
-    assert.ok(none.body.includes('<label><input type="checkbox" name="live" value="on"> Make live (pick a plan first)</label>'), none.body);
+    assert.ok(barButtons(none.body), none.body);
     // after S + 4 h of today's race
     srv.clock.now = T('2026-11-19T22:30:00.001Z');
     await refused({as: 'new', date: DATE}, 'The race on 2026-11-19 is over: choose a later date.');
@@ -787,7 +792,7 @@ test('store: a team or plan changed without a redraw stores nothing and redraws'
     // for Rollers' new plan, so nothing is stored
     const file = storedClub(srv);
     const res = await storePost(srv, c.cookie, id, {
-        team: 'sprockets', as: 'new', live: 'on', type: '', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new', touched: '', event: '',
+        team: 'sprockets', as: 'new', live: 'on', confirm: '1', type: '', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new', touched: '', event: '',
     });
     assert.equal(res.status, 400, res.body);
     assert.deepEqual(flashOf(res.body), {kind: 'err', text: 'Check the choices: the preview was for another team or plan.'});
@@ -801,7 +806,7 @@ test('store: a team or plan changed without a redraw stores nothing and redraws'
     assert.deepEqual(whatHappens(res.body), ['Pick a plan.']);
     // the same plan choice as drawn: stored, with no false "Someone changed"
     const ok = await storePost(srv, c.cookie, id, {
-        team: 'sprockets', as: sp, live: 'on', base: VERSION_OF(srv, 'sprockets'), drawn: `sprockets:${sp}`, touched: '', event: '',
+        team: 'sprockets', as: sp, live: 'on', confirm: '1', base: VERSION_OF(srv, 'sprockets'), drawn: `sprockets:${sp}`, touched: '', event: '',
     });
     assert.equal(ok.status, 303, ok.body);
     assert.ok(!textOf(ok.body).includes('Someone changed'), textOf(ok.body));
@@ -811,7 +816,7 @@ test('store: a team or plan changed without a redraw stores nothing and redraws'
     assert.equal(sheetsOf(srv, 'rollers').length, 0);
     // a missing drawn counts as another choice
     const id2 = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers new', ROLLERS)});
-    const bare = await storePost(srv, c.cookie, id2, {team: 'rollers', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers')});
+    const bare = await storePost(srv, c.cookie, id2, {team: 'rollers', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers')});
     assert.equal(bare.status, 400);
     assert.deepEqual(flashOf(bare.body), {kind: 'err', text: 'Check the choices: the preview was for another team or plan.'});
     assert.equal(sheetsOf(srv, 'rollers').length, 0);
@@ -823,7 +828,7 @@ test('assign page: the outcome without a start time', async t => {
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'cranks', json: planJson('Cranks', ['1001', '1002'])});
     const lines = whatHappens((await assignOf(srv, id)).body);
-    assert.equal(lines[0], 'New plan \'Cranks\', live.');
+    assert.equal(lines.some(l => l.startsWith('Make live:')), false, lines.join('\n'));
     assert.ok(lines.includes('Cranks has no start time: riders on this plan get nothing.'), lines.join('\n'));
     const body = (await assignOf(srv, id)).body;
     assert.match(body, /<li class="err"><svg[^>]*>[\s\S]*?<\/svg><span>Cranks has no start time: riders on this plan get nothing\.<\/span><\/li>/);
@@ -835,7 +840,7 @@ test('assign page: the outcome without a start time', async t => {
     // a new version of the live plan
     const next = await intake(srv, c.cookie, {team: 'cranks', forPlan: plan, json: planJson('Cranks', ['1002', '1001'])});
     const v2 = whatHappens((await assignOf(srv, next)).body);
-    assert.equal(v2[0], 'v2 of \'Cranks\', live.');
+    assert.equal(v2.some(l => l.startsWith('Make live:')), false, v2.join('\n'));
     assert.ok(v2.includes('Cranks has no start time: riders on this plan get nothing.'));
 });
 
@@ -845,7 +850,7 @@ test('store twice: the second finds no entry', async t => {
     const live = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: live, json: planJson('Rollers fast', ROLLERS.slice(1))});
-    const fields = {team: 'rollers', as: live, live: 'on', type: 'fast', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: '', event: ''};
+    const fields = {team: 'rollers', as: live, live: 'on', confirm: '1', type: 'fast', base: VERSION_OF(srv, 'rollers'), drawn: `rollers:${live}`, touched: '', event: ''};
     const first = await storePost(srv, c.cookie, id, fields);
     assert.equal(first.status, 303, first.body);
     assert.equal(sheetsOf(srv, 'rollers').length, 2);
@@ -939,7 +944,7 @@ test('Store flash: the version, the diff in the table, upload for the hole team 
     assert.ok(textOf(element(body, `<li class="cp-row" data-sel="v:${live}">`)).includes('Ben out'), body);
     // the hole's upload carries its race (races Task 7)
     assert.deepEqual(flash.links, [[`/manage/upload?team=sprockets&plan=${sp}&date=2026-11-19`, 'Upload for Sprockets']]);
-    // no "Wrong file?": Undo or Make live of the version before undoes it (spec §4.1)
+    // no "Wrong file?" and no Undo: Make live of the version before takes it back (spec §4.1; user, 23 Nov 2026)
     assert.ok(!textOf(body).includes('Wrong file?') && !element(body, '<div id="panel"').includes('/manage/plan/back'), body);
 
     // with two plans in Sprockets' race the link leaves the plan out: the captain picks
@@ -962,8 +967,8 @@ test('assign page: one team, no picker', async t => {
     assert.ok(!body.includes('name="team" value="rollers" checked'));
     assert.ok(!/<input type="radio" name="team"/.test(body));
     assert.ok(!body.includes('Other team'));
-    assert.equal(textOf(element(body, '<div class="cp-pick"')).includes('Team'), false, 'the page\'s own team: no line repeats it');
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', date: DATE, type: '', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new', touched: '', event: ''});
+    assert.equal(textOf(element(body, '<div class="cp-form"')).includes('Team'), false, 'the page\'s own team: no line repeats it');
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', confirm: '1', date: DATE, type: '', base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new', touched: '', event: ''});
     assert.equal(res.status, 303, res.body);
     assert.ok(liveId(srv.store.get(CID), 'rollers'));
 });
@@ -1072,7 +1077,7 @@ test('upload: stored, not live', async t => {
     assert.equal(liveId(club, 'rollers'), live);
     const [[id]] = sheetsOf(srv, 'rollers').filter(([i]) => i !== live);
     // Make live for the new version in the panel: past the gate it asks first, in its place (the Make live rule)
-    const ask = armOf(element(body, '<div id="panel-body"'), '/manage/live') ?? '';
+    const ask = armOf(element(body, '<div id="panel-acts"'), '/manage/live') ?? '';
     assert.ok(textOf(ask).includes('Riders in the event get \'Rollers · slow\' v1 instead of \'Rollers · fast\' v1 within a minute.'), textOf(ask));
     assert.ok(armHas(ask, '/manage/live', `<input type="hidden" name="team" value="rollers"><input type="hidden" name="sheet" value="${id}"><input type="hidden" name="version" value="${VERSION_OF(srv, 'rollers')}">`, 'btn primary small', 'Make live'), body);
     assert.ok(!flash.all.includes('is live'));
@@ -1081,7 +1086,7 @@ test('upload: stored, not live', async t => {
     const none = storeFlash(noneBody);
     // red at once, with Make live in the panel (spec §8)
     assert.deepEqual([none.kind, none.text], ['err', 'Stored as v1 of \'Sprockets\'. Not live: riders get nothing until you press Make live.']);
-    assert.ok(armOf(element(noneBody, '<div id="panel-body"'), '/manage/live'), noneBody);
+    assert.ok(armOf(element(noneBody, '<div id="panel-acts"'), '/manage/live'), noneBody);
     assert.equal(liveId(srv.store.get(CID), 'sprockets'), null);
 });
 
@@ -1178,7 +1183,7 @@ test('upload: event link', async t => {
     assert.ok(page.body.includes('name="event" maxlength="300" inputmode="url" autocomplete="off" value="https://example.org/x"'), page.body);
     // Store with it: refused, nothing stored, the entry stays
     const file = storedClub(srv);
-    const res = await storePost(srv, c.cookie, id, {team: 'sprockets', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'sprockets'), drawn: 'sprockets:new', event: 'https://example.org/x'});
+    const res = await storePost(srv, c.cookie, id, {team: 'sprockets', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'sprockets'), drawn: 'sprockets:new', event: 'https://example.org/x'});
     assert.equal(res.status, 400);
     assert.deepEqual(flashOf(res.body), {kind: 'err', text: 'This is not a Zwift or ZwiftPower event link.'});
     assert.ok(res.body.indexOf('class="flash err"') < res.body.indexOf('data-assign'));
@@ -1207,7 +1212,7 @@ test('upload: paste', async t => {
     const entry = inboxOf(srv).at(-1);
     assert.deepEqual([entry.via, entry.text], ['paste', null]);
     assert.equal(res.headers.get('location'), `/manage/team/sprockets?e=${entry.id}#panel`);
-    const stored = await storePost(srv, c.cookie, entry.id, {team: 'sprockets', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'sprockets'), drawn: 'sprockets:new'});
+    const stored = await storePost(srv, c.cookie, entry.id, {team: 'sprockets', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'sprockets'), drawn: 'sprockets:new'});
     assert.equal(stored.status, 303, stored.body);
     const after = srv.store.get(CID);
     assert.equal(after.sheets[liveId(after, 'sprockets')].via, 'paste');
@@ -1304,7 +1309,7 @@ test('upload: at most 20 import warnings, then how many more', async t => {
     const lines = whatHappens((await assignOf(srv, id)).body);
     assert.equal(lines.filter(l => l.endsWith('from the text export is not in the JSON.')).length, 20);
     assert.equal(lines.at(-1), '… and 5 more import warnings.');
-    const stored = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
+    const stored = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
     assert.equal(stored.status, 303, stored.body);
     const body = stored.body;
     assert.equal(count(body, 'from the text export is not in the JSON.'), 20);
@@ -1505,7 +1510,7 @@ test('upload: the body and the shape of each file are capped before any parse', 
     const entry = inboxOf(srv).find(e => e.id === id);
     assert.equal(Object.keys(entry.json.riders).length, 40);
     // and it stores
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', live: 'on', confirm: '1', date: DATE, base: VERSION_OF(srv, 'rollers'), drawn: 'rollers:new'});
     assert.equal(res.status, 303, res.body);
     const club = srv.store.get(CID);
     assert.equal(Object.keys(club.sheets[liveId(club, 'rollers')].json.riders).length, 40);
@@ -1687,25 +1692,32 @@ const pushedEntry = srv => srv.store.change(CID, c => receiveEntry(c, {team: 'ro
     {now: FRI, newId: () => randomId(6)}));
 
 
-test('a pushed plan with two races ahead: the race choice before the plans, the nearest checked, the box off', async t => {   // [Review Focus 5]
+test('a pushed plan with two races ahead: every race\'s plans in "Store as"; a new plan\'s race fold has the race radios, the nearest checked', async t => {   // [Review Focus 5]
     const {srv} = await twoRaces(t);
     const id = pushedEntry(srv);
-    const page = (await assignOf(srv, id)).body;
+    // its planner name matches Sunday's plan: that version, the plans of both races listed with their
+    // days, no race radio (a version takes its plan's race, user 23 Nov 2026)
+    const version = (await assignOf(srv, id)).body;
+    assert.deepEqual(checkedOf(version, 'as').length, 1);
+    assert.ok(textOf(version).includes('Sun 22 Nov · live · v1') && textOf(version).includes('Thu 26 Nov · v1'), textOf(version));
+    assert.ok(!version.includes('name="race"'), version);
+    const page = (await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new')).body;
     const radios = [...page.matchAll(/<input type="radio" name="race" value="([^"]+)"( checked)?>/g)].map(m => [m[1], Boolean(m[2])]);
     assert.deepEqual(radios, [['2026-11-22', true], ['2026-11-26', false]]);
-    assert.ok(page.indexOf('name="race"') < page.indexOf('name="date"', page.indexOf('<div class="cp-pick"')));
-    assert.equal(/<input type="checkbox" name="live" value="on" checked>/.test(page), false);
-    // the radios come before the plans, each with its day and time and how many plans it has
+    // in the race fold, before the date field: each with its day and time and how many plans it has
+    const fold = element(page, '<details class="fold as-race"');
+    assert.ok(fold.indexOf('name="race"') > 0 && fold.indexOf('name="race"') < fold.indexOf('type="date"'), fold);
+    assert.ok(barButtons(page), page);
     const fieldset = /<fieldset class="choices"><legend>Race<\/legend>[\s\S]*?<\/fieldset>/.exec(page)?.[0] ?? '';
     assert.deepEqual(textOf(fieldset).trim(), 'Race Sun 22 Nov · 18:00 1 plan Thu 26 Nov · 19:30 1 plan');
-    assert.ok(page.indexOf('<legend>Race</legend>') < page.indexOf('<legend>Store as</legend>'), page);
+    assert.ok(page.indexOf('<legend>Store as</legend>') < page.indexOf('<legend>Race</legend>'), page);
     // the page says which race it was drawn for
     assert.ok(page.includes('<input type="hidden" name="startFor" value="2026-11-22">'), page);
     // one race ahead: no choice
     const one = makeClub();
     upload(one.club, 'rollers', {riders: ROLLERS, at: T('2026-11-18T10:00:00Z'), date: '2026-11-26'});
     const lone = await serve(t, one, {now: FRI});
-    const solo = (await assignOf(lone, pushedEntry(lone))).body;
+    const solo = (await assignOf(lone, pushedEntry(lone), '?team=rollers&as=new&drawn=rollers:new')).body;
     assert.ok(!solo.includes('name="race"'), solo);
     assert.ok(solo.includes('<input type="hidden" name="startFor" value="2026-11-26">'), solo);
 });
@@ -1757,10 +1769,11 @@ function assignFields(body) {
 
 
 test('Store from a page drawn before the race\'s start time changed stores nothing and redraws (final review I-2)', async t => {
-    // Sun 22 Nov 18:00 with its live plan; the assign page of a pushed plan is drawn at 18:00
+    // Sun 22 Nov 18:00 with its live plan; the assign page of a pushed plan is drawn at 18:00, for a
+    // new plan (a version takes its plan's race and posts no time, user 23 Nov 2026)
     const {c, srv, sun} = await twoRaces(t);
     const id = pushedEntry(srv);
-    const page = (await assignOf(srv, id)).body;
+    const page = (await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&type=tempo')).body;
     const drawn = assignFields(page);
     assert.equal(drawn.start, '18:00');
     assert.equal(drawn.startWas, '18:00', 'the page carries the race start it was drawn with');
@@ -1793,71 +1806,84 @@ test('Store from a page drawn before the race\'s start time changed stores nothi
 });
 
 
-test('Store from a page drawn before the team\'s time changed, for a race on the rhythm, stores nothing and redraws (user, 22 Nov 2026)', async t => {
-    // Thu 26 Nov has no time of its own: the form is drawn with the team's 19:30
+test('Store from a page drawn before the team\'s time changed: a race already made keeps its time; one stored before times were pinned stores nothing and redraws (user, 22 and 23 Nov 2026)', async t => {
+    // Thu 26 Nov was made at the team's 19:30, pinned as its own (user, 23 Nov 2026)
     const {c, srv} = await twoRaces(t);
+    assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-26'].start, '19:30');
     const id = pushedEntry(srv);
     const drawn = assignFields((await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-26&startFor=2026-11-26&type=tempo')).body);
     assert.deepEqual([drawn.start, drawn.startWas], ['19:30', '19:30']);
-    // the team's time is changed to 20:00 meanwhile (the race follows it)
+    // the team's time is changed to 20:00 meanwhile: the race keeps 19:30, so the page is not stale
     srv.store.change(CID, cl => setStart(cl, 'rollers', '20:00', FRI));
+    const kept = await storePost(srv, c.cookie, id, drawn);
+    assert.equal(kept.status, 303, kept.body);
+    assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-26'].start, '19:30');
+    // a race stored before times were pinned follows the team's time: a page drawn with the old one is stale
+    srv.store.change(CID, cl => {
+        cl.teams.rollers.races['2026-11-26'].start = null;
+    });
+    const id2 = pushedEntry(srv);
+    const old = assignFields((await assignOf(srv, id2, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-26&startFor=2026-11-26&type=easy')).body);
+    assert.deepEqual([old.start, old.startWas], ['20:00', '20:00']);
+    srv.store.change(CID, cl => setStart(cl, 'rollers', '20:15', FRI));
     const file = storedClub(srv);
-    const stale = await storePost(srv, c.cookie, id, drawn);
+    const stale = await storePost(srv, c.cookie, id2, old);
     assert.equal(stale.status, 400, stale.body);
     assert.deepEqual(flashOf(stale.body), {kind: 'err', text: 'Check the choices: the race\'s start time was changed meanwhile.'});
     assert.equal(storedClub(srv), file, 'nothing stored');
-    assert.ok([undefined, null].includes(srv.store.get(CID).teams.rollers.races['2026-11-26'].start), 'the race is not pinned to 19:30');
+    assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-26'].start, null, 'the race is not pinned to 20:00');
     assert.equal(inboxOf(srv).length, 1);
-    // redrawn with the time as it is now; that form stores, and the race stays on the rhythm
+    // redrawn with the time as it is now; that form stores it as the race's own
     const again = assignFields(stale.body);
-    assert.deepEqual([again.start, again.startWas], ['20:00', '20:00']);
-    const stored = await storePost(srv, c.cookie, id, again);
+    assert.deepEqual([again.start, again.startWas], ['20:15', '20:15']);
+    const stored = await storePost(srv, c.cookie, id2, again);
     assert.equal(stored.status, 303, stored.body);
-    assert.ok([undefined, null].includes(srv.store.get(CID).teams.rollers.races['2026-11-26'].start));
+    assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-26'].start, '20:15');
 });
 
 
 test('Store: a start time the captain typed on a page that is not stale still moves the race (final review I-2)', async t => {
     const {c, srv} = await twoRaces(t);
     const id = pushedEntry(srv);
-    const drawn = assignFields((await assignOf(srv, id)).body);
+    const drawn = assignFields((await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&type=tempo')).body);
     assert.equal(drawn.startWas, '18:00');
     const res = await storePost(srv, c.cookie, id, {...drawn, start: '17:30'});
     assert.equal(res.status, 303, res.body);
     assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-22'].start, '17:30');
     // a typed time on a GET redraw of a page that is not stale stays in the field
     const id2 = pushedEntry(srv);
-    const fields = assignFields((await assignOf(srv, id2)).body);
+    const fields = assignFields((await assignOf(srv, id2, '?team=rollers&as=new&drawn=rollers:new&type=easy')).body);
     assert.equal(fields.startWas, '17:30');
     assert.equal(assignFields((await assignOf(srv, id2, `?${new URLSearchParams({...fields, start: '17:45'})}`)).body).start, '17:45');
 });
 
 
-test('assign: the Store form\'s start time is prefilled, the race\'s own else the team\'s, with no hint (user, 22 Nov 2026)', async t => {
+test('assign: the Store form\'s start time is prefilled, the race\'s own else the team\'s, required, with no hint (user, 22 and 23 Nov 2026)', async t => {
     const {srv} = await twoRaces(t);
     const id = pushedEntry(srv);
     const draw = async d => (await assignOf(srv, id, `?team=rollers&as=new&drawn=rollers:new&date=${d}&startFor=${d}`)).body;
-    const field = body => /<label class="field">Start time(<input type="time" name="start"[^>]*>)(<span class="hint">[^<]*<\/span>)?<\/label>/.exec(element(body, '<div class="cp-pick"'));
-    // Sun 22 Nov has its own 18:00, Thu 26 Nov follows the rhythm (19:30), Thu 3 Dec has no race yet
+    const field = body => /<label class="field">Start time(<input type="time" name="start"[^>]*>)(<span class="hint">[^<]*<\/span>)?<\/label>/.exec(element(body, '<div class="cp-form"'));
+    // Sun 22 Nov has its own 18:00, Thu 26 Nov its 19:30 (the team's when it was made), Thu 3 Dec has
+    // no race yet (the team's time, pinned by Store); required, so a cleared field is no "team's time"
+    // (user, 23 Nov 2026)
     for (const [date, time] of [['2026-11-22', '18:00'], ['2026-11-26', '19:30'], ['2026-12-03', '19:30']]) {
         const body = await draw(date);
         const m = field(body);
         assert.ok(m, `${date}: the field`);
-        assert.equal(m[1], `<input type="time" name="start" value="${time}">`, date);
+        assert.equal(m[1], `<input type="time" name="start" value="${time}" required>`, date);
         assert.equal(m[2], undefined, `${date}: no hint under the time`);
         assert.equal(assignFields(body).start, time, date);
         for (const gone of ['Empty: ', 'A time here is', 'keeps this race']) {
-            assert.equal(element(body, '<div class="cp-pick"').includes(gone), false, `${date}: ${gone}`);
+            assert.equal(element(body, '<div class="cp-form"').includes(gone), false, `${date}: ${gone}`);
         }
     }
-    // a new version: the plan's date, the same prefill for its race (Sun: its own; Thu: the team's)
+    // a new version takes its plan's race (user, 23 Nov 2026): no date or time field at all
     const sheets = Object.entries(srv.store.get(CID).sheets);
-    for (const [date, time] of [['2026-11-22', '18:00'], ['2026-11-26', '19:30']]) {
+    for (const date of ['2026-11-22', '2026-11-26']) {
         const [vid, v] = sheets.find(([, sh]) => sh.date === date);
         const body = (await assignOf(srv, id, `?team=rollers&as=${v.plan}&drawn=rollers:${v.plan}`)).body;
-        assert.ok(element(element(body, '<div class="cp-pick"'), '<div class="as-when">').includes(`<input type="date" value="${date}" readonly>`), vid);
-        assert.equal(field(body)[1], `<input type="time" name="start" value="${time}">`, `version of ${date}`);
-        assert.equal(field(body)[2], undefined, `version of ${date}: no hint`);
+        assert.equal(field(body), null, vid);
+        assert.equal(element(body, '<div class="cp-form"').includes('as-when'), false, vid);
     }
 });
 
@@ -1877,10 +1903,10 @@ test('assign: the prefilled start time follows the date; a time typed for the dr
 });
 
 
-test('Store: the prefilled team time stores no time of its own and moves nothing; the race\'s own time stays (user, 22 Nov 2026)', async t => {
+test('Store: the prefilled time is stored as the race\'s own and moves nothing; the race\'s own time stays (user, 22 and 23 Nov 2026)', async t => {
     const {c, srv} = await twoRaces(t);
     const drawn = async (id, d, type) => assignFields((await assignOf(srv, id, `?team=rollers&as=new&drawn=rollers:new&date=${d}&startFor=${d}&type=${type}`)).body);
-    // Thu 26 Nov follows the rhythm: the form carries the team's 19:30 and Store keeps the race on it
+    // Thu 26 Nov was made at the team's 19:30: the form carries it and Store keeps it
     const thuId = pushedEntry(srv);
     const thu = await drawn(thuId, '2026-11-26', 'tempo');
     assert.equal(thu.start, '19:30');
@@ -1889,7 +1915,7 @@ test('Store: the prefilled team time stores no time of its own and moves nothing
     const a = await storePost(srv, c.cookie, thuId, thu);
     assert.equal(a.status, 303, a.body);
     assert.equal(textOf(a.body).includes('now starts at'), false);
-    assert.ok([undefined, null].includes(srv.store.get(CID).teams.rollers.races['2026-11-26'].start), 'no time of its own');
+    assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-26'].start, '19:30');
     assert.equal(srv.store.get(CID).teams.rollers.races['2026-11-22'].start, '18:00');
     // Sun 22 Nov has its own 18:00: the form carries it, Store keeps it, nothing moves
     const sunId = pushedEntry(srv);
@@ -1914,10 +1940,10 @@ test('assign: a weekly team\'s time and link in the form, and the form says what
         + '&event=https%3A%2F%2Fwww.zwift.com%2Fevents%2Fview%2F5123456&type=tempo';
     const {body} = await assignOf(srv, id, q);
     // in the form, not folded (the team cockpit): the date, the start time with its hint, the event link
-    const more = element(body, '<div class="cp-pick"') ?? '';
+    const more = element(body, '<div class="cp-form"') ?? '';
     assert.ok(more.includes('<input type="date" name="date" value="2026-11-22">'), more);
     // the race has a time of its own (the typed one wins in the field); no hint under the time
-    assert.ok(more.includes('<label class="field">Start time<input type="time" name="start" value="17:00"></label>'), more);
+    assert.ok(more.includes('<label class="field">Start time<input type="time" name="start" value="17:00" required></label>'), more);
     assert.ok(more.includes('name="event"'), more);
     // the race radios name the race; no line repeats the race or the link typed (team cockpit spec
     // §5.3b: the date and the link are in their fields)
@@ -1926,22 +1952,25 @@ test('assign: a weekly team\'s time and link in the form, and the form says what
     assert.ok(!body.includes('class="as-row"'), 'no race line naming the race again');
     // the rhythm date has no time of its own: the field shows the team's (user, 22 Nov 2026), no hint
     const rhythm = (await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-26&startFor=2026-11-26&type=tempo')).body;
-    assert.ok(rhythm.includes('<label class="field">Start time<input type="time" name="start" value="19:30"></label>'), rhythm);
+    assert.ok(rhythm.includes('<label class="field">Start time<input type="time" name="start" value="19:30" required></label>'), rhythm);
     const lines = whatHappens(body);
     assert.ok(lines.includes('Race on Sun 22 Nov now starts at 17:00 (was 18:00). \'Rollers\' moves with it.'), JSON.stringify(lines));
     const link = lines.find(l => l.startsWith('Race on Sun 22 Nov now has event link 5123456.')) ?? '';
     assert.ok(link.startsWith('Race on Sun 22 Nov now has event link 5123456. \'Rollers\' moves with it.'), JSON.stringify(lines));
-    // the link is the race's: its live plan follows it, so riders already in another event get nothing
-    assert.ok(link.includes('Riders in another event then get nothing from \'Rollers\', the race\'s live plan.'), link);
+    // What happens follows Make live (user, 23 Nov 2026): the new plan becomes the race's live plan,
+    // so no line about the plan live there now (the Store result says it, below)
+    assert.equal(link, 'Race on Sun 22 Nov now has event link 5123456. \'Rollers\' moves with it.', JSON.stringify(lines));
     // a field drawn without a typed time: the race's own
     assert.ok((await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-22&startFor=2026-11-22')).body
-        .includes('<input type="time" name="start" value="18:00">'));
+        .includes('<input type="time" name="start" value="18:00" required>'));
     // Store: the race starts then and has the link; the live plan stays
     const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: 'new', drawn: 'rollers:new', base: VERSION_OF(srv, 'rollers'),
         date: '2026-11-22', startFor: '2026-11-22', start: '17:00', event: 'https://www.zwift.com/events/view/5123456', type: 'tempo'});
     assert.equal(res.status, 303, res.body);
     const r = srv.store.get(CID).teams.rollers.races['2026-11-22'];
     assert.deepEqual([r.start, r.pinnedEventId, r.live], ['17:00', 5123456, sun]);
+    // the link is the race's: its live plan follows it, so riders already in another event get nothing
+    assert.ok(storeFlash(res.body).all.includes('Riders in another event then get nothing from \'Rollers\', the race\'s live plan.'), storeFlash(res.body).all);
     // an emptied field keeps the race's own time (review I2)
     const blank = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers easy', ROLLERS.slice(0, 5))});
     const kept = await storePost(srv, c.cookie, blank, {team: 'rollers', as: 'new', drawn: 'rollers:new', base: VERSION_OF(srv, 'rollers'),
@@ -1956,17 +1985,17 @@ test('assign: one race ahead: no race line; the date, the time and the link in t
     upload(c.club, 'rollers', {riders: ROLLERS, at: T('2026-11-18T10:00:00Z'), date: '2026-11-26', pinned: 4567890});
     const srv = await serve(t, c, {now: FRI});
     const id = await intake(srv, c.cookie, {team: 'rollers', json: planJson('Rollers tempo', ROLLERS.slice(0, 6))});
-    const form = async q2 => element((await assignOf(srv, id, q2)).body, '<div class="cp-pick"');
+    const form = async q2 => element((await assignOf(srv, id, q2)).body, '<div class="cp-form"');
     const q = '?team=rollers&as=new&drawn=rollers:new&date=2026-11-26&startFor=2026-11-26&type=tempo';
     const plain = await form(q);
     // (the race line "Race Thu 26 Nov 19:30 · event link 4567890" went, review M7's facts stay in the fields)
     assert.equal(/class="as-row"|Race Thu 26 Nov/.test(plain), false, plain);
     assert.ok(plain.includes('<input type="date" name="date" value="2026-11-26">'), plain);
-    assert.ok(plain.includes('<label class="field">Start time<input type="time" name="start" value="19:30"></label>'), plain);
+    assert.ok(plain.includes('<label class="field">Start time<input type="time" name="start" value="19:30" required></label>'), plain);
     assert.ok(plain.includes('<span class="hint">This race&#39;s event link now: 4567890</span>'), plain);
     // a time and a link typed: in their fields; the race's link still says what the race has now
     const typed = await form(`${q}&start=20:00&event=https%3A%2F%2Fwww.zwift.com%2Fevents%2Fview%2F5123456`);
-    assert.ok(typed.includes('<input type="time" name="start" value="20:00">'), typed);
+    assert.ok(typed.includes('<input type="time" name="start" value="20:00" required>'), typed);
     assert.ok(typed.includes('value="https://www.zwift.com/events/view/5123456">'), typed);
     assert.ok(typed.includes('<span class="hint">This race&#39;s event link now: 4567890</span>'), typed);
     // an emptied date and Store: the date is asked for, not a redraw for another race (review M3)
@@ -1992,14 +2021,14 @@ test('assign: a race choice whose date matches no radio: the date in its field, 
     let {body} = await assignOf(srv, id, q);
     assert.ok(body.includes('name="race"'), 'still a race choice');
     assert.deepEqual(checkedOf(body, 'race'), []);
-    const form = element(body, '<div class="cp-pick"');
+    const form = element(body, '<div class="cp-form"');
     assert.ok(form.includes('<input type="date" name="date" value="2026-12-03">'), form);
-    assert.ok(form.includes('<input type="time" name="start" value="19:30">') && !form.includes('Empty:'), form);
+    assert.ok(form.includes('<input type="time" name="start" value="19:30" required>') && !form.includes('Empty:'), form);
     assert.equal(/class="as-row"|Race Thu 3 Dec/.test(form), false, form);
     // a checked radio: the same, the date in its field
     ({body} = await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-22&startFor=2026-11-22&type=tempo'));
     assert.deepEqual(checkedOf(body, 'race'), ['2026-11-22']);
-    assert.ok(element(body, '<div class="cp-pick"').includes('<input type="date" name="date" value="2026-11-22">'));
+    assert.ok(element(body, '<div class="cp-form"').includes('<input type="date" name="date" value="2026-11-22">'));
     assert.equal(body.includes('class="as-row"'), false);
 });
 
@@ -2020,7 +2049,7 @@ test('upload page: a plan of a race that is over is no "new version of" (M9)', a
 });
 
 
-test('assign: a new plan for a race with an event link shows it; the same file with a new link says so', async t => {
+test('assign: a new plan for a race with an event link shows it; a version takes its race\'s link as it is (user, 23 Nov 2026)', async t => {
     const {c, srv, sun} = await twoRaces(t);
     srv.store.change(CID, cl => {
         race(cl, 'rollers', '2026-11-22').pinnedEventId = 4567890;
@@ -2029,13 +2058,15 @@ test('assign: a new plan for a race with an event link shows it; the same file w
     const {body} = await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new&date=2026-11-22&startFor=2026-11-22');
     // (a race choice: the radios name the race, the hint under the link field its link)
     assert.ok(body.includes('<span class="hint">This race&#39;s event link now: 4567890</span>'), body);
-    // the live plan's own file again with another link: nothing new stored, but the line about the link
+    // the live plan's own file again, a link sent along (a page from before): a version has no link
+    // field and changes no link, so nothing happens at all
     const same = srv.store.get(CID).sheets[sun];
     const again = await intake(srv, c.cookie, {team: 'rollers', json: same.json});
     const page = await assignOf(srv, again, `?team=rollers&as=${sun}&drawn=rollers:${sun}&startFor=2026-11-22&event=https%3A%2F%2Fwww.zwift.com%2Fevents%2Fview%2F5123456`);
     const lines = whatHappens(page.body);
-    assert.ok(lines[0].startsWith('Same as v1'), JSON.stringify(lines));
-    assert.ok(lines.includes('Race on Sun 22 Nov now has event link 5123456 (was 4567890).'), JSON.stringify(lines));
+    assert.deepEqual(lines, ['No pull watts in this plan: export it from ZwiftGopher with pull power.'], JSON.stringify(lines));
+    assert.ok(!lines.some(l => l.includes('event link')), JSON.stringify(lines));
+    assert.ok(!element(page.body, '<div class="cp-form"').includes('name="event"'));
 });
 
 
@@ -2059,7 +2090,8 @@ test('upload page: the JSON only; a file for a race carries its date to the assi
     assert.equal(up.status, 303, await up.text());
     const entry = inboxOf(srv).at(-1);
     assert.equal(entry.forDate, '2026-11-26');
-    const assign = (await assignOf(srv, entry.id)).body;
+    // (a new plan: its race fold has the race radios; a version takes its plan's race)
+    const assign = (await assignOf(srv, entry.id, '?team=rollers&as=new&drawn=rollers:new')).body;
     assert.deepEqual(checkedOf(assign, 'race'), ['2026-11-26']);
     assert.ok(assign.includes('<input type="hidden" name="startFor" value="2026-11-26">'), assign);
     // a refusal keeps the date in the form and its action
@@ -2285,7 +2317,7 @@ test('club settings: targets in W/kg or watts', async t => {
     assert.equal(club.targetUnit, 'watts');
     assert.deepEqual(club.log.filter(e => e.what === 'unit').map(e => e.label), ['watts']);
     assert.ok(textOf(saved.page).includes('Targets in Watts'), textOf(saved.page));
-    assert.deepEqual(teams(), before, 'a display setting: no team changes its version (its Undo stays)');
+    assert.deepEqual(teams(), before, 'a display setting: no team changes its version');
     // the same again, or a form without the field (a page from before it): nothing changes
     let file = storedClub(srv);
     for (const fields of [{unit: 'watts'}, {}]) {
@@ -2462,6 +2494,7 @@ test('every action needs same origin and a principal', async t => {
     const routes = [
         ['/manage/live', {team: 'rollers', sheet: live, confirm: '1'}],
         ['/manage/undo', {team: 'rollers', version}],
+        ['/manage/live/undo', {team: 'rollers', version, confirm: '1'}],
         ['/manage/plan/back', {team: 'rollers', plan: live, n: '1', version}],
         ['/manage/sheet/delete', {team: 'rollers', sheet: live, confirm: '1'}],
         ['/manage/sheet/unpin', {team: 'rollers', sheet: live}],
@@ -3045,17 +3078,19 @@ test('several clubs: the footer switches to the other club, names the club in Lo
 
 // ---- wave 1 review fixes (UI panel, 19 Nov 2026) ----
 
-test('before the gate: the live box, the version preview and the result say when riders get it (review M2, M5)', async t => {
+test('before the gate: the result says when riders get it, and Make live asks nothing (review M2, M5)', async t => {
     const c = makeClub();
     const v1 = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS, at: T('2026-11-19T14:00:00Z')});
     // 17:00 in Berlin: Rollers starts 19:30, its gate opens 19:00
     const srv = await serve(t, c, {now: T('2026-11-19T16:00:00Z')});
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: v1, json: planJson('Rollers fast', ROLLERS.slice(1))});
     const {body} = await assignOf(srv, id);
-    assert.ok(body.includes('<label><input type="checkbox" name="live" value="on" checked> Make live: from 19:00, riders get v2 instead of v1</label>'), body);
+    assert.ok(barButtons(body) && !body.includes('data-arm-strip data-for'), body);
     assert.ok(!textOf(body).includes('at once'), textOf(body));
-    assert.equal(whatHappens(body)[0], 'v2 of \'Rollers · fast\', live for Thu 19 Nov 19:30. Riders get it from 19:00.');
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: v1, type: 'fast', live: 'on', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${v1}`});
+    // the card says only what warns (user, 23 Nov 2026: no "What happens"); the result says when
+    assert.equal(whatHappens(body).some(l => l.startsWith('Make live:')), false, whatHappens(body).join('\n'));
+    // before the gate Make live acts at once, without confirm (user, 23 Nov 2026)
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: v1, type: 'fast', live: 'on', confirm: '1', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${v1}`});
     assert.equal(res.status, 303, res.body);
     assert.ok(textOf(res.body).includes('\'Rollers · fast\' v2 is live for Thu 19 Nov 19:30.'), textOf(res.body));
     assert.ok(textOf(res.body).includes('Riders get it from 19:00.'), textOf(res.body));
@@ -3071,7 +3106,7 @@ test('the same file made live: "(was …)" names only a plan live for the same r
     const fast = upload(c.club, 'rollers', {type: 'fast', riders: ROLLERS.slice(1), at: T('2026-11-19T14:00:00Z'), live: false, json});
     const srv = await serve(t, c);
     const id = await intake(srv, c.cookie, {team: 'rollers', forPlan: fast, json});
-    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: fast, type: 'fast', live: 'on', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${fast}`});
+    const res = await storePost(srv, c.cookie, id, {team: 'rollers', as: fast, type: 'fast', live: 'on', confirm: '1', base: String(VERSION_OF(srv, 'rollers')), drawn: `rollers:${fast}`});
     assert.equal(res.status, 303, res.body);
     assert.equal(liveId(srv.store.get(CID), 'rollers', DATE), fast);
     assert.ok(liveId(srv.store.get(CID), 'rollers', '2026-11-12') !== null, 'last week\'s race keeps its own (live per race)');
@@ -3279,3 +3314,14 @@ test('POST /manage/race when: the question names every plan, the new gate (only 
 });
 
 
+
+
+test('assign: a weekly team without any start time: the time field empty and not required, the fold open (user, 23 Nov 2026)', async t => {
+    const c = makeClub({teams: [['Rollers', null]]});
+    const srv = await serve(t, c, {now: FRI});
+    const id = pushedEntry(srv);
+    const body = (await assignOf(srv, id, '?team=rollers&as=new&drawn=rollers:new')).body;
+    const form = element(body, '<div class="cp-form"');
+    assert.ok(form.includes('<input type="time" name="start" value="">'), form);
+    assert.ok(/<details class="fold as-race" open>/.test(form), form);
+});

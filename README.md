@@ -334,15 +334,12 @@ taller or wider and they grow (new in 0.3.4-beta.3):
   middle, the time left of your pull in seconds on the right (`110`, `s`; amber in the last 10
   seconds, over time it runs on below zero in amber, `−4`). Below is the power
   bar: the middle line is your target, green is within 5 % of it, amber within 10 %, red beyond.
-  The marker is your filtered power: single spikes in Zwift's power are thrown out, small wobbles
-  are smoothed over several seconds, and a real change (more than 5 % of the target) moves it at
-  once (new in 0.3.5). So it stays calm while you ride on target, a drop of 10 % shows after about
-  a second, and when you push back it is back a second later, instead of still showing the drop.
-  It glides from one second to the next. Its colour is the zone it stands in; right at a zone's
-  edge it keeps its colour until it is 1 % past the edge, so it does not flicker there. In the first seconds of
-  your pull, while you ramp up, the marker stays white. The number in the middle is the marker's
-  value (the same filtered power; the marker glides there within a second), in the marker's colour; kept small on
-  purpose, so the
+  The marker is your filtered power: single spikes in Zwift's power are thrown out, the rest is
+  smoothed over a few seconds, and the marker only moves once that is more than 2 % (about 5 W)
+  away from where it stands. So it keeps still while you ride on target, and a real drop of 10 %
+  shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
+  while you ramp up, the marker stays white. The number in the middle is the marker's value (the
+  same filtered power, so they always agree), in the marker's colour; kept small on purpose, so the
   bar stays what you ride by and the number only confirms it. Without pull watts in the plan
   (neither in the JSON nor from a text export) there is no target, so you see `–` as the target,
   your power now, the time and a plain grey bar.

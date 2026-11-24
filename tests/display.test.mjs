@@ -28,28 +28,23 @@ function view(now, front, selfId = '5100002') {
 }
 
 test('markerStep: median, smoothing, restart after a gap and at a pull start', () => {
-    assert.deepEqual([D.MEDIAN_N, D.POWER_TAU_S, D.SNAP_PCT, D.ZONE_HYST_PCT], [3, 6, 5, 1]);
+    assert.deepEqual([D.MEDIAN_N, D.POWER_TAU_S, D.DEADBAND_PCT], [5, 4, 2]);
     let m = D.markerStep(D.initialMarker(), {at: 0, w: 200, pull: null});
     assert.equal(m.w, 200); assert.equal(m.zone, null);
-    m = D.markerStep(m, {at: 1000, w: 210, pull: null});
-    assert.equal(m.w, 200 + 5 / 6);                           // median 205: within 5 % of it, smoothed
+    m = D.markerStep(m, {at: 1000, w: 300, pull: null});
+    assert.equal(m.w, 212.5);                                 // median 250, 200 + (250 - 200) / 4
     assert.equal(D.markerStep(m, {at: 2000, w: NaN, pull: null}), m);
-    assert.equal(D.markerPower(m, 1000 + D.POWER_KEEP_MS), m.w);
+    assert.equal(D.markerPower(m, 1000 + D.POWER_KEEP_MS), 212.5);
     assert.equal(D.markerPower(m, 1001 + D.POWER_KEEP_MS), null);
     // After a gap it starts over.
     assert.equal(D.markerStep(m, {at: 7000, w: 250, pull: null}).w, 250);
-    // My pull starts: it starts over with the pull's first sample (without the restart the median
-    // of 290 290 280 would keep it at 290: no snap within 5 %).
-    m = D.initialMarker();
-    for (let t = 0; t < 10; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 290, pull: null});
-    }
-    m = D.markerStep(m, {at: 10000, w: 280, pull: {since: 9500, target: 280}});
-    assert.equal(m.w, 280); assert.equal(m.pullSince, 9500);
+    // My pull starts: it starts over with the pull's first sample.
+    m = D.markerStep(m, {at: 2000, w: 280, pull: {since: 1500, target: 280}});
+    assert.equal(m.w, 280); assert.equal(m.pullSince, 1500);
 });
 
 
-test('markerStep: a single spike does not move the marker, a few watts either way only a little', () => {
+test('markerStep: a single spike does not move the marker, a few watts either way neither', () => {
     const pull = {since: 0, target: 280};
     let m = D.initialMarker();
     for (let t = 0; t < 20; t++) {
@@ -58,15 +53,14 @@ test('markerStep: a single spike does not move the marker, a few watts either wa
     assert.equal(m.w, 280); assert.equal(m.zone, 'green');
     m = D.markerStep(m, {at: 20000, w: 520, pull});              // one Zwift spike
     assert.equal(m.w, 280);
-    for (let t = 21; t < 60; t++) {                               // +-5 W: no snap, green throughout
+    for (let t = 21; t < 60; t++) {                               // +-5 W: inside the 2 % deadband
         m = D.markerStep(m, {at: t * 1000, w: t % 2 ? 285 : 275, pull});
-        assert.ok(Math.abs(m.w - 280) < 3, `near the target at ${t}: ${m.w}`);
-        assert.equal(m.zone, 'green', `green at ${t}`);
+        assert.equal(m.w, 280, `still at ${t}`);
     }
 });
 
 
-test('markerStep: neutral at the start of a pull; a 12 % drop is red within 2 s', () => {
+test('markerStep: neutral at the start of a pull; a 10 % drop is coloured within a few seconds', () => {
     assert.equal(D.PULL_SETTLE_S, 5);
     const pull = {since: 0, target: 280};
     let m = D.initialMarker();
@@ -78,90 +72,18 @@ test('markerStep: neutral at the start of a pull; a 12 % drop is red within 2 s'
         m = D.markerStep(m, {at: t * 1000, w: 280, pull});
     }
     assert.equal(m.zone, 'green');
+    // 12 % short from 40 on: amber after a few seconds, then red.
     const zones = [];
-    for (let t = 40; t < 50; t++) {
+    for (let t = 40; t < 60; t++) {
         m = D.markerStep(m, {at: t * 1000, w: 246, pull});
         zones.push(m.zone[0]);
     }
-    assert.equal(zones.join(''), 'grrrrrrrrr');
-    // Without a target or outside a pull: neutral; it snaps by 5 % of my own power.
-    assert.equal(D.markerStep(m, {at: 50000, w: 280, pull: {since: 0, target: null}}).zone, null);
-    let off = D.markerStep(m, {at: 50000, w: 300, pull: null});
-    off = D.markerStep(off, {at: 51000, w: 300, pull: null});   // median 300, 54 W away: snapped
-    assert.equal(off.zone, null); assert.equal(off.w, 300);
-});
-
-
-test('markerStep: a 5 s dip of 10 % shows after 1 s and is gone 1 s after the rider is back (user, 23 Nov 2026)', () => {
-    const pull = {since: 0, target: 300};
-    let m = D.initialMarker();
-    for (let t = 0; t < 20; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 300, pull});
-    }
-    const ws = [];
-    for (let t = 20; t < 32; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: t < 25 ? 270 : 300, pull});
-        ws.push(Math.round(m.w));
-    }
-    // 270 W from second 20 to 24, 300 W again from 25: the old filter showed 293 293 283 283 283
-    // 283 283 283 290 ... (lowest after 4 s, still there 3 s after the rider was back).
-    assert.deepEqual(ws, [300, 270, 270, 270, 270, 270, 300, 300, 300, 300, 300, 300]);
-});
-
-
-test('markerStep: READY (no pull yet, the marker against my target): coming up to the target shows within 2 s', () => {
-    let m = D.initialMarker();
-    for (let t = 0; t < 20; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 210, pull: null});
-    }
-    const ws = [];
-    for (let t = 20; t < 24; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 300, pull: null});
-        ws.push(Math.round(m.w));
-    }
-    assert.deepEqual(ws, [210, 300, 300, 300]);    // before 0.3.5: 249 after 3 s, 279 after 6 s
-});
-
-
-test('markerStep: the marker stands at the filtered power (no deadband); its colour is the zone, held 1 % past an edge', () => {
-    const pull = {since: 0, target: 300};
-    let m = D.initialMarker();
-    const hold = (w, n = 60) => {
-        for (let i = 0; i < n; i++) {
-            m = D.markerStep(m, {at: (m.at ?? -1000) + 1000, w, pull});
-        }
-        return m;
-    };
-    hold(300);
-    assert.equal(m.zone, 'green');
-    hold(297, 1); hold(297, 1);                    // a few watts move it (no deadband), no snap
-    assert.ok(m.w < 300 && m.w > 297, String(m.w));
-    // Down to the green/amber edge (5 % = 285) and past it: green until 6 % (282), then amber.
-    assert.equal(hold(284).zone, 'green');         // 5.3 %: still green
-    assert.equal(hold(281).zone, 'amber');         // 6.3 %
-    assert.equal(hold(286).zone, 'amber');         // 4.7 %: amber until 4 %
-    assert.equal(hold(289).zone, 'green');         // 3.7 %
-    // A pull that starts off target takes the plain zone.
-    m = D.markerStep(m, {at: m.at + 1000, w: 284, pull: {since: m.at + 500, target: 300}});
-    for (let t = 0; t < 6; t++) {
-        m = D.markerStep(m, {at: m.at + 1000, w: 284, pull: {since: m.pullSince, target: 300}});
-    }
-    assert.equal(m.zone, 'amber');                 // 5.3 % without a colour before: amber
-});
-
-
-test('markerStep: a 10 % dip is amber while short and green when back', () => {
-    const pull = {since: 0, target: 300};
-    let m = D.initialMarker();
-    for (let t = 0; t < 20; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 300, pull});
-    }
-    const zones = [];
-    for (let t = 20; t < 30; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: t < 25 ? 270 : 300, pull});
-        zones.push(m.zone[0]);
-    }
-    assert.equal(zones.join(''), 'gaaaaaggggg'.slice(0, 10));
+    assert.match(zones.join(''), /^g{2,4}a+r+$/);
+    assert.ok(zones.indexOf('a') <= 5, zones.join(''));
+    // Without a target or outside a pull: neutral, and no deadband.
+    assert.equal(D.markerStep(m, {at: 61000, w: 280, pull: {since: 0, target: null}}).zone, null);
+    const off = D.markerStep(m, {at: 61000, w: 250, pull: null});
+    assert.equal(off.zone, null); assert.notEqual(off.w, m.w);
 });
 
 

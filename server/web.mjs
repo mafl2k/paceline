@@ -319,10 +319,25 @@ export function zoneOk(cfg, tz, current = null) {
     return isZone(tz) && (ZONES.has(tz) || tz === 'UTC' || tz === cfg.tz || tz === current);
 }
 
+// The zones most clubs race in (user, 23 Nov 2026), first in the select, in this order: Western,
+// Central and Eastern Europe, the US, Australia, Japan, UTC. Only those the runtime knows are shown
+// (the runtime's own names stay: a stored zone must keep working).
+const COMMON_ZONES = ['Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam', 'Europe/Madrid', 'Europe/Helsinki',
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Australia/Sydney', 'Asia/Tokyo', 'UTC'];
+
+// The time zone select: a group "Common" (COMMON_ZONES), then "All zones" (zoneOptions); `selected`
+// is selected once, where it first stands.
 export function zoneSelect(cfg, selected, current = null) {
-    const options = zoneOptions(cfg, current)
-        .map(z => `<option value="${esc(z)}"${z === selected ? ' selected' : ''}>${esc(z)}</option>`).join('');
-    return `<select name="tz" required>${options}</select>`;
+    const all = zoneOptions(cfg, current);
+    let done = false;
+    const option = z => {
+        const on = !done && z === selected;
+        done ||= on;
+        return `<option value="${esc(z)}"${on ? ' selected' : ''}>${esc(z)}</option>`;
+    };
+    const common = COMMON_ZONES.filter(z => all.includes(z)).map(option).join('');
+    const rest = all.map(option).join('');
+    return `<select name="tz" required><optgroup label="${esc(t('tz-common'))}">${common}</optgroup><optgroup label="${esc(t('tz-all'))}">${rest}</optgroup></select>`;
 }
 
 
@@ -391,7 +406,8 @@ const PLANNER_URL = 'https://zwiftgopher.com/TTT/';
 function homePage() {
     const ext = (href, key) => `<a href="${href}" rel="noopener noreferrer">${esc(t(key))}</a>`;
     const intro = th('home-intro', {paceline: ext(PACELINE_URL, 'home-paceline'), planner: ext(PLANNER_URL, 'home-planner')});
-    const logo = `<img class="home-logo" src="${logoHref}" alt="Paceline" width="512" height="512">`;
+    // the hand-drawn banner (docs/images/banner.png at 832 x 260), as wide as the card under it
+    const logo = `<img class="home-logo" src="${logoHref}" alt="Paceline" width="832" height="260">`;
     return publicPage(logo + card(t('home-title'), `<p class="prose">${intro}</p>
     <div class="btnrow">
       <a class="btn primary block" href="/register">${ic('plus')}${esc(t('home-register'))}</a>

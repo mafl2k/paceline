@@ -1,15 +1,16 @@
 // The club settings /manage/settings (spec §5.2 "Club section", §5.4): the club's name and zone
 // (races spec §4c: every weekly team has its own race day) and the unit of the pull targets (team
-// cockpit spec §7), who gets the plans (open, or private with the rider code), sign-in (the masked
-// address with Change e-mail, a new club link), Remove a rider; then the "Records" band: the recordings per rider file with the quota, grouped by team
-// and the session's local day, the activity (the newest entries, the rest folded), and Delete
-// club. The page never reloads itself. A new rider code, Make private, Remove a rider and (with a race within 7 days)
+// cockpit spec §7), who gets the plans (open, or private with the rider code; only when it can
+// change), sign-in (the masked address with Change e-mail, a new club link); then the "Records"
+// band: the recordings per rider file with the quota, grouped by team and the session's local day,
+// the activity (the newest entries, the rest folded), Remove a rider; and Delete club (user, 23 Nov
+// 2026: that order; every hint one line, the rest in a closed "More" fold). The page never reloads itself. A new rider code, Make private, Remove a rider and (with a race within 7 days)
 // another zone ask first in their place (UI panel wave 2), and the server asks without the script.
 // Also the rider code page, the answer of /manage/code that shows the code once. Pure: it
 // reads the club and the recordings it is given, and the clock is passed in. Every value goes
 // through esc().
 import {esc, t, maskAddress, retentionText} from './pages.mjs';
-import {captainPage, th, flashBlock, hidden, postForm, armForm, sevLine, placeNav, footer} from './ui.mjs';
+import {captainPage, th, flashBlock, hidden, postForm, armForm, sevLine, placeNav, footer, moreFold} from './ui.mjs';
 import {ic} from './icons.mjs';
 import {atLabel, nameOf, raceWithin} from './team-view.mjs';
 import {isPrivate} from './club.mjs';
@@ -66,9 +67,13 @@ function clubCard(club, cfg, typed, now) {
 
 
 // Open or private, and what the captain can do about it. Without CODE_SECRET no code can be made,
-// but a club still private can be made open (F11).
+// but a club still private can be made open (F11); an open club then has nothing to change, so the
+// card goes (user, 23 Nov 2026: it would only say that private clubs are off).
 function whoCard(club, cfg, now) {
     const priv = isPrivate(club);
+    if (!cfg.codeSecret && !priv) {
+        return '';
+    }
     const off = postForm('/manage/code', {action: 'off'}, t('private-off'), {cls: 'btn secondary', icon: 'users'});
     const out = [priv ? sevLine('neutral', 'lock', t('private-private')) : sevLine('neutral', 'users', t('private-open'))];
     if (!cfg.codeSecret) {
@@ -79,7 +84,7 @@ function whoCard(club, cfg, now) {
     } else if (priv) {
         const at = Date.parse(club.riderCode.setAt);
         if (Number.isFinite(at)) {
-            out.push(`<p class="hint">${esc(t('cs-code-made', {at: atLabel(at, now, club.tz)}))}</p>`);
+            out.push(`<p class="hint">${esc(t('cs-code-made', {at: atLabel(at, now, club.tz)}))}</p>${moreFold(t('cs-code-more'), t('ui-more-about', {topic: t('cs-who')}))}`);
         }
         out.push(`<div class="btnrow">
       ${armForm('/manage/code', {action: 'new', setAt: club.riderCode.setAt}, {key: 'code-new', button: t('cs-new-code'), cls: 'btn secondary danger-text',
@@ -107,9 +112,9 @@ function signInCard(club) {
       <label class="field">${esc(t('manage-email-label'))}<input type="email" name="email" maxlength="254" required autocomplete="email" placeholder="name@example.org"></label>
       <button class="btn primary" type="submit">${esc(t('manage-email-button'))}</button>
     </form>
-    <p class="hint">${esc(t('cs-email-hint'))}</p>
+    <p class="hint">${esc(t('cs-email-hint'))}</p>${moreFold(t('cs-email-more'), t('ui-more-about', {topic: t('manage-email-label')}))}
     ${postForm('/manage/newlink', {}, t('manage-newlink'), {cls: 'btn secondary block', icon: 'link'})}
-    <p class="hint">${esc(t('cs-newlink-hint'))}</p>
+    <p class="hint">${esc(t('cs-newlink-hint'))}</p>${moreFold(t('cs-newlink-more'), t('ui-more-about', {topic: t('manage-newlink')}))}
   </section>`;
 }
 
@@ -125,7 +130,7 @@ function riderCard(club) {
     <h2 id="rm-h">${esc(t('rider-heading'))}</h2>
     ${armForm('/manage/rider/remove', {}, {key: 'rider', body: field, button: t('rider-button'), cls: 'btn secondary danger-text', formCls: 'inline-form',
         wordsHtml: th('rider-confirm', {who, club: esc(club.name)}), yes: t('rider-yes'), yesCls: 'btn danger'})}
-    <p class="hint">${esc(t('rider-hint'))}</p>
+    <p class="hint">${esc(t('rider-hint'))}</p>${moreFold(t('rider-more'), t('ui-more-about', {topic: t('rider-heading')}))}
   </section>`;
 }
 
@@ -185,7 +190,7 @@ function recordingsCard(club, cfg, {files, bytes}) {
     <ul class="recs">
       ${items.join('\n      ')}
     </ul>
-    <p class="hint">${esc(retentionText('rec-hint', cfg.logRetentionDays))}</p>
+    <p class="hint">${esc(retentionText('rec-hint', cfg.logRetentionDays))}</p>${moreFold(t('rec-more'), t('ui-more-about', {topic: t('rec-heading')}))}
   </section>`;
 }
 
@@ -253,20 +258,23 @@ function dangerZone(club, recordings) {
 // ({name}, as posted) fills the club form again after a refused rename. `seen` and `others`:
 // captainPage's; the footer at the end of the page shows on phones only (the sidebar has it from
 // 1024 px); from 1024 px the breadcrumb names the club above the title (the back bar does on
-// phones).
+// phones). From 1180 px (user, 23 Nov 2026) the page has the team page's width and its cards flow
+// into as many columns as fit (.setcols, CSS columns, in the page's order down each column; a card
+// never splits; below 1180 px the box gives its cards to the page), the danger zone last at the
+// whole width.
 export function settingsPage(club, {now, seen, others = [], cfg, recordings, flash = null, typed = null}) {
     const nav = placeNav(club, [{label: t('tp-club-settings')}]);
-    const main = `<main class="page" id="main">
+    const main = `<main class="page settings" id="main">
   ${nav.crumbs}
   <header class="pagehead"><h1>${esc(t('tp-club-settings'))}</h1></header>
   ${flashBlock(flash)}
-  ${clubCard(club, cfg, typed, now)}
-  ${whoCard(club, cfg, now)}
-  ${signInCard(club)}
-  ${riderCard(club)}
+  <div class="setcols">
+  ${[clubCard(club, cfg, typed, now), whoCard(club, cfg, now), signInCard(club)].filter(Boolean).join('\n  ')}
   <h2 class="band">${esc(t('cs-records'))}</h2>
   ${recordingsCard(club, cfg, recordings)}
   ${activityCard(club, now)}
+  ${riderCard(club)}
+  </div>
   ${dangerZone(club, recordings)}
   ${footer({club: club.name, others})}
 </main>`;

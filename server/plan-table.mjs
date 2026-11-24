@@ -7,7 +7,8 @@
 // and the clock is passed in. The model is plain text; planTable escapes it.
 import {esc, t} from './pages.mjs';
 import {th} from './ui.mjs';
-import {diffVersions, diffSummary, positive, rawRider} from './diff.mjs';
+import {positive, rawRider} from './diff.mjs';
+import {versionName} from './plans.mjs';
 import {datePicks} from './select.mjs';
 import {raceOf} from './races.mjs';
 import {dateDay} from './team-view.mjs';
@@ -74,8 +75,8 @@ export function raceBase(club, slug, date) {
 
 
 // What version `id` of team `slug` is marked against: its race's live version ('live'); the live
-// version itself against nothing ('self': the plan as riders get it, no old lines, also within the
-// Undo window after a switch, team cockpit spec §5.3b); 'none' without a live version (or without
+// version itself against nothing ('self': the plan as riders get it, no old lines, also right after a
+// switch, team cockpit spec §5.3b); 'none' without a live version (or without
 // version `id`).
 export function tableBase(club, slug, id) {
     const sheet = storedSheet(club, id);
@@ -179,11 +180,11 @@ export function tableModel(club, sheet, base, {now}) {
     });
     lines.push(...atEnd);
 
-    const baseText = samePlan ? t('pt-base', {n: older.n}) : t('pt-base-plan', {label: older.label, n: older.n});
-    const targetOf = (sh, r) => shownTarget(club, sh, r);
-    const caption = marked
-        ? `${t('pt-against', {base: baseText})} · ${diffSummary(diffVersions(club, older, sheet, now, {targetOf}))}`
-        : t('pt-same', {base: baseText});
+    // the caption names what the table is held against, "Against live v3" (another plan of the team:
+    // "Against live 'fast' v3"); what changed the table marks itself, so the caption does not repeat
+    // it (user, 23 Nov 2026: "Hanna in, Ben out" over a table with Hanna NEW and Ben crossed out)
+    const baseText = samePlan ? t('pt-base', {n: older.n}) : t('pt-base-plan', {name: versionName(older.type, older.n)});
+    const caption = marked ? t('pt-against', {base: baseText}) : t('pt-same', {base: baseText});
     return {state: marked ? 'diff' : 'same', caption, unit, lines};
 }
 

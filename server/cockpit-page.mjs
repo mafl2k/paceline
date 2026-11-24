@@ -1,26 +1,30 @@
 // The team page /manage/team/<slug>, the team cockpit (team cockpit spec §5.1-§5.3b, §6, §8): the
-// frame (the switch bar, breadcrumb, title with Team settings, rhythm line, the ways to a plan,
+// frame (the switch bar, title with Team settings, the ways to a plan (no breadcrumb and no rhythm
+// line: the sidebar and the race's line say them, user 23 Nov 2026),
 // "Updated", the DST banner), then one grid .cp of the page's slots in this order in the document:
 // #panel (the flash and the top of the card), .cp-list (the list per race: the plans not stored yet,
 // the plans in their fixed order, their versions, the races that are over, "How races work") and
-// #panel-body (the card's body: the rider table, what happens, the action bar). The card shows what is
+// #panel-body (the card's body: the rider table, a received plan's Store form, what happens, the
+// action bar). Every row of the list is a link alone, with no form beside it (user, 23 Nov 2026), so
+// the list never changes height when something is picked. The card shows what is
 // picked, and with nothing picked the nearest race's live version (spec §5.3b), its row marked. From
 // 1180 px the list is the left column and the card the right one; below that they stack, the card
 // right after the nearest race, and a picked row opens it as a sheet (body.has-sel, §5.5). Every row
-// is a plain link to the page with that selection (`?v=` / `?e=`, #panel); the script swaps the three
+// is a plain link to the page with that selection (`?v=` / `?e=`, #panel); the script swaps the two
 // slots in place from the fragment (cockpitFragment), drawn by the same function. Pure: it reads the
 // club and the checks it is given, and the clock is passed in. Every value goes through esc().
 import {esc, t} from './pages.mjs';
-import {captainPage, teamRows, withClub, freshLine, placeNav, dstBanner, sevLine, th} from './ui.mjs';
+import {captainPage, teamRows, withClub, freshLine, dstBanner, sevLine, th} from './ui.mjs';
 import {ic} from './icons.mjs';
 import {refreshDue, WAITING_REFRESH_S, plannerHref, teamShare} from './team-view.mjs';
 import {
-    cockpitPath, switchBar, rhythmLine, raceHead, notesHtml, noStartHtml, headActs, emptyHtml, racesHelpHtml, planMenu,
-    makeLiveHtml, liveTag, planCode, undoBlock,
+    cockpitPath, switchBar, raceHead, notesHtml, noStartHtml, headActs, emptyHtml, racesHelpHtml, planMenu,
+    liveTag, phaseTag, racePhase, planCode,
 } from './team-page.mjs';
 import {cockpitView} from './cockpit-view.mjs';
 import {panelParts, pendingLine} from './cockpit-panel.mjs';
 import {tableModel, planTable, tableBase} from './plan-table.mjs';
+import {versionName, shownType} from './plans.mjs';
 import {resultHolds} from './store-form.mjs';
 import {localHHMM, dstChangedRecently} from './time.mjs';
 
@@ -39,7 +43,7 @@ const reloadDue = (club, view, now) => refreshDue(club, now) || view.received.le
 
 
 // What the page says while its slots hold its reload (Ruling I2 (b)): "Not updating while the Store
-// form is open · Refresh" (or "… this result is shown …"), the last thing in #panel-body, under the
+// form is open · Refresh" (or "… this result is shown …"), the last thing in #panel-acts, under the
 // card; Refresh is a plain link to the page with the same selection, which draws it again (the
 // one-shot result gone).
 function holdNote(view, path, kind) {
@@ -49,14 +53,15 @@ function holdNote(view, path, kind) {
 }
 
 
-// The three slots of the page (shapes), as markup: {kind, hold, panel, pick, body} (panelParts:
-// one card in every state). One function for the page and the fragment. #panel carries the body
-// state the slots imply, so the script sets the body's classes from a fragment as the page draws
-// them: data-kind (sel-e) and data-sel (the row the card shows, picked in the list: the selection's,
+// The slots of the page (shapes), as markup: {kind, hold, panel, body, acts} (panelParts: one card in
+// every state; `acts` #panel-acts, the card's actions, user 23 Nov 2026). One function for the page and the fragment. #panel carries the state the slots
+// imply, so the script marks the list from a fragment as the page draws it: data-kind (what the card
+// shows) and data-sel (the row the card shows, picked in the list: the selection's,
 // or with nothing picked the nearest race's live version; '' for none); data-result when it holds a
 // Store result (a phone's head then flows with the page, M3). `hold`: the slots hold the page's reload (an
 // open Store form, or a Store result with something to keep: resultHolds); while they do and the page
-// would reload (`reloads`), #panel-body ends with holdNote.
+// would reload (`reloads`), #panel-acts ends with holdNote (under the card at every width: below
+// 1180 px after the bar at the card's bottom, from 1180 px in the row under the card).
 function slotsOf(club, view, {now, path, flash, choices, preview, reloads}) {
     const parts = panelParts(club, view, {now, path, flash, choices, preview});
     const hold = parts.kind === 'entry' || resultHolds(flash);
@@ -65,8 +70,8 @@ function slotsOf(club, view, {now, path, flash, choices, preview, reloads}) {
         kind: parts.kind,
         hold,
         panel: `<div id="panel" data-kind="${esc(parts.kind)}" data-sel="${esc(parts.sel)}" tabindex="-1"${flash?.result ? ' data-result' : ''}>${parts.head}</div>`,
-        pick: parts.row,
-        body: `<div id="panel-body">${parts.body}${note}</div>`,
+        body: `<div id="panel-body">${parts.body}</div>`,
+        acts: `<div id="panel-acts">${parts.acts === '' ? '' : `<div class="cp-bar">${parts.acts}</div>`}${note}</div>`,
     };
 }
 
@@ -75,20 +80,21 @@ const chev = () => ic('right', 'chev');
 const linkAttrs = (href, picked) => `class="cp-link" href="${esc(href)}"${picked ? ' aria-current="true"' : ''}`;
 
 
-// One version's row: a link to the page with it picked ("v3 19:12 · live since 19:14 · 4/6 have it"
-// after the gate, "v2 18:55 · was live 18:57 · Hanna in, Ben out"); the live version's links to its
-// race's live pointer (`?r=<date>`), so a reload follows live; the newer version not live reads "v4
-// stored 19:20, not live" with its Make live beside the link; the row that offers the Undo of the last
-// switch has it beside the link, a plain POST form (data-row-undo), hidden while the card offers the
-// same Undo (the script shows and hides it on every swap).
-function versionRow(club, slug, r, {path, now}) {
+// One version's row: a link to the page with it picked ("v3 · 4/6 have it" after the gate, "v2 ·
+// Hanna in, Ben out"); the live version's links to its race's live pointer (`?r=<date>`), so a reload
+// follows live; the newer version not live reads "v4 · not live". Nothing beside the link (user, 23
+// Nov 2026): Make live is in the card's action bar, there is no Undo.
+function versionRow(r, {path, sent, phase = null, over = false}) {
     const cls = ['cp-row', r.live ? 'live' : '', r.picked ? 'picked' : ''].filter(Boolean).join(' ');
-    const first = r.notice ? t('cp-newer', {n: r.n, at: r.at}) : t('cp-row', {n: r.n, at: r.at});
-    const text = [first, r.liveLine, r.has, r.summary].filter(x => x !== null).join(' · ');
-    const make = r.notice ? makeLiveHtml(club, slug, r.id, {now, button: t('tp-make-newer-live', {n: r.n}), plain: t('tp-make-newer-live-now', {n: r.n}), sr: false}) : '';
-    const undo = r.undo ? `<div class="cp-row-undo" data-row-undo${r.undo === 'hidden' ? ' hidden' : ''}>${undoBlock(club, slug, now)?.form ?? ''}</div>` : '';
+    // the version's number and its status, no time (user, 23 Nov 2026: the card says when it was stored)
+    const first = r.notice ? t('cp-newer', {n: r.n}) : t('cp-row', {n: r.n});
+    const text = [first, r.has, r.summary].filter(x => x !== null).join(' · ');
+    // the live row's LIVE tag at its end ("Not sent" without a start time; grey under Over), not on
+    // the plan's head (a space before it: a screen reader reads "… have it Live", not "have itLive"),
+    // then the race's phase (phaseTag: "Sending", "Started"; user, 23 Nov 2026)
+    const tag = r.live ? ` ${liveTag({sent, over}).trim()}${phaseTag(phase)}` : '';
     const href = r.race === null ? `${path}?v=${r.id}#panel` : `${path}?r=${r.race}#panel`;
-    return `<li class="${cls}" data-sel="v:${esc(r.id)}"><a ${linkAttrs(href, r.picked)}><span class="cp-what">${esc(text)}</span>${chev()}</a>${make}${undo}</li>`;
+    return `<li class="${cls}" data-sel="v:${esc(r.id)}"><a ${linkAttrs(href, r.picked)}><span class="cp-what">${esc(text)}</span>${tag}${chev()}</a></li>`;
 }
 
 
@@ -98,14 +104,14 @@ const rowsList = (items, picked) => `<ul class="cp-rows${picked ? ' sel-rows' : 
 
 
 // "Not stored yet": the plans received from ZwiftGopher and the uploads of this race, newest first;
-// '' without any. `sfx` follows the heading's id ('-<date>' for a later race); `pick` the .cp-pick
-// slot, drawn inside the picked row.
-function pendingHtml(list, path, sfx, pick) {
+// '' without any. `sfx` follows the heading's id ('-<date>' for a later race). A picked one is a
+// plain picked row: its Store form is in the card.
+function pendingHtml(list, path, sfx) {
     if (!list.pending.length) {
         return '';
     }
     const items = list.pending.map(p => `<li class="cp-row${p.picked ? ' picked' : ''}" data-sel="e:${esc(p.id)}">`
-        + `<a ${linkAttrs(`${path}?e=${p.id}#panel`, p.picked)}><span class="cp-what">${esc(pendingLine(p))}</span>${chev()}</a>${p.picked ? pick : ''}</li>`);
+        + `<a ${linkAttrs(`${path}?e=${p.id}#panel`, p.picked)}><span class="cp-what">${esc(pendingLine(p))}</span>${chev()}</a></li>`);
     return `<section class="cp-pending" aria-labelledby="pending-h${esc(sfx)}"><h3 class="cp-sub" id="pending-h${esc(sfx)}">${esc(t('cp-pending'))}</h3>`
         + `${rowsList(items, list.pending.some(p => p.sheet))}</section>`;
 }
@@ -114,14 +120,13 @@ function pendingHtml(list, path, sfx, pick) {
 // The block of one plan: its tag (Live, or Not sent without a start time), its label and its ⋯
 // (planMenu: no Make live in it, every version row has it in the panel), then its versions newest
 // first, the older ones in a fold of links only (it keeps the reload).
-function planHtml(club, slug, p, {path, now, planner, sent}) {
-    const tag = p.live ? liveTag({sent}) : '';
-    const rows = p.shown.map(r => versionRow(club, slug, r, {path, now}));
+function planHtml(club, slug, p, {path, now, planner, sent, phase = null, over = false}) {
+    const rows = p.shown.map(r => versionRow(r, {path, sent, phase, over}));
     const n = p.older.length;
     const older = n === 0 ? '' : `<details class="fold cp-older" data-keep-refresh><summary>${esc(n === 1 ? t('cp-older-one') : t('cp-older', {n}))}</summary>`
-        + `${rowsList(p.older.map(r => versionRow(club, slug, r, {path, now})), p.older.some(r => r.sheet))}</details>`;
+        + `${rowsList(p.older.map(r => versionRow(r, {path, sent, phase, over})), p.older.some(r => r.sheet))}</details>`;
     return `<section class="cp-plan${p.live ? ' live' : ''}" id="plan-${esc(p.planId)}" aria-labelledby="plan-h-${esc(p.planId)}">
-      <div class="rowtop"><h3 class="cp-plan-head" id="plan-h-${esc(p.planId)}">${tag}<span class="label">${esc(p.label)}</span></h3>${planMenu(club, slug, p.planId, {now, planner})}</div>
+      <div class="rowtop"><h3 class="cp-plan-head" id="plan-h-${esc(p.planId)}"><span class="label">${esc(shownType(p.type))}</span></h3>${planMenu(club, slug, p.planId, {now, planner})}</div>
       ${rowsList(rows, p.shown.some(r => r.sheet))}${older}
     </section>`;
 }
@@ -134,12 +139,12 @@ const holdsPick = list => list.pending.some(p => p.sheet) || list.plans.some(p =
 // card as on the team page; then the plans not stored yet and the plans. A later race keeps its fold
 // with its notes and riders card (closed; it keeps the reload while it holds no form), or its
 // status without a live plan. `rv` is the race's raceView, `first` the nearest race.
-function raceHtml(club, view, list, rv, {first, path, now, planner, plannerLink, pick}) {
+function raceHtml(club, view, list, rv, {first, path, now, planner, plannerLink}) {
     const sfx = first ? '' : `-${list.date}`;
     const id = list.date === null || (first && view.regular) ? '' : ` id="race-${esc(list.date)}"`;
     const cls = `race cp-race${first ? '' : ' later'}${holdsPick(list) ? ' sel-race' : ''}`;
     const sent = rv.live ? rv.live.sent : true;
-    const plans = list.plans.map(p => planHtml(club, view.slug, p, {path, now, planner, sent}));
+    const plans = list.plans.map(p => planHtml(club, view.slug, p, {path, now, planner, sent, phase: racePhase(rv, now)}));
     const top = first ? `${notesHtml(club, rv, now)}${noStartHtml(club, rv, now)}${emptyHtml(rv, now, plannerLink)}` : '';
     let more = '';
     if (!first) {
@@ -153,7 +158,7 @@ function raceHtml(club, view, list, rv, {first, path, now, planner, plannerLink,
         }
     }
     return `<div class="${cls}"${id}>
-    ${raceHead(club, rv, now)}${top}${pendingHtml(list, path, sfx, pick)}
+    ${raceHead(club, rv, now)}${top}${pendingHtml(list, path, sfx)}
     ${plans.join('\n    ')}${more}
   </div>`;
 }
@@ -169,7 +174,7 @@ function overHtml(club, view, {path, now, planner}) {
     const open = view.overLists.some(holdsPick);
     const races = view.overLists.map(list => `<div class="race cp-race over${holdsPick(list) ? ' sel-race' : ''}" id="race-${esc(list.date)}">
       <p class="race"><span>${esc(list.day)}</span></p>
-      ${list.plans.map(p => planHtml(club, view.slug, p, {path, now, planner, sent: true})).join('\n      ')}
+      ${list.plans.map(p => planHtml(club, view.slug, p, {path, now, planner, sent: true, over: true})).join('\n      ')}
     </div>`);
     return `<details class="fold over" id="over" data-keep-refresh${open ? ' open' : ''}><summary>${esc(t('tp-over', {n: view.overLists.length}))}</summary>
     ${races.join('\n    ')}
@@ -205,7 +210,7 @@ function ridersCard(club, view, now, {sfx = ''} = {}) {
             : `<p class="hint">${esc(t(view.special ? 'tp-no-start-hint-special' : 'tp-no-start-hint'))}</p>`;
     }
     return `<section class="card riders-card" aria-labelledby="riders-h${esc(sfx)}">
-      <div class="card-head"><h2 id="riders-h${esc(sfx)}">${esc(t('tp-riders-on', {label: view.live.label}))}</h2><p class="count">${count}</p></div>
+      <div class="card-head"><h2 id="riders-h${esc(sfx)}">${esc(t('tp-riders-on', {name: versionName(view.live.type, view.live.n)}))}</h2><p class="count">${count}</p></div>
       ${planCode(view.live.sig)}
       ${planTable(model, {states})}
       ${hint}
@@ -231,21 +236,19 @@ export function cockpitPage(club, slug, {now, seen = {}, others = [], flash = nu
     const path = cockpitPath(slug);
     const here = `${path}${selQuery(sel)}`;
     const updated = localHHMM(now, club.tz);
-    const {crumbs} = placeNav(club, [{label: view.name}], {back: false});
     const race = refreshDue(club, now);
     const reload = refresh && reloadDue(club, view, now);
     const slots = slotsOf(club, view, {now, path, flash, choices, preview, reloads: reload});
     const races = view.lists.map((list, i) => raceHtml(club, view, list, view.races[i] ?? view,
-        {first: i === 0, path, now, planner, plannerLink, pick: slots.pick}));
+        {first: i === 0, path, now, planner, plannerLink}));
     const acts = headActs(view, plannerLink);
     // data-here: the page's own URL for what it drew, also when it answers a POST at another URL (a
     // refused Store at /manage/inbox/<id>): the script puts it in the address bar, so its redraws,
     // Back and its reload ask the cockpit, never the POST's URL
     const main = `<main class="page wide cockpit" id="main" data-tv="${esc(club.teams[slug].version)}" data-here="${esc(here)}">
-  ${crumbs}
   <header class="pagehead">
     <div class="teamhead"><p class="kicker">${esc(club.name)}</p><h1 class="desk">${esc(view.name)}</h1><a class="btn quiet small" href="${esc(settingsPath(slug))}">${ic('settings')}${esc(t('tp-settings'))}</a></div>
-    ${rhythmLine(club, view)}${acts ? `
+${acts ? `
     ${acts}` : ''}
     ${freshLine(updated, here)}
   </header>
@@ -253,10 +256,12 @@ export function cockpitPage(club, slug, {now, seen = {}, others = [], flash = nu
   <div class="cp">
   ${slots.panel}
   <div class="cp-list" role="region" aria-label="${esc(t('cp-list'))}">
-  ${races.join('\n  ')}
+  ${acts ? `<div class="cp-ways">${acts}</div>
+  ` : ''}${races.join('\n  ')}
   ${overHtml(club, view, {path, now, planner})}${racesHelpHtml()}
   </div>
   ${slots.body}
+  ${slots.acts}
   </div>
 </main>`;
     // every 30 s around a race; else every 60 s while plans from ZwiftGopher wait; the selection
@@ -264,13 +269,13 @@ export function cockpitPage(club, slug, {now, seen = {}, others = [], flash = nu
     // holds it ([data-hold-reload]) and lets it go once a swap takes the form or the result away, so
     // the page keeps data-refresh but has no meta refresh (without the script nothing could hold it).
     // has-sel only for a selection in the URL (a phone's sheet); the card nothing picked draws is no sheet
-    const cls = ['teampage', 'cockpit', sel.kind !== 'none' ? 'has-sel' : '', slots.kind === 'entry' ? 'sel-e' : ''].filter(Boolean).join(' ');
+    const cls = ['teampage', 'cockpit', sel.kind !== 'none' ? 'has-sel' : ''].filter(Boolean).join(' ');
     return captainPage(club, {now, seen, others, here: `/manage/team/${slug}`, herePage: true, rows, bar: switchBar(club, view, rows, now), main,
         cls, refresh: reload ? here : null, refreshS: race ? 30 : WAITING_REFRESH_S, noscript: !slots.hold, updated, needsScript: 'cp-needs-js'});
 }
 
 
-// The three slots alone (shapes: #panel, .cp-pick, #panel-body, in this order), as the whole page
+// The slots alone (shapes: #panel, #panel-body, #panel-acts, in this order), as the whole page
 // draws them, club field included: the answer to the script's panel fetch. Never the
 // one-shot flash (the next whole page shows it); `flash` is only a refusal drawn now (the parse
 // budget's). An open Store form carries data-hold-reload in it, so the script can tell on each swap,
@@ -278,5 +283,5 @@ export function cockpitPage(club, slug, {now, seen = {}, others = [], flash = nu
 export function cockpitFragment(club, slug, {now, seen = {}, sel, choices = null, preview = null, flash = null}) {
     const view = cockpitView(club, slug, {now, seen, sel});
     const s = slotsOf(club, view, {now, path: cockpitPath(slug), flash, choices, preview, reloads: reloadDue(club, view, now)});
-    return withClub(s.panel + s.pick + s.body, club.id);
+    return withClub(s.panel + s.body + s.acts, club.id);
 }

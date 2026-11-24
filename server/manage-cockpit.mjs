@@ -25,15 +25,23 @@ const stale = res => send(res, 409, 'text/plain; charset=utf-8', '');
 const budgetFlash = () => ({kind: 'err', text: t('upload-budget')});
 
 
-// What Store gets from the choices (uploadSheet's input without the content): the event link as
-// its id, null when it does not parse (the callers check parseEventUrl(...).ok first).
+// What Store gets from the choices (uploadSheet's input without the content): `live` true for Make
+// live, false for Store; the event link as its id, null when it does not parse (the callers check
+// parseEventUrl(...).ok first). A version (`as` a plan) takes its plan's race as it is (user, 23 Nov
+// 2026): no start time and no event link go along, whatever was posted (uploadSheet keeps the race's
+// and takes the plan's date).
 export function storeInput(choices, base) {
-    const event = parseEventUrl(choices.event ?? '');
+    const version = isVersion(choices);
+    const event = version ? {ok: false} : parseEventUrl(choices.event ?? '');
     return {
-        slug: choices.team, as: choices.as, live: choices.live, date: choices.date, start: choices.start ?? null, type: choices.type,
+        slug: choices.team, as: choices.as, live: choices.live, date: choices.date, start: version ? null : choices.start ?? null, type: choices.type,
         pinnedEventId: event.ok ? event.id : null, base,
     };
 }
+
+
+// Is the Store a new version of a plan (its `as` a plan id), not a new plan or no choice?
+export const isVersion = choices => typeof choices.as === 'string' && choices.as !== '' && choices.as !== 'new';
 
 
 // The refusals of Store that concern the race date, the start time (club.mjs uploadSheet): the
@@ -42,28 +50,31 @@ export function storeInput(choices, base) {
 export const RACE_CODES = new Set(['bad-date', 'race-over', 'race-over-time', 'bad-start']);
 
 
-// The dry run of Store for `choices` (spec §6.6): assignPreview's answer, {error} for a refusal or an
+// The dry runs of the Store form's two buttons for `choices` (spec §6.6; user, 23 Nov 2026: Make live
+// stores and makes live, Store only stores): assignPreview's answer, {error} for a refusal or an
 // event link that does not parse (with `race: true` when it concerns the race fold's fields: an
 // event link, RACE_CODES), {note} while the date or a special team's start time is empty, null
-// without a team. Counts nothing: the caller does.
+// without a team. Counts nothing: the caller does (one draw, both runs).
 export function previewOf(ctx, cid, club, entry, choices) {
     const {store, now} = ctx;
     if (choices.team === null) {
         return null;
     }
-    if (!parseEventUrl(choices.event).ok) {
+    // a version takes its plan's race: its date, time and link are none of the form's
+    const fresh = !isVersion(choices);
+    if (fresh && !parseEventUrl(choices.event).ok) {
         return {error: t('upload-bad-event'), race: true};
     }
     // nothing typed yet is no error (the coordinator, 19 Nov 2026): a neutral line until the date
     // (and a special team's start time) is there; a value that is there but wrong is an error
-    if (choices.date === '' || (choices.special && choices.start === '')) {
+    if (fresh && (choices.date === '' || (choices.special && choices.start === ''))) {
         const key = choices.date !== '' ? 'as-pv-choose-time' : choices.special && choices.start === '' ? 'as-pv-choose' : 'as-pv-choose-date';
         return {note: t(key)};
     }
     const base = club.teams[choices.team].version;
+    const run = live => store.dryRun(cid, c => storeEntry(c, entry.id, storeInput({...choices, live}, base), {now, newId: () => randomId(6)}));
     try {
-        const run = store.dryRun(cid, c => storeEntry(c, entry.id, storeInput(choices, base), {now, newId: () => randomId(6)}));
-        return assignPreview(club, run.club, entry, {result: run.result, live: choices.live, now});
+        return assignPreview(club, entry, {live: run(true), off: run(false), now});
     } catch (e) {
         if (!(e instanceof ClubError)) {
             throw e;

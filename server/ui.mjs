@@ -132,17 +132,14 @@ export function th(key, vars = {}) {
 
 
 // The flash {kind: 'ok' | 'err', text} at the top of a page; '' for none.
-export function flashBlock(flash, undo = null) {
-    // the Undo of a change of the live plan (UI panel wave 2): inside the flash of that change (later,
-    // on the team page, in the live card's action bar: cockpit-panel.mjs)
-    const line = (text, form = '') => `<div class="flash ok${form ? ' undo' : ''}" role="status">${ic('checkCircle')}<p>${esc(text)}</p>${form}</div>`;
+export function flashBlock(flash) {
     if (!flash) {
         return '';
     }
     if (flash.kind !== 'ok') {
         return `<div class="flash err" role="status">${ic('alert')}<p>${esc(flash.text)}</p></div>`;
     }
-    return line(flash.text, undo !== null && flash.undo === true ? undo.form : '');
+    return `<div class="flash ok" role="status">${ic('checkCircle')}<p>${esc(flash.text)}</p></div>`;
 }
 
 
@@ -222,6 +219,12 @@ export function confirmPage(club, {kicker, trail, heading, words, action, fields
 
 
 // A status line: the severity's colour, an icon and the text; `tag` 'span' inside a link.
+// The rest of a hint in a closed fold under it (user, 23 Nov 2026: a hint is one line): "More", for
+// screen readers "More about <topic>". `about` the words after "More" ("about Remove a rider").
+export const moreFold = (text, about) => `<details class="fold more"><summary>${esc(t('ui-more'))}<span class="sr"> ${esc(about)}</span></summary>`
+    + `<p class="hint">${esc(text)}</p></details>`;
+
+
 export function sevLine(sev, icon, text, cls = '', tag = 'p') {
     return `<${tag} class="sevline ${esc(sev)}${cls ? ` ${esc(cls)}` : ''}">${ic(icon)}<span>${esc(text)}</span></${tag}>`;
 }

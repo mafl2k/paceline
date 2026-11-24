@@ -1,18 +1,39 @@
 // Preselection in the team page's Store form (plan versions spec §6.2–§6.4, team cockpit spec §5.4):
-// the team, the plan, the "Make live" box and the other choices for an inbox entry. Pure: the clock
+// the team, the plan and the other choices for an inbox entry (no Make live box: the form's action
+// bar has Make live and Store, user 23 Nov 2026). Pure: the clock
 // is always passed in.
-import {nameKey} from './ids.mjs';
+import {nameKey, cleanName} from './ids.mjs';
 import {localDay, zonedToUtc, isDate} from './time.mjs';
 import {nextRaceDate, raceStart, raceOver, rhythmDate, stillToRace} from './select.mjs';
-import {isUsed, plansOf, racePlans, planOfId, planNames, ridersShared, teamTypes} from './plans.mjs';
+import {plansOf, racePlans, planOfId, planNames, ridersShared, teamTypes, typeKey} from './plans.mjs';
 import {normalizePlan} from '../pages/src/engine/plan.mjs';
-import {raceOf, racesOf} from './races.mjs';
+import {racesOf} from './races.mjs';
+import {TYPE_MAX} from './club.mjs';
 
 
 const teamOf = (club, slug) => (typeof slug === 'string' && Object.hasOwn(club.teams, slug) ? club.teams[slug] : null);
 
 // "Thu 19 Nov" for a date in the club's zone.
 const dayOf = (club, date) => localDay(zonedToUtc(date, '12:00', club.tz), club.tz);
+
+
+// A plan's type as its name suggests it (user, 23 Nov 2026: the new plan's Type field prefilled): the
+// name the plan came with (`name`: a ZwiftGopher plan's or upload's team name) without team
+// `teamName` at its start (any case; the name must end there or at a separator) and the separators
+// after it (space, "·", "-", "–", "—", ":"), trimmed and cut to TYPE_MAX (30) characters; '' for a
+// name that is only the team's, for none, and for one the type rules refuse (cleanName).
+export function typeFromName(teamName, name) {
+    if (typeof name !== 'string') {
+        return '';
+    }
+    let s = name.trim();
+    const team = typeof teamName === 'string' ? teamName.trim() : '';
+    if (team !== '' && s.toLowerCase().startsWith(team.toLowerCase()) && (s.length === team.length || /^[\s·:\-–—]/u.test(s.slice(team.length)))) {
+        s = s.slice(team.length).replace(/^[\s·:\-–—]+/u, '');
+    }
+    s = [...s.trim()].slice(0, TYPE_MAX).join('').trim();
+    return s === '' ? '' : cleanName(s, 1, TYPE_MAX) ?? '';
+}
 
 
 // The entry's riders and bench (Zwift IDs, in plan order) and its planner name key.
@@ -57,12 +78,13 @@ function racePlanOf(club, slug, id, now) {
 
 
 // §6.3: a plan id, 'new' or null (the captain picks), the first that applies:
-// 1. `forPlan` (the plan's own "New version" link), any plan of a race not over (choicePlans);
+// 1. `forPlan` (a hole's link; the plan ⋯'s "New version" link until 23 Nov 2026), any plan of a race not over (choicePlans);
 // 2. the one plan of the race whose planner names hold the entry's (two or more: none);
 // 3. 'new' when the race has no plan; else null.
 // Riders in common never preselect: a fast and a slow plan share their riders (controller ruling).
 // The race is the plans of `date` (the page's race date): a plan for next week, or last race's
-// plan within S + 4 h, is not a plan of this race.
+// plan within S + 4 h, is not a plan of this race. "Store as" lists the plans of every race ahead
+// (controller ruling 23 Nov 2026); the suggestion stays this race's.
 export function pickPlan(club, slug, entry, now, date = nextRaceDate(club, slug, now)) {
     const forPlan = racePlanOf(club, slug, entry.forPlan, now);
     if (forPlan) {
@@ -75,29 +97,6 @@ export function pickPlan(club, slug, entry, now, date = nextRaceDate(club, slug,
         return named[0].id;
     }
     return plans.length === 0 ? 'new' : null;
-}
-
-
-// §6.4: the box's default for `as` (a plan by any of its ids, 'new' or null) and, for a new plan,
-// its race `date`. Live is per race (races spec §1): the race is the chosen plan's, else the one of
-// `date`. On when that race has no live plan that is not used up (`none`) or the chosen plan is its
-// live plan (`live-plan`); else off (`other-plan`, `new-plan`). No plan chosen: off (`pick`).
-// {on, kind, vars}; `kind` names the sentence beside the box.
-export function liveDefault(club, slug, {as, date}, now) {
-    const team = teamOf(club, slug);
-    const own = as === 'new' ? null : team ? planOfId(club, slug, as) : null;
-    if (!team || (as !== 'new' && own === null)) {
-        return {on: false, kind: 'pick', vars: {}};
-    }
-    const liveId = raceOf(club, slug, own !== null ? own.date : date)?.live;
-    const live = typeof liveId === 'string' && Object.hasOwn(club.sheets, liveId) ? club.sheets[liveId] : null;
-    if (live === null || isUsed(club, live, now)) {
-        return {on: true, kind: 'none', vars: {team: team.name}};
-    }
-    if (own !== null && own.live !== null) {
-        return {on: true, kind: 'live-plan', vars: {n: own.newest[1].n + 1, ln: live.n}};
-    }
-    return {on: false, kind: own !== null ? 'other-plan' : 'new-plan', vars: {label: live.label, ln: live.n}};
 }
 
 
@@ -116,8 +115,8 @@ export function chosenDate(params) {
 
 // The start time the Store form's field shows for team `slug`'s race on `date` when nothing was
 // typed (user, 22 Nov 2026: prefilled): the race's own start, else the team's (raceStart: for both
-// kinds, also without a date); '' without one. Posting the team's own time stores nothing of its
-// own (club.mjs storedStart). The page carries it as `startWas`, so a Store can tell a race whose
+// kinds, also without a date); '' without one. Store pins the time posted as the race's own (user,
+// 23 Nov 2026, club.mjs storedStart). The page carries it as `startWas`, so a Store can tell a race whose
 // start (or a weekly team's time) someone changed since the page was drawn (final review I-2).
 export function drawnStart(club, slug, date) {
     return teamOf(club, slug) === null ? '' : raceStart(club, slug, date) ?? '';
@@ -141,7 +140,7 @@ function raceChoices(club, slug, now) {
 
 
 // The page's race when nothing drawn says otherwise: the race the upload was made for (`forDate`:
-// the race ⋯'s "Upload a file for this race", a hole's link) while that is the entry's team and the
+// a hole's link; the race ⋯'s "Upload a file for this race" until 23 Nov 2026) while that is the entry's team and the
 // race is not over (pre-flight M7), else the team's next race (nextRaceDate); '' without one (a
 // special team with nothing ahead, decision 11).
 function defaultDate(club, slug, entry, now) {
@@ -154,14 +153,14 @@ function defaultDate(club, slug, entry, now) {
 
 
 // Everything the Store form chooses for `entry`, from the query `params` (anything with get(k))
-// and the preselection. The page's race (`date`): the date the form means (chosenDate) with an
-// unchanged team and plan choice (`drawn`), else defaultDate; a version keeps its plan's date,
-// except when the captain changed the race (the date differs from `startFor`, the date the page was
-// drawn for) and the plan is of another date: that plan choice goes and the plan is preselected
-// anew for the chosen race, so the race radio is never overruled by a plan of another race. Without
-// a race (a special team with nothing ahead) the date is '' and `dateRequired`: the page asks for it
-// in the race fold, drawn open (store-form.mjs). `races` (raceChoices) and `raceChoice` (two or more
-// of them: the page asks for the race with radios above the plans, races spec §4); `startFor` is the
+// and the preselection. A version takes its plan's race (user, 23 Nov 2026: the form shows the race
+// date, the start time and the event link for "New plan" only), so the page's race (`date`) is the
+// chosen plan's; for a new plan it is the date the form means (chosenDate) with an unchanged team
+// and plan choice (`drawn`), else defaultDate. `plans` lists the plans of every race ahead, nearest
+// race first, each with its `date` and `day` (controller ruling 23 Nov 2026). Without a race (a
+// special team with nothing ahead) the date is '' and `dateRequired`: the page asks for it in the
+// race fold, drawn open (store-form.mjs). `races` (raceChoices) and `raceChoice` (two or more of
+// them: the new plan's race fold has a radio per race, races spec §4); `startFor` is the
 // page's date. The race's start time
 // `start`, for every kind of team: the time sent with an unchanged team and plan choice for this very
 // date (`startFor`) while the race still has the start the page was drawn with (`startWas`; none
@@ -169,10 +168,9 @@ function defaultDate(club, slug, entry, now) {
 // every kind of team: prefilled), else ''. It never carries over from another
 // date, nor over a change of the race's start by someone else (final review I-2). `startWas` is
 // drawnStart now, for the page to carry. A
-// redraw keeps the box and the type when the team and plan choice are the ones drawn (`drawn`);
-// otherwise they go back to their defaults, except the fields the script lists in `touched` (Ruling
-// 6). The event link is always kept. `touched` comes back as it was received (only type and live,
-// sorted), so the page carries it on: also through a refused Store, whose page has no query for the
+// redraw keeps the type when the team and plan choice are the ones drawn (`drawn`); otherwise it
+// goes back to its default, unless the script lists it in `touched` (Ruling 6). The event link is
+// always kept. `touched` comes back as it was received (only the type), so the page carries it on: also through a refused Store, whose page has no query for the
 // script to read it from. `raceOpen`: the form's race fold was open (`raceOpen=1`, kept by the
 // script), so the redraw draws it open again (store-form.mjs).
 export function assignChoices(club, entry, params, now) {
@@ -184,21 +182,15 @@ export function assignChoices(club, entry, params, now) {
     const sent = otherTeam ? null : params.get('as');
     const sentSame = sentDrawn === `${team ?? ''}:${sent ?? ''}`;
     const fallback = defaultDate(club, team, entry, now);
+    // the race a new plan joins (a version's is its plan's: its form sends no date, user 23 Nov 2026);
+    // a date sent with a plan that is gone decides the race its preselection looks at
     const chosen = sentSame ? chosenDate(params) : null;
     const race = chosen ?? fallback;
-    // the captain changed the race on this page: only a race the form names (a version's page sends
-    // no date, and no radio with one race ahead: its redraw keeps the version, review I1)
     const startFor = params.get('startFor');
-    const moved = chosen !== null && chosen !== '' && startFor !== null && chosen !== startFor;
     let as = null;
     if (team !== null) {
         const plan = sent === 'new' ? null : racePlanOf(club, team, sent, now);
-        if (moved && plan !== null && plan.date !== race) {
-            // a plan of another race, and its New version too, give way to the race chosen
-            as = pickPlan(club, team, {...entry, forPlan: null}, now, race);
-        } else {
-            as = sent === 'new' ? 'new' : plan ? plan.id : pickPlan(club, team, entry, now, race);
-        }
+        as = sent === 'new' ? 'new' : plan ? plan.id : pickPlan(club, team, entry, now, race);
     }
     const own = as !== null && as !== 'new' ? planOfId(club, team, as) : null;
     const drawn = `${team ?? ''}:${as ?? ''}`;
@@ -208,18 +200,19 @@ export function assignChoices(club, entry, params, now) {
 
     // one date for the plan choice and the page (I-1)
     const date = own !== null ? own.date : race;
-    const def = liveDefault(club, team, {as, date}, now);
-    // no plan chosen: the box is off, whatever was sent (spec §6.3); a received plan (ZwiftGopher)
-    // starts off in every case (plan versions spec §5.5): it is never live before the captain says so
-    const live = as === null ? false : keep('live') ? params.get('live') === 'on' : entry.source === 'receive' ? false : def.on;
-    const type = keep('type') ? params.get('type') ?? '' : own !== null ? own.type ?? '' : '';
+    // a new plan's type from the name the plan came with (typeFromName; user, 23 Nov 2026), unless the
+    // race has it already (typeFor would refuse it): then none
+    const named = own === null && team !== null ? typeFromName(teamOf(club, team).name, entry.json?.team?.name) : '';
+    const free = named !== '' && !plansOf(club, team).some(p => p.date === date && p.type !== null && typeKey(p.type) === typeKey(named));
+    const type = keep('type') ? params.get('type') ?? '' : own !== null ? own.type ?? '' : free ? named : '';
 
     const {riders} = entryPlan(entry);
-    const plans = team === null ? [] : choicePlans(club, team, now).map(p => {
+    // every race ahead, nearest first (controller ruling 23 Nov 2026; within a race as racePlans)
+    const plans = team === null ? [] : choicePlans(club, team, now).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map(p => {
         const [, v] = p.newest;
         const {shared} = ridersShared(v, riders);
         return {
-            id: p.id, label: p.label, day: dayOf(club, p.date), n: v.n, at: v.at, live: p.live !== null,
+            id: p.id, label: p.label, date: p.date, day: dayOf(club, p.date), n: v.n, at: v.at, live: p.live !== null,
             shared, total: riders.length,
         };
     });
@@ -243,11 +236,11 @@ export function assignChoices(club, entry, params, now) {
     return {
         team,
         teams: Object.entries(club.teams).map(([slug, t]) => ({slug, name: t.name})),
-        as, plans, live, liveKind: def.kind, liveVars: def.vars,
-        date, dateFixed: own !== null, dateRequired: own === null && fallback === '', special, start, startWas, type, startFor: date,
+        as, plans,
+        date, dateRequired: own === null && fallback === '', special, start, startWas, type, startFor: date,
         races, raceChoice: races.length >= 2,
         types: team === null ? [] : teamTypes(club, team), typeNeeded,
-        event: params.get('event') ?? '', drawn, touched: ['live', 'type'].filter(f => touched.has(f)).join(','),
+        event: params.get('event') ?? '', drawn, touched: touched.has('type') ? 'type' : '',
         raceOpen: params.get('raceOpen') === '1',
     };
 }

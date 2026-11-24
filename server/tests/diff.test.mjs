@@ -101,16 +101,16 @@ test('diff: no type line; other details; same names the plan', () => {
     // a plan has one type (schema 4): two versions that differ only in type read as the same
     const fast = {...ver(['1001', '1002'], {n: 1, type: 'fast'}), label: 'Rollers · fast'};
     let lines = diff(fast, {...ver(['1001', '1002'], {n: 2, type: 'slow'}), label: 'Rollers · slow'});
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers · fast\' v1']]);
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'fast\' v1']]);
     lines = diff(ver(['1001', '1002'], {n: 3}), ver(['1002', '1001'], {n: 4, type: 'slow'}));
     assert.deepEqual(kinds(lines), ['order']);
     const colour = base();
     colour.json.riders['1001'].color = '#00ff00';
     lines = diff(base(), colour);
     assert.deepEqual(lines.map(l => [l.kind, l.text]), [['other', 'Other details only']]);
-    // "Same as" names the older version's plan and n
+    // "Same as" names the older version's plan and n ("Plan" for one without a type: user, 23 Nov 2026)
     lines = diff(ver(['1001', '1002'], {n: 3}), base());
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Plan\' v3']]);
 });
 
 
@@ -138,9 +138,9 @@ test('diff: the event link is the race\'s, no line of a version\'s diff', () => 
     // event fields on versions (as 0.3 stored them) are never read
     const at = (n, pinnedEventId) => ver(['1001', '1002'], {n, pinnedEventId});
     let lines = diff(at(3, null), at(4, 4567890));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Plan\' v3']]);
     lines = diff(at(3, 4567890), at(4, 4567899));
-    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Rollers\' v3']]);
+    assert.deepEqual(lines.map(l => [l.kind, l.text]), [['same', 'Same as \'Plan\' v3']]);
     // with other changes: no line for the event (nor for the type)
     const typed = ver(['1002', '1001'], {n: 4, type: 'slow', pinnedEventId: 4567890});
     assert.deepEqual(diff(at(3, null), typed).map(l => l.kind), ['order']);

@@ -10,20 +10,22 @@ import {ClubError, entryOf, storeEntry, discardEntry, teamHint} from './club.mjs
 import {effects, nextRaceDate} from './select.mjs';
 import {SHEET_RE, isSlug, parseEventUrl, randomId} from './ids.mjs';
 import {assignChoices, chosenDate, drawnStart} from './preselect.mjs';
-import {storeResult, entryGonePage} from './store-form.mjs';
+import {storeResult, entryGonePage, storeAsk} from './store-form.mjs';
 import {ridersLine} from './team-view.mjs';
 import {clubErrorText, field, postedClub, frameOf} from './manage-page.mjs';
 import {redirectWithFlash} from './flash.mjs';
 import {confirmPage} from './ui.mjs';
 import {cockpitPath} from './team-page.mjs';
 import {raceOf} from './races.mjs';
-import {renderCockpit, previewOf, storeInput, RACE_CODES} from './manage-cockpit.mjs';
+import {renderCockpit, previewOf, storeInput, isVersion, RACE_CODES} from './manage-cockpit.mjs';
 
 // The Store input and the dry run live in manage-cockpit.mjs (the cockpit's form draws it too).
 export {storeInput, previewOf};
 
 
-// The choices of a Store POST, straight from the form: never preselected. A blank `as` is no plan;
+// The choices of a Store POST, straight from the form: never preselected. `live`: the form's Make
+// live (live=on), or the confirm of its strip or of the server's question (confirm=1, which only
+// Make live sends); Store sends neither. A blank `as` is no plan;
 // a missing `type` keeps a version's type (a blank one is none); the date is the one the form means
 // (chosenDate: a typed date, else the race radio, else the date field), none sent is the team's next
 // race (the page always sends one for a new plan); `start` is the race's start time as posted
@@ -31,7 +33,7 @@ export {storeInput, previewOf};
 function formChoices(form) {
     const has = k => form.get(k) !== null;
     return {
-        team: field(form, 'team'), as: field(form, 'as') || null, live: field(form, 'live') === 'on',
+        team: field(form, 'team'), as: field(form, 'as') || null, live: field(form, 'live') === 'on' || field(form, 'confirm') === '1',
         date: chosenDate(form), start: field(form, 'start'),
         type: has('type') ? field(form, 'type') : undefined, event: field(form, 'event'),
     };
@@ -45,7 +47,7 @@ function refusedChoices(club, entry, form, now) {
     if (field(form, 'as') !== '' || choices.as === null) {
         return choices;
     }
-    return {...choices, as: null, live: false, liveKind: 'pick', liveVars: {}, dateFixed: false, drawn: `${choices.team ?? ''}:`};
+    return {...choices, as: null, drawn: `${choices.team ?? ''}:`};
 }
 
 
@@ -63,8 +65,12 @@ function inboxGet(req, res, ctx, cid, id) {
 }
 
 
-// POST /manage/inbox/<id> (team, as, live, type, race, date, start, startFor, startWas, event, base, drawn,
-// touched, raceOpen): Store. A team or plan choice the form was not drawn for (`drawn` is not `<team>:<as>`:
+// POST /manage/inbox/<id> (team, as, live, confirm, type, race, date, start, startFor, startWas, event,
+// base, drawn, touched, raceOpen): Store, or with live=on Store and make live (the form's Make live).
+// Make live without confirm=1 asks first when the rule says so (storeAsk: the race window with
+// another version live in that race; user, 23 Nov 2026): 200 with the question on a page of its own
+// (the no-script path of the bar's strip), its form posting the same fields again with confirm=1,
+// and nothing changes. A team or plan choice the form was not drawn for (`drawn` is not `<team>:<as>`:
 // the captain changed it and stored without a redraw) stores nothing: 400 with the form redrawn for
 // the new choice (its defaults, its preview; not counted, Ruling 7) and a note to check it. So does a
 // race the form was not drawn for (the date the form means, chosenDate, is not `startFor`: the race
@@ -115,7 +121,10 @@ function inboxStore(req, res, ctx, cid, form, id) {
         redraw('as-redrawn');
         return;
     }
-    const startFor = form.get('startFor');
+    // a version takes its plan's race (user, 23 Nov 2026): a date, time or link posted with it (a page
+    // from before) is ignored, and so are the guards that concern them
+    const version = isVersion(choices);
+    const startFor = version ? null : form.get('startFor');
     // (an emptied date names no race: uploadSheet asks for one, bad-date)
     if (startFor !== null && choices.date !== null && choices.date !== '' && choices.date !== startFor) {
         redraw('as-redrawn-race', true);
@@ -133,7 +142,7 @@ function inboxStore(req, res, ctx, cid, form, id) {
         refused(t('as-pick-team'));
         return;
     }
-    if (!parseEventUrl(choices.event).ok) {
+    if (!version && !parseEventUrl(choices.event).ok) {
         refused(t('upload-bad-event'), true);
         return;
     }
@@ -141,6 +150,9 @@ function inboxStore(req, res, ctx, cid, form, id) {
     if (input.date === null) {
         // the team's next race when no date came (never from the page's own form)
         input.date = nextRaceDate(before, choices.team, now);
+    }
+    if (choices.live && field(form, 'confirm') !== '1' && asked(ctx, cid, res, before, entry, form, input)) {
+        return;
     }
     let result;
     try {
@@ -168,6 +180,37 @@ function inboxStore(req, res, ctx, cid, form, id) {
     const isLive = raceOf(after, slug, stored.date)?.live === result.id;
     redirectWithFlash(res, ctx, cid, cockpitPath(slug), storeResult(before, after, slug, {result, moves, holes, hint, importWarnings, importMore, now}),
         {query: isLive ? `?r=${stored.date}` : `?v=${result.id}`, hash: 'panel'});
+}
+
+
+// Make live of the Store form posted without confirm=1 (`form`, `input` its storeInput): when the
+// rule says it asks (storeAsk, from a dry run of the same Store), the question on a page of its own
+// (the version's words, "Make live anyway" posting every field again with confirm=1, the way back
+// the team page with the entry picked) and true; else false (a dry run that is refused stores
+// nothing: the Store itself refuses it with its words).
+function asked(ctx, cid, res, before, entry, form, input) {
+    let run;
+    try {
+        run = ctx.store.dryRun(cid, c => storeEntry(c, entry.id, input, {now: ctx.now, newId: () => randomId(6)}));
+    } catch (e) {
+        if (e instanceof ClubError) {
+            return false;
+        }
+        throw e;
+    }
+    const ask = storeAsk(before, run.club, run.result, ctx.now);
+    if (ask === null) {
+        return false;
+    }
+    const sheet = run.club.sheets[run.result.id];
+    const team = before.teams[entry.team].name;
+    const fields = Object.fromEntries([...form].filter(([k]) => k !== 'club' && k !== 'confirm' && k !== 'live'));
+    const back = `${cockpitPath(entry.team)}?e=${entry.id}`;
+    html(res, 200, confirmPage(before, {...frameOf(ctx, cid), here: cockpitPath(entry.team), kicker: t('ui-club-team', {club: before.name, team}),
+        trail: [{href: back, label: team}], heading: t('live-confirm-heading', {label: sheet.label, n: sheet.n}), words: ask.words,
+        action: `/manage/inbox/${entry.id}`, fields: {...fields, live: 'on'}, button: t('live-confirm-button'), danger: false,
+        back: {href: back, label: t('live-confirm-back', {team})}}));
+    return true;
 }
 
 

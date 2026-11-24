@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {entryPlan, pickTeam, pickPlan, liveDefault, assignChoices, chosenDate, drawnStart} from '../preselect.mjs';
+import {entryPlan, pickTeam, pickPlan, assignChoices, chosenDate, drawnStart, typeFromName} from '../preselect.mjs';
+import {versionName} from '../plans.mjs';
 import {rememberType} from '../plans.mjs';
 import {club, sheet, planJson, T, race, setLive} from './helpers.mjs';
 import {tidyRaces} from '../races.mjs';
@@ -168,9 +169,8 @@ test('assignChoices: the race picked for the plan is the date shown (I-1)', () =
     assert.equal(ch.as, 'new');
     assert.equal(ch.date, '2026-11-26');
     assert.equal(ch.typeNeeded, false);
-    // live is per race (races spec §1): 26 Nov has no live plan, so the box is on
-    assert.equal(ch.liveKind, 'none');
-    assert.equal(ch.live, true);
+    // no Make live box any more (user, 23 Nov 2026): Make live and Store are the bar's buttons
+    assert.deepEqual(['live', 'liveKind', 'liveVars'].filter(k => Object.hasOwn(ch, k)), []);
 });
 
 test('pickPlan: two plans in the race and no forPlan or name: nothing (Ruling 15)', () => {
@@ -186,69 +186,6 @@ test('pickPlan: no plan in the race is a new plan', () => {
     const c = club({teams: teams(), sheets: {old001: ver({date: '2026-11-12'})}});
     assert.equal(pickPlan(c, 'rollers', entry(), NOW), 'new');
     assert.equal(pickPlan(c, 'sprockets', entry(), NOW), 'new');
-});
-
-
-test('liveDefault: every row of the table', () => {
-    const c = club({teams: teams(), sheets: {
-        aa0001: ver({plan: 'aa0001'}),
-        aa0004: ver({plan: 'aa0001', n: 4}),
-        bb0001: ver({type: 'slow'}),
-    }});
-    // no live version
-    assert.deepEqual(liveDefault(c, 'rollers', {as: null, date: '2026-11-19'}, NOW), {on: false, kind: 'pick', vars: {}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // a used-up live version: last week's race (its own live plan; live is per race)
-    c.sheets.old001 = {...ver({date: '2026-11-12'}), plan: 'old001'};
-    setLive(c, 'rollers', 'old001');
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-12'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'old001', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // the live plan, newest n 4 (19 Nov; last week's race keeps its own)
-    setLive(c, 'rollers', 'aa0004');
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-26'}, NOW),
-        {on: true, kind: 'live-plan', vars: {n: 5, ln: 4}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0004', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'live-plan', vars: {n: 5, ln: 4}});
-    // live is v1, v4 newer and not live
-    setLive(c, 'rollers', 'aa0001');
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'aa0001', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'live-plan', vars: {n: 5, ln: 1}});
-    setLive(c, 'rollers', 'aa0004');
-    // another plan of 19 Nov, and a new plan for 19 Nov
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-19'}, NOW),
-        {on: false, kind: 'other-plan', vars: {label: 'Kettenfett Rollers', ln: 4}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
-        {on: false, kind: 'new-plan', vars: {label: 'Kettenfett Rollers', ln: 4}});
-    // the selection's slug matters: Sprockets has no live version
-    assert.equal(liveDefault(c, 'sprockets', {as: 'new', date: '2026-11-19'}, NOW).kind, 'none');
-});
-
-test('liveDefault: per race, a live plan of another race does not count', () => {
-    // races spec §1: a race without a live plan defaults on although the team's other race has one
-    const c = club({teams: teams(), sheets: {
-        nx0001: ver({date: '2026-11-26', type: 'fast'}),
-        bb0001: ver({type: 'slow'}),
-    }});
-    setLive(c, 'rollers', 'nx0001');
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // a version: the plan's race counts, not the date sent
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-26'}, NOW),
-        {on: true, kind: 'none', vars: {team: 'Kettenfett Rollers'}});
-    // a new plan for 26 Nov sits next to its live plan
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-26'}, NOW),
-        {on: false, kind: 'new-plan', vars: {label: 'Kettenfett Rollers · fast', ln: 1}});
-    // both races live: each plan's own race decides
-    setLive(c, 'rollers', 'bb0001');
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'bb0001', date: '2026-11-26'}, NOW), {on: true, kind: 'live-plan', vars: {n: 2, ln: 1}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'nx0001', date: '2026-11-19'}, NOW), {on: true, kind: 'live-plan', vars: {n: 2, ln: 1}});
-    assert.deepEqual(liveDefault(c, 'rollers', {as: 'new', date: '2026-11-19'}, NOW),
-        {on: false, kind: 'new-plan', vars: {label: 'Kettenfett Rollers · slow', ln: 1}});
 });
 
 
@@ -277,15 +214,12 @@ test('assignChoices: the preselection, the plans and the defaults', () => {
     assert.equal(ch.as, 'aa0001');
     assert.equal(ch.drawn, 'rollers:aa0001');
     assert.deepEqual(ch.plans, [{
-        id: 'aa0001', label: 'Kettenfett Rollers', day: 'Thu 19 Nov', n: 2, at: '2026-11-17T10:00:00.000Z',
+        id: 'aa0001', label: 'Kettenfett Rollers', date: '2026-11-19', day: 'Thu 19 Nov', n: 2, at: '2026-11-17T10:00:00.000Z',
         live: true, shared: 7, total: 8,
     }]);
-    assert.equal(ch.live, true);
-    assert.equal(ch.liveKind, 'live-plan');
-    assert.deepEqual(ch.liveVars, {n: 3, ln: 2});
+    assert.deepEqual(['live', 'liveKind', 'liveVars'].filter(k => Object.hasOwn(ch, k)), []);
     assert.equal(ch.type, '');
     assert.equal(ch.date, '2026-11-19');
-    assert.equal(ch.dateFixed, true);
     assert.equal(ch.typeNeeded, false);
     assert.equal(ch.event, '');
     assert.deepEqual(ch.types, ['fast', 'slow']);
@@ -298,25 +232,21 @@ test('assignChoices: the preselection, the plans and the defaults', () => {
         'https://zwift.com/events/view/123');
 });
 
-test('assignChoices: drawn keeps the box, the type and the date', () => {
+test('assignChoices: drawn keeps the type and the date', () => {
     const c = assignClub();
     const e = entry({name: 'Rollers fast'});
     const kept = q => assignChoices(c, e, params(`team=rollers&as=aa0001&drawn=rollers:aa0001${q}`), NOW);
-    assert.equal(kept('').live, false);
-    assert.equal(kept('&live=on').live, true);
     assert.equal(kept('&type=slow').type, 'slow');
     // the same without a matching drawn: the defaults
     const fresh = q => assignChoices(c, e, params(`team=rollers&as=aa0001${q}`), NOW);
-    assert.equal(fresh('').live, true);
     assert.equal(fresh('&drawn=rollers:new&type=slow').type, '');
-    // a new plan: its type defaults to '', never the JSON name; its date is kept by drawn only
+    // a new plan: its type defaults to the plan's name without the team's (typeFromName; user, 23 Nov
+    // 2026, replacing "never the JSON name"): 'Rollers fast' does not start with 'Kettenfett Rollers',
+    // so all of it; its date is kept by drawn only
     const n = assignChoices(c, e, params('team=rollers&as=new'), NOW);
-    assert.equal(n.type, '');
+    assert.equal(n.type, 'Rollers fast');
     assert.equal(n.as, 'new');
     assert.equal(n.date, '2026-11-19');
-    assert.equal(n.dateFixed, false);
-    assert.equal(n.live, false);
-    assert.equal(n.liveKind, 'new-plan');
     assert.equal(assignChoices(c, e, params('team=rollers&as=new&drawn=rollers:new&date=2026-11-26'), NOW).date,
         '2026-11-26');
     assert.equal(assignChoices(c, e, params('team=rollers&as=new&drawn=rollers:aa0001&date=2026-11-26'), NOW).date,
@@ -333,7 +263,7 @@ test('assignChoices: drawn keeps the box, the type and the date', () => {
         false);
 });
 
-test('assignChoices: a team change drops the old plan choice and re-defaults live and type', () => {
+test('assignChoices: a team change drops the old plan choice and re-defaults the type', () => {
     const c = assignClub();
     const e = entry({forPlan: 'aa0001', name: 'Sprockets File B'});
     const q = 'team=sprockets&as=aa0001&drawn=rollers:aa0001&live=on&type=slow';
@@ -342,16 +272,14 @@ test('assignChoices: a team change drops the old plan choice and re-defaults liv
     assert.equal(ch.as, pickPlan(c, 'sprockets', e, NOW));
     assert.equal(ch.as, 'sb0001');
     assert.equal(ch.drawn, 'sprockets:sb0001');
-    const def = liveDefault(c, 'sprockets', {as: 'sb0001', date: ch.date}, NOW);
-    assert.equal(def.on, false);
-    assert.equal(ch.live, def.on);
-    assert.equal(ch.liveKind, 'other-plan');
     assert.equal(ch.type, 'fast');
     assert.deepEqual(ch.types, []);
+    // a page from before the box went may still send live in touched: only the type is kept
     const touched = assignChoices(c, e, params(`${q}&touched=type,live`), NOW);
     assert.equal(touched.as, 'sb0001');
     assert.equal(touched.type, 'slow');
-    assert.equal(touched.live, true);
+    assert.equal(touched.touched, 'type');
+    assert.equal(Object.hasOwn(touched, 'live'), false);
     // a Rollers plan id is never kept for Sprockets, also when drawn names Sprockets
     assert.equal(assignChoices(c, e, params('team=sprockets&as=aa0001&drawn=sprockets:aa0001'), NOW).as, 'sb0001');
     // a sent 'new' does not survive a team change either (M-2); it stays when drawn for Sprockets
@@ -365,29 +293,14 @@ test('assignChoices: a team change drops the old plan choice and re-defaults liv
     assert.equal(assignChoices(c, e, params('team=gone'), NOW).team, 'rollers');
 });
 
-test('assignChoices: with no plan chosen the box is off, whatever was sent', () => {
-    const c = assignClub();
-    c.sheets.bb0001 = {...ver({type: 'slow'}), plan: 'bb0001'};
-    const e = entry({name: 'Other'});
-    for (const q of ['live=on&touched=live', 'team=rollers&live=on&drawn=rollers:', 'team=rollers&live=on&drawn=rollers:&touched=live']) {
-        const ch = assignChoices(c, e, params(q), NOW);
-        assert.equal(ch.as, null, q);
-        assert.equal(ch.live, false, q);
-        assert.equal(ch.liveKind, 'pick', q);
-    }
-});
-
 test('assignChoices: no team, no plan choice', () => {
     const c = assignClub();
     const ch = assignChoices(c, entry({team: null}), params('as=new&live=on&touched=live'), NOW);
     assert.equal(ch.team, null);
-    assert.equal(ch.live, false);
     assert.equal(ch.as, null);
     assert.deepEqual(ch.plans, []);
     assert.deepEqual(ch.types, []);
-    assert.equal(ch.liveKind, 'pick');
     assert.equal(ch.typeNeeded, false);
-    assert.equal(ch.dateFixed, false);
 });
 
 test('assignChoices: two plans in the race, nothing chosen', () => {
@@ -395,16 +308,13 @@ test('assignChoices: two plans in the race, nothing chosen', () => {
     c.sheets.bb0001 = {...ver({type: 'slow'}), plan: 'bb0001', at: '2026-11-18T10:00:00.000Z'};
     const ch = assignChoices(c, entry({name: 'Other'}), params(''), NOW);
     assert.equal(ch.as, null);
-    assert.equal(ch.live, false);
-    assert.equal(ch.liveKind, 'pick');
     assert.deepEqual(ch.plans.map(p => [p.id, p.live]), [['aa0001', true], ['bb0001', false]]);
 });
 
-test('assignChoices: a version\'s date is fixed', () => {
+test('assignChoices: a version takes its plan\'s date, whatever date is sent (user, 23 Nov 2026)', () => {
     const c = assignClub();
     const ch = assignChoices(c, entry(), params('team=rollers&as=aa0001&drawn=rollers:aa0001&date=2026-11-26'), NOW);
     assert.equal(ch.date, '2026-11-19');
-    assert.equal(ch.dateFixed, true);
 });
 
 test('assignChoices: a special team without a plan has no default date', () => {
@@ -414,7 +324,6 @@ test('assignChoices: a special team without a plan has no default date', () => {
     assert.equal(ch.as, 'new');
     assert.equal(ch.date, '');
     assert.equal(ch.dateRequired, true);
-    assert.equal(ch.dateFixed, false);
     // preselected (no plan in its race: a new plan), the same
     const pre = assignChoices(c, e, params(''), NOW);
     assert.equal(pre.as, 'new');
@@ -480,7 +389,7 @@ test('assignChoices: a special team\'s start time (user, 19 Nov 2026)', () => {
     assert.equal(assignChoices(c, e, params('team=cogs&as=new&drawn=cogs:new&date=2026-12-13&start=20:15&startFor=2026-12-06'), NOW).start, '19:30');
     // a version: the plan's date, the race's start, editable
     const v = assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001&date=2026-12-13'), NOW);
-    assert.deepEqual([v.date, v.dateFixed, v.start], ['2026-12-06', true, '20:15']);
+    assert.deepEqual([v.date, v.start], ['2026-12-06', '20:15']);
     const vt = assignChoices(c, e, params('team=cogs&as=cc0001&drawn=cogs:cc0001&start=21:00&startFor=2026-12-06'), NOW);
     assert.equal(vt.start, '21:00');
     // a race without a start of its own (0.3.0): the team's
@@ -541,17 +450,19 @@ function sundayOnly() {
 // a pushed plan whose planner name matches no stored plan
 const pushed = () => ({...entry({name: 'Other'}), source: 'receive', via: 'zwiftgopher'});
 
-test('assignChoices: choosing another race drops a plan choice of the race before', () => {
+test('assignChoices: a version keeps its plan and its race whatever race is sent; a new plan\'s race follows the radio (user, 23 Nov 2026)', () => {
     const c = sundayOnly();
-    const q = {team: 'rollers', as: 'su0001', drawn: 'rollers:su0001', date: '2026-11-22', startFor: '2026-11-22'};
-    const ch = assignChoices(c, pushed(), params({...q, race: '2026-11-26'}), FRI);
-    assert.deepEqual([ch.date, ch.as, ch.dateFixed, ch.startFor], ['2026-11-26', 'new', false, '2026-11-26']);
-    // the race radio of the plan's own race keeps the version and its date
-    const same = assignChoices(c, pushed(), params({...q, race: '2026-11-22'}), FRI);
-    assert.deepEqual([same.date, same.as, same.dateFixed], ['2026-11-22', 'su0001', true]);
-    // a plan's New version (forPlan) never overrules the race chosen
+    // (the race radios are in a new plan's race fold only: a version has its plan's race)
+    const q = {team: 'rollers', as: 'su0001', drawn: 'rollers:su0001', startFor: '2026-11-22'};
+    for (const race of ['2026-11-26', '2026-11-22']) {
+        const ch = assignChoices(c, pushed(), params({...q, race}), FRI);
+        assert.deepEqual([ch.date, ch.as], ['2026-11-22', 'su0001'], race);
+    }
     const own = assignChoices(c, {...pushed(), forPlan: 'su0001'}, params({...q, race: '2026-11-26'}), FRI);
-    assert.deepEqual([own.date, own.as], ['2026-11-26', 'new']);
+    assert.deepEqual([own.date, own.as], ['2026-11-22', 'su0001']);
+    // a new plan: the race radio decides its race
+    const fresh = assignChoices(c, pushed(), params({team: 'rollers', as: 'new', drawn: 'rollers:new', startFor: '2026-11-22', race: '2026-11-26'}), FRI);
+    assert.deepEqual([fresh.date, fresh.as, fresh.startFor], ['2026-11-26', 'new', '2026-11-26']);
 });
 
 test('chosenDate: a typed date wins over the radio, the radio over the drawn date', () => {
@@ -572,8 +483,6 @@ test('assignChoices: a weekly team with one extra race ahead still gets the choi
     assert.deepEqual(ch.races.map(r => [r.date, r.time, r.plans]), [['2026-11-22', '18:00', 1], ['2026-11-26', '19:30', 0]]);
     assert.deepEqual(ch.races.map(r => r.day), ['Sun 22 Nov', 'Thu 26 Nov']);
     assert.deepEqual([ch.raceChoice, ch.date, ch.startFor], [true, '2026-11-22', '2026-11-22']);
-    // a pushed plan is never live before the captain says so (plan versions spec §5.5)
-    assert.equal(ch.live, false);
     // one race ahead (the rhythm date only): no choice
     const lone = club({teams: {rollers: {name: 'Kettenfett Rollers', start: '19:30', live: null}}});
     const one = assignChoices(lone, pushed(), params(''), FRI);
@@ -640,12 +549,12 @@ test('assignChoices: a redraw that names no race keeps the version, also with a 
         }});
         const e = {...entry({team: 'sprockets', name: 'Other'}), forDate: '2026-12-03'};
         assert.equal(assignChoices(c, e, params(''), FRI).date, '2026-12-03', JSON.stringify(kind));
-        // the captain picks the 26 Nov plan, then ticks Make live: a version's page sends no date and,
-        // with one race ahead, no race radio
+        // the captain picks the 26 Nov plan: a version's page sends no date and, with one race ahead,
+        // no race radio
         const picked = assignChoices(c, e, params('team=sprockets&as=sp0026&drawn=sprockets:new&date=2026-12-03&startFor=2026-12-03'), FRI);
         assert.deepEqual([picked.as, picked.date, picked.startFor], ['sp0026', '2026-11-26', '2026-11-26']);
-        const live = assignChoices(c, e, params('team=sprockets&as=sp0026&drawn=sprockets:sp0026&startFor=2026-11-26&live=on&start=19:40'), FRI);
-        assert.deepEqual([live.as, live.date, live.live], ['sp0026', '2026-11-26', true], JSON.stringify(kind));
+        const live = assignChoices(c, e, params('team=sprockets&as=sp0026&drawn=sprockets:sp0026&startFor=2026-11-26&start=19:40'), FRI);
+        assert.deepEqual([live.as, live.date], ['sp0026', '2026-11-26'], JSON.stringify(kind));
     }
 });
 
@@ -655,4 +564,48 @@ test('chosenDate: an emptied date field names no race; the checked radio wins (r
     assert.equal(of({date: '', startFor: '2026-11-22', race: '2026-11-22'}), '2026-11-22');
     // no radio: the empty field as it is (the page then asks for a date)
     assert.equal(of({date: '', startFor: '2026-11-22'}), '');
+});
+
+
+test('typeFromName: the plan\'s name without the team\'s name at its start, else empty (user, 23 Nov 2026)', () => {
+    for (const [name, type] of [
+        ['Kettenfett Rollers slow', 'slow'], ['kettenfett rollers · fast', 'fast'], ['Kettenfett Rollers - tempo', 'tempo'],
+        ['KETTENFETT ROLLERS: easy B', 'easy B'], ['Kettenfett Rollers–long', 'long'], ['  Kettenfett Rollers   sunday  ', 'sunday'],
+        // only the team's name, or nothing: no type (the page shows "Plan")
+        ['Kettenfett Rollers', ''], ['kettenfett rollers · ', ''], ['', ''], ['   ', ''],
+        // another name: all of it, as a type; the team's name must end at a separator
+        ['Morning group', 'Morning group'], ['Kettenfett Rollersfast', 'Kettenfett Rollersfast'],
+    ]) {
+        assert.equal(typeFromName('Kettenfett Rollers', name), type, JSON.stringify(name));
+    }
+    for (const name of [null, undefined, 7, {}]) {
+        assert.equal(typeFromName('Kettenfett Rollers', name), '', String(name));
+    }
+    // capped at TYPE_MAX (30), then trimmed; a name the type rules refuse (a control character) gives none
+    assert.equal(typeFromName('Kettenfett Rollers', `Kettenfett Rollers ${'x'.repeat(29)} y`), 'x'.repeat(29));
+    assert.equal(typeFromName('Kettenfett Rollers', 'Kettenfett Rollers sl\u0007ow'), '');
+});
+
+
+test('assignChoices: a new plan\'s type comes prefilled from the name the plan came with (user, 23 Nov 2026)', () => {
+    const c = club({teams: teams(), sheets: {}});
+    const fresh = name => assignChoices(c, entry({name}), params('team=rollers&as=new&drawn=rollers:&date=2026-11-26'), NOW);
+    assert.equal(fresh('Kettenfett Rollers slow').type, 'slow');
+    assert.equal(fresh('Kettenfett Rollers').type, '');
+    // a redraw of the same form keeps what the captain made of it, an emptied field too
+    const kept = assignChoices(c, entry({name: 'Kettenfett Rollers slow'}), params('team=rollers&as=new&drawn=rollers:new&date=2026-11-26&type='), NOW);
+    assert.equal(kept.type, '');
+    // a type the race has already (typeFor would refuse it): left empty
+    const date = fresh('Kettenfett Rollers slow').date;
+    c.sheets.aa0001 = {...sheet({team: 'rollers', label: 'Kettenfett Rollers · slow', date, riders: EIGHT, uploadedAt: '2026-11-17T10:00:00.000Z'}), type: 'slow', plan: 'aa0001'};
+    tidyRaces(c);
+    assert.equal(fresh('Kettenfett Rollers SLOW').type, '');
+    assert.equal(fresh('Kettenfett Rollers fast').type, 'fast');
+});
+
+
+test('versionName: a plan without a type reads "Plan" on the team page (user, 23 Nov 2026)', () => {
+    assert.equal(versionName(null, 3), '\'Plan\' v3');
+    assert.equal(versionName(undefined, 1), '\'Plan\' v1');
+    assert.equal(versionName('fast', 2), '\'fast\' v2');
 });

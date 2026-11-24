@@ -119,26 +119,11 @@ export function elements(html, open) {
 }
 
 
-// The flash at the top of a page: {kind, text}, or null. The flash of a change of the live plan
-// carries its Undo (undoOf) after the text.
+// The flash at the top of a page: {kind, text}, or null (a flash holds its text alone: no Undo in it
+// any more, user 23 Nov 2026).
 export function flashOf(body) {
-    const m = /<div class="flash (ok|err)(?: undo)?" role="status">[\s\S]*?<p>([^<]*)<\/p>(?:<form [^]*?<\/form>)?<\/div>/.exec(body);
+    const m = /<div class="flash (ok|err)" role="status">[\s\S]*?<p>([^<]*)<\/p><\/div>/.exec(body);
     return m ? {kind: m[1], text: textOf(m[2]).trim()} : null;
-}
-
-
-// The Undo of a page (UI panel wave 2, ui.mjs flashBlock): {text, form} of the first flash line that
-// carries one (the text of that line, the form's markup), or null: the flash itself (role status)
-// or the line of its own after a reload (no role); else the team page live card's Undo in its action bar.
-export function undoOf(body) {
-    const m = /<div class="flash ok undo"(?: role="status")?>[\s\S]*?<p>([^<]*)<\/p>(<form method="post" action="\/manage\/live\/undo">[^]*?<\/form>)<\/div>/.exec(body);
-    if (m) {
-        return {text: textOf(m[1]).trim(), form: m[2]};
-    }
-    // the team page's live card offers it in its action bar after the flash of its switch is gone
-    // (team cockpit spec §5.3b): no line of its own, text null
-    const b = /<div class="cp-undo">(<form method="post" action="\/manage\/live\/undo">[^]*?<\/form>)<\/div>/.exec(body);
-    return b ? {text: null, form: b[1]} : null;
 }
 
 
@@ -207,8 +192,10 @@ function entryOfLocation(location) {
 
 // An upload through the intake: POST /manage/upload (expects 303 to the team page with the entry
 // picked), then Store from its form (POST /manage/inbox/<id>) with `choices`: team (the upload's),
-// as 'new', live 'on', the team's version as base and drawn `<team>:<as>` (the form drawn for these
-// choices) by default; a choice set to undefined is not sent. {id, status, body, location} of the
+// as 'new', live 'on' (its Make live) with confirm '1' (its strip's confirm: Make live in the race
+// window with another plan live asks first, user 23 Nov 2026; the tests of that question post
+// without it), the team's version as base and drawn `<team>:<as>` (the form drawn for these
+// choices) by default; a choice set to undefined is not sent; live '' is its Store (no confirm). {id, status, body, location} of the
 // Store: after a 303 `body` is the page it leads to (fetched with the club cookie and the flash
 // cookie, so its panel's head shows the Store flash), else the Store's own answer.
 export async function storeUpload(srv, cookie, fields, choices = {}) {
@@ -219,6 +206,9 @@ export async function storeUpload(srv, cookie, fields, choices = {}) {
     const team = Object.hasOwn(choices, 'team') ? choices.team : fields.team;
     const base = team && srv.store.get(CID).teams[team] ? VERSION_OF(srv, team) : '';
     const merged = {team, as: 'new', live: 'on', base, ...choices};
+    if (merged.live === 'on' && !Object.hasOwn(choices, 'confirm')) {
+        merged.confirm = '1';
+    }
     const all = {drawn: `${merged.team ?? ''}:${merged.as ?? ''}`, ...merged};
     const sent = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
     return {id, ...await storePost(srv, cookie, id, sent)};

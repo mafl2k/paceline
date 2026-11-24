@@ -613,7 +613,7 @@ function liveCard(club, slug, lv, p, {now, marksOf}) {
     const nw = newerNotLive(club, slug, lv.id);
     const race = raceOfSheet(club, sheet);
     return {
-        id: lv.id, label: sheet.label, date: sheet.date, day: dateDay(sheet.date, tz), sig: sheet.sig,
+        id: lv.id, label: sheet.label, type: sheet.type ?? null, date: sheet.date, day: dateDay(sheet.date, tz), sig: sheet.sig,
         at: madeLabel(sheet, now, tz), pinnedEventId: race?.pinnedEventId ?? null, eventId: race?.eventId ?? null,
         sent: lv.S !== null,
         n: sheet.n, planId: p.id, versions: p.versions.length,
@@ -727,10 +727,13 @@ function liveDry(club, slug, id, now) {
 // liveWords' words and whether Make live must ask before it acts (UI panel wave 2, the Make live
 // rule; the server decides it again on the POST): never for the version that is live already in its
 // race; else while the gate is open of that race (from S - 30 min until it is used up), or when the
-// words warn: outdated marks, a move, a new hole, no start time. Otherwise it acts at once and
-// offers Undo. Only the version's own race counts (races spec §1: the team's other races keep their
-// live plans). {words, ask, marks}: `marks` the outdated marks the words ask about (liveConfirmPage
-// lists them).
+// words warn: outdated marks, a move, a new hole, no start time. Otherwise it acts at once. Only the
+// version's own race counts (races spec §1: the team's other races keep their
+// live plans). {words, ask, marks, warnings}: `marks` the outdated marks the words ask about
+// (liveConfirmPage lists them); `warnings` what of it warns, as lines for the version card above its
+// action bar (user, 23 Nov 2026: no "What happens"; the words' first sentence, when riders get it, is
+// Make live's own question): no start time (err), each rider it moves (info), the teams it leaves
+// with a hole (warn), the outdated marks (warn).
 export function liveQuestion(club, slug, id, now) {
     const sheet = club.sheets[id];
     const tz = club.tz;
@@ -748,25 +751,32 @@ export function liveQuestion(club, slug, id, now) {
             : t(`tp-live-words${open}`, {...v, live: lv.sheet.label, ln: lv.sheet.n});
     }
     const words = [head];
+    const warnings = S === null ? [{sev: 'err', text: head}] : [];
     const liveId = raceOfSheet(club, sheet)?.live ?? null;
     const {moves, holes} = liveId === id ? {moves: [], holes: []} : liveDry(club, slug, id, now);
     // a rider the switch brings to this team is no outdated mark: the move names him
     const coming = new Set(moves.filter(m => m.to === slug).map(m => m.id));
     const marks = (outdated(club, slug, now).get(id) ?? []).filter(m => !coming.has(m.id));
-    // this team's own new holes, for any version (outdated() sees only each plan's newest: an Undo
-    // or "Make vN live" of an older version can open one too, review I2), asked about with the marks
+    // this team's own new holes, for any version (outdated() sees only each plan's newest: "Make vN
+    // live" of an older version can open one too, review I2), asked about with the marks
     for (const h of holes) {
         if (h.slug === slug && !marks.some(m => m.id === h.id)) {
             marks.push({id: h.id, name: h.name, rides: h.rides});
         }
     }
-    words.push(...moves.map(m => `${t('result-move', {name: m.name, from: nameOf(club, m.from), to: nameOf(club, m.to)})}.`));
+    const moveWords = moves.map(m => `${t('result-move', {name: m.name, from: nameOf(club, m.from), to: nameOf(club, m.to)})}.`);
+    words.push(...moveWords);
+    warnings.push(...moveWords.map(text => ({sev: 'info', text})));
     const others = [...new Set(holes.filter(h => h.slug !== slug).map(h => h.slug))];
     if (others.length) {
-        words.push(`${t('result-holes', {teams: andList(others.map(s => nameOf(club, s)))})}.`);
+        const text = `${t('result-holes', {teams: andList(others.map(s => nameOf(club, s)))})}.`;
+        words.push(text);
+        warnings.push({sev: 'warn', text});
     }
     if (marks.length) {
-        words.push(t(marks.length === 1 ? 'tp-make-live-q-one' : 'tp-make-live-q', {label: sheet.label, n: sheet.n, names: andList(marks.map(m => m.name))}));
+        const text = t(marks.length === 1 ? 'tp-outdated-line-one' : 'tp-outdated-line', {label: sheet.label, n: sheet.n, names: andList(marks.map(m => m.name))});
+        words.push(`${text} ${t('tp-live-q-anyway')}`);
+        warnings.push({sev: 'warn', text});
     } else if (moves.length || others.length) {
         words.push(t('tp-live-q-anyway'));
     }
@@ -774,38 +784,7 @@ export function liveQuestion(club, slug, id, now) {
     const current = typeof liveId === 'string' && Object.hasOwn(club.sheets, liveId) ? club.sheets[liveId] : null;
     const warn = S === null || marks.length > 0 || moves.length > 0 || others.length > 0;
     const open = gateOpen(club, sheet, now) || (current !== null && gateOpen(club, current, now));
-    return {words: words.join(' '), ask: liveId !== id && (warn || open), marks};
-}
-
-
-// How long Undo is offered after a Make live that changed the live plan (UI panel wave 2).
-export const UNDO_MS = 10 * MIN_MS;
-
-
-// The Undo of the last change of a live plan of team `slug`, while it is offered: the team's own
-// record of it (team.liveBefore, club.mjs makeLive) is of its current version (nothing changed
-// since), at most UNDO_MS old, and the version that was live before is still one of the team's.
-// Live is per race (races spec §1): the race is that of the version Undo makes live again, and
-// `live` that race's live version. {id, prev, live, version}: `prev` the version Undo makes live
-// again, `live` the one live now; else null.
-export function undoOffer(club, slug, now) {
-    const team = Object.hasOwn(club.teams, slug) ? club.teams[slug] : null;
-    const u = team?.liveBefore;
-    if (u === null || typeof u !== 'object' || typeof u.id !== 'string' || !Object.hasOwn(club.sheets, u.id)) {
-        return null;
-    }
-    const liveId = raceOfSheet(club, club.sheets[u.id])?.live ?? null;
-    if (u.version !== team.version || typeof liveId !== 'string' || !Object.hasOwn(club.sheets, liveId)) {
-        return null;
-    }
-    const at = Date.parse(u.at);
-    if (!Number.isFinite(at) || now < at || now - at > UNDO_MS) {
-        return null;
-    }
-    if (typeof u.id !== 'string' || u.id === liveId || !Object.hasOwn(club.sheets, u.id) || club.sheets[u.id].team !== slug) {
-        return null;
-    }
-    return {id: u.id, prev: club.sheets[u.id], live: club.sheets[liveId], version: team.version};
+    return {words: words.join(' '), ask: liveId !== id && (warn || open), marks, warnings};
 }
 
 

@@ -3,6 +3,7 @@
 // and the clock is passed in. Plain text: the pages escape it.
 import {t, andList} from './pages.mjs';
 import {datePicks} from './select.mjs';
+import {versionName} from './plans.mjs';
 import {normalizePlan, RAW_SHORT_MAX} from '../pages/src/engine/plan.mjs';
 
 
@@ -145,7 +146,7 @@ export function diffVersions(club, older, newer, now, {newPlan = false, targetOf
 
     if (!lines.length) {
         const identical = same(older.json, newer.json) && same(older.text, newer.text);
-        lines.push(identical ? line('same', t('df-same', {label: older.label, n: older.n})) : line('other', t('df-other')));
+        lines.push(identical ? line('same', t('df-same', {name: older.plan != null && older.plan === newer.plan ? `v${older.n}` : versionName(older.type, older.n)})) : line('other', t('df-other')));
     }
     return lines;
 }
