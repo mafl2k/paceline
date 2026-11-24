@@ -207,15 +207,12 @@ export function gapStep(prev, {now, positions, selfId, active, hill = false, nee
             firstBreak = i;
         }
     }
-    // Who a gap cuts off: the riders still together behind it, up to the next real gap (one let go,
-    // open, or GAP_ON_M and more): riders further back are counted by their own gap.
-    const apart = r => r.lost || r.open || r.m >= GAP_ON_M;
+    // Who a gap cuts off: everyone behind it in the group except the riders already let go (they
+    // are counted nowhere). No stop at the next gap, and none at a gap that has just closed (still
+    // open, under GAP_OFF_M): 22 Nov 2026, a warning named one rider for 476 s and 489 s while
+    // more riders were behind the gap (a second gap further back, or a closed one, ended the list).
     for (let i = 1; i < group.length; i++) {
-        let j = i + 1;
-        while (j < group.length && !apart(riders[group[j].id])) {
-            j++;
-        }
-        riders[group[i].id].behind = group.slice(i, j).map(c => c.id);
+        riders[group[i].id].behind = group.slice(i).map(c => c.id).filter(id => !riders[id].lost);
     }
     return {riders, frontId: group.length ? group[0].id : null, pw};
 }
@@ -268,4 +265,24 @@ export function cutBehind(st, selfId) {
         }
     }
     return new Set(Object.entries(rs).filter(([, r]) => r.at >= first).map(([id]) => id));
+}
+
+
+// Who the frontmost full (GAP_ON_M and more, open) or let-go gap cuts off, for the turn clocks:
+// {ids (at or behind it, in line order), id (the rider right behind it), m (its metres, rounded)}.
+// null when there is none, or when I am behind it myself (nobody hangs behind me then), or when I am
+// not in the gap group.
+export function cutOff(st, selfId) {
+    const rs = st?.riders || {};
+    const myAt = rs[selfId]?.at ?? (st?.frontId === selfId ? 0 : null);
+    if (myAt === null) {
+        return null;
+    }
+    const all = Object.entries(rs).sort((a, b) => a[1].at - b[1].at);
+    const first = all.find(([, r]) => (r.open && r.m >= GAP_ON_M) || r.lost);
+    if (!first || myAt >= first[1].at) {
+        return null;
+    }
+    return {ids: all.filter(([, r]) => r.at >= first[1].at).map(([id]) => id), id: first[0],
+            m: Math.round(first[1].m)};
 }

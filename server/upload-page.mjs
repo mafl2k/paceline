@@ -70,14 +70,14 @@ export function uploadHref(club, slug, date, now) {
 // pasted in a fold; races spec §4: the text upload went); the captain picks the file and Continue
 // makes an inbox entry and goes on to the team page with it picked (?e=<id>#panel, manage.mjs; nothing
 // goes on by itself). `plan` (any id of a race plan of this team; any other value is ignored) is the
-// plan the page was opened for (the plan ⋯'s New version, a hole's link): it is sent on as `forPlan`,
+// plan the page was opened for (a hole's link; the plan ⋯'s New version until 23 Nov 2026, links of it already handed out): it is sent on as `forPlan`,
 // the Store form's preselection. `date` (when it passes isDate) is the race the page was opened for
-// (the race ⋯'s "Upload a file for this race", a hole's link): it is sent on as `forDate`, the Store
+// (a hole's link; the race ⋯'s "Upload a file for this race" until 23 Nov 2026, links of it already handed out): it is sent on as `forDate`, the Store
 // form's race. The way back is the team page. The form's action keeps `plan` and `date`, so a refused
 // upload (also one refused before its body is read) draws the same page again. `flash` (a refused
 // upload's text, kind 'err') at the top. Never reloads itself. `seen`, `others`: captainPage's.
 // Plans from ZwiftGopher waiting for the team show as a line with the way to the team page; "Plan on
-// ZwiftGopher" itself sits on the team page, above "Upload a file instead" (user, 19 Nov 2026; races
+// ZwiftGopher" itself sits on the team page, above "Upload a file" (user, 19 Nov 2026; races
 // spec §4), not here: this page is for the file. A `from` in the query (a link from before the team
 // cockpit) is ignored.
 export function uploadPage(club, slug, {now, seen, others, plan = null, date = null, flash = null}) {

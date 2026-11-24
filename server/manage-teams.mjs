@@ -1,8 +1,8 @@
-// The team forms (spec §5.2), urlencoded POSTs behind the club gate (manage.mjs): make live and its
-// Undo, delete, unpin and rename a plan, a race's date, time and event link (races spec §4: the two
-// ⋯ menus), and the team's add, rename, start time and delete; the old Undo form (/manage/undo) and
-// the old Restore form (gone with the team cockpit, team cockpit spec §4.1) answer that their page
-// was out of date. Each handler gets
+// The team forms (spec §5.2), urlencoded POSTs behind the club gate (manage.mjs): make live, delete,
+// unpin and rename a plan, a race's date, time and event link (races spec §4: the two ⋯ menus), and
+// the team's add, rename, start time and delete; the old Undo forms (/manage/undo, and
+// /manage/live/undo: Undo went on 23 Nov 2026) and the old Restore form (gone with the team cockpit,
+// team cockpit spec §4.1) answer that their page was out of date. Each handler gets
 // (req, res, ctx, cid, form) with the principal's club id and answers 303 to the page it came from
 // with a flash (done, manage-page.mjs), a refusal on that page, or a page of its own.
 import {html} from './http.mjs';
@@ -13,7 +13,7 @@ import {
 import {effects, teamWeekday, raceStartAt} from './select.mjs';
 import {parseEventUrl} from './ids.mjs';
 import {clubErrorText, field, teamOf, sheetOf, planOf, done, refuse, attempt, frameOf, placePath, teamPlace} from './manage-page.mjs';
-import {liveQuestion, undoOffer, raceWithin, raceMoveWords, dateDay} from './team-view.mjs';
+import {liveQuestion, raceWithin, raceMoveWords, dateDay} from './team-view.mjs';
 import {liveConfirmPage, teamDeleteWords, deletePlanWords} from './team-page.mjs';
 import {confirmPage} from './ui.mjs';
 import {raceOf} from './races.mjs';
@@ -40,7 +40,7 @@ function effectsText(before, after, date, now, head) {
 // and a browser without it agree, and a page drawn before the gate opened still asks: without
 // confirm=1, a switch that must ask (the gate open for the plan replaced or the one becoming live, or
 // a warning) answers with the question (liveConfirmPage: what it does, the outdated marks) and nothing
-// changes; any other acts at once, and the page it goes back to offers Undo (team-page.mjs undoBlock).
+// changes; any other acts at once (no Undo: Make live of the version live before takes it back).
 // The flash names the moves and the holes the change makes on the sheet's date. Upload times stay.
 // Back to the team page at the race's live pointer (?r=<date>: the version now live, and after a
 // later switch by someone else the one live then; a `back` or `from` of a page from before the team
@@ -67,59 +67,12 @@ function live(req, res, ctx, cid, form) {
         return;
     }
     const after = store.get(cid);
-    done(res, ctx, cid, teamPlace(slug, {r: sheet.date}), effectsText(before, after, sheet.date, now, t('live-done', {label: sheet.label, n: sheet.n, team: after.teams[slug].name})), 'ok', {undo: true});
+    done(res, ctx, cid, teamPlace(slug, {r: sheet.date}), effectsText(before, after, sheet.date, now, t('live-done', {label: sheet.label, n: sheet.n, team: after.teams[slug].name})));
 }
 
 
-// POST /manage/live/undo (team, version, confirm): Undo of the last change of the team's live
-// plan (UI panel wave 2): makes the version that was live before it live again, while Undo is
-// offered (undoOffer: at most 10 minutes after the change, and nothing changed since). A stale
-// `version` is refused as Make live's (409, nothing changes); an Undo no longer offered says so
-// (409). Then the same rule as Make live: without confirm=1, an Undo that must ask answers with the
-// question (its form posts this Undo again, with confirm=1); else it acts, says "Undone", and offers
-// no Undo of its own. It goes on to the team page at that race's live pointer (?r=<date>; a refusal:
-// the same, the version live now).
-function undoLive(req, res, ctx, cid, form) {
-    const {store, now} = ctx;
-    const slug = field(form, 'team');
-    const before = store.get(cid);
-    const team = teamOf(before, slug);
-    if (!team) {
-        refuse(res, ctx, cid, t('club-not-found'));
-        return;
-    }
-    // a refusal keeps picked the version live now in the race of the team's last change
-    // (where the Undo was offered), as a stale Make live keeps its version
-    const lb = team.liveBefore;
-    const liveNow = lb && typeof lb.id === 'string' && Object.hasOwn(before.sheets, lb.id) ? raceOf(before, slug, before.sheets[lb.id].date)?.live ?? null : null;
-    const place = teamPlace(slug, typeof liveNow === 'string' ? {r: before.sheets[lb.id].date} : {});
-    if (Number(field(form, 'version')) !== team.version) {
-        refuse(res, ctx, cid, t('back-changed', {team: team.name}), {status: 409, place});
-        return;
-    }
-    const u = undoOffer(before, slug, now);
-    if (u === null) {
-        refuse(res, ctx, cid, t('undo-late'), {status: 409, place});
-        return;
-    }
-    if (field(form, 'confirm') !== '1') {
-        const q = liveQuestion(before, slug, u.id, now);
-        if (q.ask) {
-            html(res, 200, liveConfirmPage(before, slug, u.id, {...frameOf(ctx, cid), words: q.words, marks: q.marks, undo: {version: team.version}}));
-            return;
-        }
-    }
-    const to = teamPlace(slug, {r: u.prev.date});
-    const word = e => (e.code === 'changed' ? t('back-changed', {team: team.name}) : clubErrorText(e));
-    if (!attempt(res, ctx, cid, c => makeLive(c, slug, u.id, now, {version: team.version, undo: false}), {place: to, word})) {
-        return;
-    }
-    const after = store.get(cid);
-    done(res, ctx, cid, to, effectsText(before, after, u.prev.date, now, t('undo-done', {n: u.prev.n, label: u.prev.label, team: after.teams[slug].name})));
-}
-
-
-// POST /manage/undo (team, version), from a page drawn before Undo went (Ruling 9), and Restore's
+// POST /manage/undo (team, version), from a page drawn before Undo went (Ruling 9), POST
+// /manage/live/undo (team, version, confirm) from a page drawn before its Undo went (23 Nov 2026), and Restore's
 // POST (team, plan, n, version, confirm) from a page drawn before Restore went (team cockpit spec
 // §4.1): nothing changes; 303 to the team page (or the teams, for a team that is gone)
 // with the out-of-date flash.
@@ -304,9 +257,11 @@ function teamAsk(res, ctx, cid, slug, {heading, words, fields, button, danger = 
 // The flash after a change of team `slug`'s race rhythm (after: the club changed; `was` its kind
 // before; `changed` setRhythm's {rhythm, start}, null for the kind action): the rhythm, or the start
 // time alone when only it changed, or both in one sentence naming the team once (user, 22 Nov 2026);
-// then, when the kind changed and the team has plans, what the switch does to the start of its plans
-// (the coordinator, 19 Nov 2026); a race with its own time keeps it (races Task 2 ruling), so with
-// one only the others move.
+// then, when the team has plans, what the change does to them: made special, its plans keep their
+// race times; made weekly, or its start time changed, races already planned keep their time (user,
+// 23 Nov 2026: a race's start is pinned when it is made, the team's time is only the default for
+// new races; this replaces the lines that said plans "now start at …"; a race stored before times
+// were pinned still follows the team's time on read).
 function rhythmFlash(after, slug, was, changed = null) {
     const {name, kind, start: own} = after.teams[slug];
     const day = t(`weekday-${teamWeekday(after, slug)}`);
@@ -315,10 +270,8 @@ function rhythmFlash(after, slug, was, changed = null) {
         : !changed.rhythm ? (own === null ? t('team-start-cleared', {team: name}) : t('team-start-set', {team: name, start: own}))
         : own === null ? t('team-rhythm-no-start', {team: name, weekday: day}) : t('team-rhythm-start', {team: name, weekday: day, start: own});
     const plans = Object.values(after.sheets).some(sh => sh.team === slug);
-    const ownTime = Object.values(after.teams[slug].races ?? {}).some(r => r.start != null);
-    const what = !plans || kind === was ? null : kind === 'special' ? t('team-kind-special-keep')
-        : own != null ? t(ownTime ? 'team-kind-weekly-start-others' : 'team-kind-weekly-start', {start: own})
-        : t(ownTime ? 'team-kind-weekly-none-others' : 'team-kind-weekly-none');
+    const what = !plans ? null : kind === 'special' ? (kind === was ? null : t('team-kind-special-keep'))
+        : kind !== was || changed?.start === true ? t('team-races-keep') : null;
     return [said, what].filter(Boolean).join(' ');
 }
 
@@ -389,7 +342,8 @@ function teamAction(req, res, ctx, cid, form) {
         }
         if (attempt(res, ctx, cid, c => setStart(c, slug, start, now), {place: settings, typed: {start: typedStart}})) {
             const {name: team} = store.get(cid).teams[slug];
-            done(res, ctx, cid, settings, start === null ? t('team-start-cleared', {team}) : t('team-start-set', {team, start}));
+            const keep = Object.values(store.get(cid).sheets).some(sh => sh.team === slug) ? ` ${t('team-races-keep')}` : '';
+            done(res, ctx, cid, settings, (start === null ? t('team-start-cleared', {team}) : t('team-start-set', {team, start})) + keep);
         }
     } else if (action === 'kind') {
         const weekday = postedWeekday(form, teamWeekday(store.get(cid), slug));
@@ -433,7 +387,7 @@ function teamAction(req, res, ctx, cid, form) {
 // path -> handler
 export const TEAM_FORMS = {
     '/manage/live': live,
-    '/manage/live/undo': undoLive,
+    '/manage/live/undo': outOfDate,
     '/manage/plan/back': outOfDate,
     '/manage/plan/rename': renameAction,
     '/manage/race': raceAction,

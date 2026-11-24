@@ -221,8 +221,9 @@ export function restGapBand(g) {
 
 
 // The gap band under the recovery fields (coordinator ruling, 20 Nov 2026): only in chaos, where
-// an Action-only rider has nothing else to show the gap. Outside chaos the fields only show with a
-// Rest window open, whose status line has the gap already, so it is not shown twice.
+// an Action-only rider has nothing else to show the gap. Outside chaos the gap is in a status line
+// already: the open Rest window's, or (no Rest window, user, 23 Nov 2026) the Action window's own in
+// the bar's place (clockInFields), so it is not shown twice.
 export function fieldsGapBand(g, reason) {
     return reason === 'chaos' ? restGapBand(g) : null;
 }
@@ -301,7 +302,8 @@ export function shownModel({m, dash, meanW = null, wheel = null, next = null}) {
 
 // ---------- the recovery fields (spec 2026-11-20-paceline-big-numbers, section 3) ----------
 // While I rest, the Action window can show three fields in the pull's three slots instead of
-// nothing (an open Rest window has the countdown), and in chaos (no countdown) always.
+// nothing (an open Rest window has the countdown) or the big countdown (without one the countdown
+// is the right field, user, 23 Nov 2026), and in chaos (no countdown) always.
 
 // The slot choices (the settings' select values) and the slots' defaults: my power now in the
 // middle, left and right empty (user, 20 Nov 2026).
@@ -378,16 +380,47 @@ export function fieldSlots(s = {}) {
 // Whether the Action window shows the fields. model: windowModel's (actionModel's) model; reason:
 // the rotation's. Only while I rest: the countdown ('rest', the standing clock too) or a dash
 // ('none': climb, descent, …, the fields keep showing live values), never in READY (the last WARN_S,
-// the start rider in the pen) or my pull. Then in chaos always (no countdown to show), else only
-// with the option on and a Rest window open (it has the countdown; when it closes, the countdown
-// is back here at once). Outside a TTT event ('noevent') the windows stay quiet.
+// the start rider in the pen) or my pull. Then in chaos always (no countdown to show), else with the
+// option on: with a Rest window open (it has the countdown) the three fields picked, without one the
+// countdown in the right field (clockInFields; user, 23 Nov 2026). Outside a TTT event ('noevent')
+// the windows stay quiet.
 export function fieldsShown({recFields, restOpen, model, reason}) {
-    const ready = model?.kind === 'rest' && (model.next || model.timeS === 0);
-    const resting = (model?.kind === 'rest' && !ready) || model?.kind === 'none';
-    if (!resting || reason === 'noevent') {
+    if (!restingModel(model) || reason === 'noevent') {
         return false;
     }
-    return reason === 'chaos' || (recFields === true && !!restOpen);
+    return reason === 'chaos' || recFields === true;
+}
+
+
+// Whether the fields carry the countdown (user, 23 Nov 2026): the option on and no Rest window that
+// has it, so the Action window alone shows two fields and the countdown with my place as the third
+// one, in the right field, where READY and my pull's time come next. Not in chaos (no countdown).
+export function clockInFields({recFields, restOpen, model, reason}) {
+    return fieldsShown({recFields, restOpen, model, reason}) && reason !== 'chaos' && !restOpen;
+}
+
+
+function restingModel(model) {
+    const ready = model?.kind === 'rest' && (model.next || model.timeS === 0);
+    return (model?.kind === 'rest' && !ready) || model?.kind === 'none';
+}
+
+
+// The countdown as one field (user, 23 Nov 2026): the number on top ("≥" while the clock stands),
+// under it my place, "#2"; no "s" for the seconds (user, 23 Nov 2026: the field is plain enough
+// without). null: no countdown.
+// "≥" only up to 9:59: "≥10:47" is wider than the field and runs into the middle one (review, 23 Nov
+// 2026); the dimmed number and the "+N" under the fields still say the clock stands.
+export function clockField(m) {
+    if (m?.kind !== 'rest') {
+        return null;
+    }
+    const text = restClock(m.timeS);
+    const secs = text.endsWith(S.secUnit);
+    const num = secs ? text.slice(0, -S.secUnit.length) : text;
+    return {num: (m.standing && num.length < 5 ? '\u2265' : '') + num,
+            unit: '',
+            place: m.place === null || m.place === undefined ? '' : fmt('place', {n: m.place})};
 }
 
 

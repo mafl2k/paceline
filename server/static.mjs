@@ -1,6 +1,6 @@
 // The static files: /static/app.css (app-css.mjs) and /static/app.js (client.mjs, read once at
 // start), which every page links, and the brand images from assets/ (the favicon and touch icon on
-// every page, the logo on the start page; user, 22 Nov 2026). Each carries an ETag of its content; a link with the matching
+// every page, the banner on the start page; user, 22 and 23 Nov 2026). Each carries an ETag of its content; a link with the matching
 // ?v= (cssHref, jsHref) may be cached for a year, a bare one is revalidated.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -12,7 +12,7 @@ const hash = body => crypto.createHash('sha256').update(body).digest('hex').slic
 const FILES = {
     '/static/app.css': {type: 'text/css; charset=utf-8', body: Buffer.from(APP_CSS)},
     '/static/app.js': {type: 'text/javascript; charset=utf-8', body: fs.readFileSync(new URL('./client.mjs', import.meta.url))},
-    '/static/logo.png': {type: 'image/png', body: fs.readFileSync(new URL('./assets/logo.png', import.meta.url))},
+    '/static/banner.png': {type: 'image/png', body: fs.readFileSync(new URL('./assets/banner.png', import.meta.url))},
     '/static/favicon.svg': {type: 'image/svg+xml', body: fs.readFileSync(new URL('./assets/favicon.svg', import.meta.url))},
     '/static/apple-touch-icon.png': {type: 'image/png', body: fs.readFileSync(new URL('./assets/apple-touch-icon.png', import.meta.url))},
 };
@@ -23,7 +23,7 @@ for (const f of Object.values(FILES)) {
 
 export const cssHref = `/static/app.css?v=${FILES['/static/app.css'].hash}`;
 export const jsHref = `/static/app.js?v=${FILES['/static/app.js'].hash}`;
-export const logoHref = `/static/logo.png?v=${FILES['/static/logo.png'].hash}`;
+export const logoHref = `/static/banner.png?v=${FILES['/static/banner.png'].hash}`;
 export const faviconHref = `/static/favicon.svg?v=${FILES['/static/favicon.svg'].hash}`;
 export const touchIconHref = `/static/apple-touch-icon.png?v=${FILES['/static/apple-touch-icon.png'].hash}`;
 

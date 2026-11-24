@@ -1199,6 +1199,12 @@ test('privacy page', async () => {
         // the text keeps the apostrophe as an entity
         assert.match(text, /6\(1\)\(b\) for the club, 6\(1\)\(f\) for plans and delivery, 6\(1\)\(a\) for the uploading rider(&#39;|')s own data in recordings, 6\(1\)\(f\) for the rows of the other plan riders in them/, 'the legal bases');
         assert.match(text, /own team and in the same race, the data is what every rider in the race sees, there is no heart rate or cadence, only the operator opens the files/);
+        // the anonymous traffic rows: in the data column, in the kept column and in the legal bases
+        assert.match(text, /rows of riders outside the team(&#39;|')s plans, with their Zwift ID: the server drops them\), with the plan codes found in them, and anonymous rows/);
+        assert.match(text, /anonymous rows of other riders near the uploader \(Paceline sends up to 20 at each moment, within 100 m ahead and 50 m behind\): a number valid for that recording only, the distance to the uploader, speed, power, draft and whether they ride in the same event; no name, no Zwift ID, no map position/);
+        assert.match(text, /but nothing out of the anonymous rows of other riders, which name nobody \(backups: see below\)/);
+        assert.match(text, /and 6\(1\)\(f\) for the anonymous rows of other riders near the team\./);
+        assert.match(text, /disturb the team(&#39;|')s line when analysing its rides\. That is a small step too: the rows carry no name, Zwift ID or map position, only a number that is valid for that one recording, only the operator opens the files/);
         assert.match(text, /Recordings of a race[^.]*The operator\. The club sees the list and can delete a recording\./, 'who sees recordings');
         assert.doesNotMatch(text, /Recordings of a race[^.]*That club/);
         assert.match(text, /untick the box in Paceline/);

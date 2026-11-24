@@ -11,6 +11,7 @@ import {gapsCheck} from './checks/gaps.mjs';
 import {finishCheck} from './checks/finish.mjs';
 import {uploadCheck} from './checks/upload.mjs';
 import {viewsCheck} from './checks/views.mjs';
+import {trafficCheck} from './checks/traffic.mjs';
 
 export const REPORT_VERSION = 1;
 
@@ -56,6 +57,7 @@ export function analyse(text, {plans = [], planAll = null, names = false, file =
         finish: finishCheck(ride),
         upload: uploadCheck(ride, text),
         views: viewsCheck(ride, gt, {from, to, frames}),
+        traffic: trafficCheck(ride, {from, to}),
     };
     return {result, ride};
 }
@@ -68,7 +70,7 @@ function noTicks({head, bad}, file) {
         kind: 'paceline-ride-report', reportVersion: REPORT_VERSION, file,
         overview: {...skip, verdict: 'keine Ticks: die Aufzeichnung hat nur die Kopfzeile', team: head.team ?? head.plan?.team ?? null,
                    version: head.version ?? null, startedAt: head.startedAt ?? null, rollOff: {at: null}, ticks: 0, badLines: bad},
-        pulls: skip, puller: skip, countdown: skip, gaps: skip, finish: skip, upload: skip, views: skip,
+        pulls: skip, puller: skip, countdown: skip, gaps: skip, finish: skip, upload: skip, views: skip, traffic: skip,
     };
 }
 

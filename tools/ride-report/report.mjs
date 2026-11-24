@@ -80,7 +80,7 @@ export function run(argv, {log = console.log} = {}) {
     fs.mkdirSync(dir, {recursive: true});
     fs.writeFileSync(path.join(dir, 'report.json'), JSON.stringify(pub, null, 1) + '\n');
     fs.writeFileSync(path.join(dir, 'report.md'), renderMarkdown(pub));
-    for (const [n, k] of [[1, 'overview'], [2, 'pulls'], [3, 'puller'], [4, 'countdown'], [5, 'gaps'], [6, 'finish'], [7, 'upload'], [8, 'views']]) {
+    for (const [n, k] of [[1, 'overview'], [2, 'pulls'], [3, 'puller'], [4, 'countdown'], [5, 'gaps'], [6, 'finish'], [7, 'upload'], [8, 'views'], [9, 'traffic']]) {
         log(`${n}. ${pub[k].verdict}`);
     }
     log(`→ ${path.join(dir, 'report.md')}, report.json`);

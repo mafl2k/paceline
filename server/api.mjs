@@ -78,6 +78,15 @@ function lists(club, zwiftId, now) {
 }
 
 
+// The names of the club's teams whose live, unused sheet has the Zwift ID among its riders (not
+// the planner's roster, the club's rider pool), sorted, each once: "your teams" in the mod's Clubs.
+export function teamsListing(club, zwiftId, now) {
+    const names = servable(club, now).filter(c => roleIn(c.sheet, zwiftId) === 'rider')
+        .map(c => club.teams[c.slug]?.name).filter(n => typeof n === 'string');
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
+
 const byAge = (a, b) => ((Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0)) || (a.id < b.id ? -1 : 1);
 
 
@@ -177,7 +186,7 @@ export function handleRider(req, res, {store, cfg, now, codeFails}, zwiftId, que
 
     const circles = [];
     for (const c of [...shown.values()].sort(byAge)) {
-        const entry = {id: c.id, name: c.name, lists: lists(c, zwiftId, now)};
+        const entry = {id: c.id, name: c.name, lists: lists(c, zwiftId, now), teams: teamsListing(c, zwiftId, now)};
         circles.push(byCode.has(c.id) ? {...entry, private: true, code: byCode.get(c.id)} : entry);
     }
     for (const cid of needed) {

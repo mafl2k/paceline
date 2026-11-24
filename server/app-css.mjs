@@ -120,6 +120,11 @@ code{font-family:var(--mono);font-size:.9em;font-weight:650;letter-spacing:.05em
 
 /* the live tag of a plan without a start time */
 .tag.off{background:var(--err-bg);color:var(--err-fg);border-color:var(--err-bd)}
+/* the race's phase beside the live row's Live (user, 23 Nov 2026): Sending in the accent's colours,
+   Started in amber; a race that is over: its Live grey */
+.tag.sending{background:var(--accent-soft);color:var(--accent-soft-fg);border-color:var(--accent)}
+.tag.started{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-bd)}
+.tag.was{background:var(--neutral-bg);color:var(--muted);border-color:var(--neutral-bd)}
 
 /* folds open inline, never as a popover or a fixed bar */
 details>summary{list-style:none;cursor:pointer}
@@ -131,10 +136,8 @@ form[data-arm].armed>[data-arm-open]{display:none}
 .arm-strip{display:grid;gap:.625rem;flex-basis:100%;width:100%;padding:.75rem .875rem;border-radius:var(--r2);background:var(--surface-2);border:1px solid var(--control);font-size:.9375rem;color:var(--text);font-weight:400;text-align:left}
 .arm-btns{display:flex;flex-wrap:wrap;gap:.5rem}
 @media (max-width:1023px){.arm-btns>.btn{flex:1 1 100%}}
-.flash.undo{align-items:center;flex-wrap:wrap}
 /* a plan block a Rename lands on (#plan-<id>): below the sticky top bar on phones */
 [id^="plan-"]{scroll-margin-top:5rem}
-.flash.undo>p{flex:1 1 12rem}
 
 .help>summary{display:inline-flex;align-items:center;gap:.375rem;min-height:var(--tap);color:var(--accent);font-weight:600;font-size:.9375rem}
 .help .i{width:1.125rem;height:1.125rem}
@@ -215,6 +218,9 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .fold>summary::after{content:"";position:absolute;right:.25rem;top:50%;width:.6rem;height:.6rem;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg)}
 .fold[open]>summary::after{transform:translateY(-30%) rotate(225deg)}
 .fold[open]>summary{margin-bottom:.75rem}
+/* the rest of a hint (user, 23 Nov 2026): a small "More" under the hint, a 44 px target */
+.fold.more>summary{min-height:var(--tap);font-weight:600;font-size:.9375rem;color:var(--accent);padding-right:1.5rem;width:max-content;max-width:100%}
+.fold.more[open]>summary{margin-bottom:.25rem}
 .card.fold{padding-block:.5rem}
 .card.fold[open]{padding-bottom:1.125rem}
 /* the Store form's race fold, its last block (user, 22 Nov 2026): the summary names the race, its
@@ -226,7 +232,7 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 .fname{display:flex;align-items:center;gap:.5rem;font-weight:600;flex-wrap:wrap}
 .fname .i{color:var(--muted)}
 
-/* the Store form's "What happens", the Store flash's lines */
+/* the warning lines above a card's action bar, the Store flash's lines */
 .pv-list{display:grid;gap:.5rem}
 .pv-list li{display:flex;flex-wrap:wrap;gap:.25rem .625rem;align-items:flex-start;line-height:1.4}
 .pv-list li>span{flex:1 1 0;min-width:0}
@@ -322,7 +328,8 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 
 /* page */
 .page{display:grid;gap:1rem;align-content:start;padding:1rem max(1rem,env(safe-area-inset-right)) 2rem max(1rem,env(safe-area-inset-left));max-width:44rem;margin:0 auto}
-.home-logo{display:block;width:min(15rem,60vw);height:auto;margin:.5rem auto 0;border-radius:var(--r3);box-shadow:var(--shadow)}
+/* the start page's banner: as wide as the card under it (user, 23 Nov 2026) */
+.home-logo{display:block;width:100%;height:auto;margin:.5rem 0 0;border-radius:var(--r3);box-shadow:var(--shadow)}
 .page.narrow{max-width:28rem;padding-top:3rem}
 .pagehead{display:grid;gap:.375rem}
 .pagehead h1{font-size:1.875rem;line-height:1.15;font-weight:750;letter-spacing:-.01em}
@@ -330,20 +337,23 @@ input[type=radio],input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.15re
 p.race{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem;font-size:1.125rem;font-weight:650}
 p.race .in{font-weight:500;color:var(--muted)}
 /* the team page's races (races spec §4b): the team's rhythm in the head, then each race ahead (its
-   line, its plans), a later race's live plan and riders in a fold, the races that are over at the end */
-.rhythm{color:var(--muted);font-weight:600}
+   line, its plans), a later race's notes and its live row (its riders: the card), the races that are over at the end */
 div.race{display:grid;gap:.75rem;align-content:start;min-width:0;scroll-margin-top:5rem}
 div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
-.race-more .cols{margin-top:.25rem}
-.cols{display:grid;gap:1rem;align-content:start;min-width:0}
+/* the team page's list (user, 24 Nov 2026): the plans not stored yet and each race ahead in a box of
+   their own */
+.cp-list>:is(div.cp-race,.cp-pending){background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:.875rem 1rem 1rem}
+.cp-list>div.cp-race.later{padding-top:.875rem}
 /* the team cockpit (team cockpit spec §5, §5.3b): its slots #panel (the flash and the card's top),
    .cp-list and #panel-body (the card's body) in one grid, stacked below 1180 px; an empty slot takes
    no room. The card is one framed box in every state (.cp-top over .cp-body): its head, the rider
    table, the "what happens" slot and the action bar at its bottom */
 .cp{display:grid;gap:1rem;align-content:start;min-width:0}
 .cp>*{min-width:0}
-#panel:empty,#panel-body:empty,.cp-what:empty,.cp-bar:empty{display:none}
+#panel:empty,#panel-body:empty,#panel-acts:empty,.cp-what:empty,.cp-bar:empty{display:none}
 #panel,#panel-body,.cp-plan{scroll-margin-top:5rem}
+/* the swap focuses #panel for screen readers; it is no control, so no ring (Safari drew one on a click) */
+#panel:focus{outline:none}
 .cp-top,.cp-body{background:var(--surface);border:1px solid var(--border);min-width:0}
 .cp-top{border-bottom:0;border-radius:var(--r3) var(--r3) 0 0;padding:1rem 1.25rem .25rem}
 /* (no shadow: a shadow on either half would draw a seam where they meet) */
@@ -359,21 +369,42 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 .cp-meta .plancode{margin:0 .75rem 0 0}
 .cp-meta .plancode code{line-height:1.2}
 .cp-meta .count{font-size:inherit}
-/* the Store form's "Make live" box, a bare label in the form: its whole line is the 44 px target */
-/* the Store form in its row (spec §5.4): the row's whole width, its fields spaced */
-.cp-pick{flex-basis:100%;min-width:0}
-.cp-pick form{display:grid;gap:1rem;padding:.5rem .5rem 1rem}
-.cp-pick form>label:not(.field){display:flex;align-items:center;gap:.625rem;min-height:var(--tap)}
-.cp-pick form>label:not(.field)>input{margin:0}
-#panel>:is(.flash,.result){margin-bottom:.75rem}
-.cp-what{margin-top:.75rem}
-.cp-words{margin:0}
-.cp-what>.as-what>h3{font-size:1rem;font-weight:700;margin-bottom:.5rem}
-/* the action bar: the same place and height in every state; Discard at its other end, 24 px or more
-   from Store; an action asking first opens its strip over the bar's whole width */
-.cp-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 1.5rem;min-height:var(--btn);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)}
+/* the Store form in the card, under the rider table (user, 23 Nov 2026): its fields spaced */
+.cp-form{margin-top:1rem;min-width:0}
+.cp-form form{display:grid;gap:1rem}
+/* the one-shot message in its box (.cp-note), at the end of the card's head (.cp-top: under the title, the
+   sheet's ×, the plan code line; user, 24 Nov 2026): in the flow below 1180 px with its own ×, no auto-close
+   there; from 1180 px it floats over the card's top (below) */
+.cp-note{position:relative;margin-top:.625rem}
+.cp-note>:is(.flash,.result){margin:0 0 .5rem}
+.cp-note>.result:empty{display:none}
+.cp-note>.flash{padding-right:calc(var(--tap) + .25rem)}
+.cp-note-x{display:inline-flex;position:absolute;top:0;right:0;align-items:center;justify-content:center;min-width:var(--tap);min-height:var(--tap);border-radius:var(--r2);color:inherit}
+.cp-note-x:hover{background:var(--surface-2)}
+/* (the card's slot only: a list row's text has the class too and stays centred in its row) */
+.cp-body>.cp-what{margin-top:.75rem}
+/* the opened version's "Live since …" / "Was live …" under its table, apart from what happens */
+.cp-history{margin:0 0 .5rem}
+/* the action bar: the same place and height in every state; an action asking first opens its strip
+   over the bar's whole width. A status ("LIVE · riders get this", "Read only") at the card body's
+   end; the card's actions in #panel-acts (user, 23 Nov 2026): Discard · Store · Make live at the
+   bar's right end, Make live the rightmost, Discard 24 px or more from Store (the gap and its own
+   padding); an armed Discard's strip on a line of its own under them. Below 1180 px the bar is the
+   card's bottom (the card body then open at its foot, .has-acts), from 1180 px it stands in the row
+   under the title (below) */
+.cp-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;min-height:var(--btn);margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)}
 .cp-bar>.as-discard{display:contents}
-.cp-bar form.discard,.cp-bar>.cp-undo{margin-left:auto}
+#panel-acts>.cp-bar{justify-content:flex-end}
+.cp-bar form.discard:not(.armed){padding-right:.75rem}
+.cp-bar form.discard.armed{order:1}
+.cp-body.has-acts{border-bottom:0;border-radius:0}
+#panel-acts>.cp-bar{position:relative;margin-top:0;padding:1rem 1.25rem;border:1px solid var(--border);border-top:0;border-radius:0 0 var(--r3) var(--r3);background:var(--surface)}
+#panel-acts>.cp-bar::before{content:"";position:absolute;top:0;left:1.25rem;right:1.25rem;border-top:1px solid var(--border)}
+/* the ways to a plan at the list's top: from 1180 px only (the head has them below that) */
+.cp-ways{display:none}
+/* the Store form's Make live asking first (user, 23 Nov 2026): its strip takes the bar's place (below
+   1180 px; from there the strip floats under the buttons, which stay, user 24 Nov 2026) */
+@media not all and (min-width:1180px){.cp-bar.armed>:not(.arm-strip){display:none}}
 .cp-status{display:flex;align-items:center;gap:.5rem;min-height:var(--btn);margin:0;font-weight:650}
 .cp-status.ok{color:var(--ok-fg)}.cp-status.ok .i{color:var(--ok-icon)}
 .cp-status.neutral{color:var(--muted)}.cp-status.neutral .i{color:var(--neutral-icon)}
@@ -388,6 +419,8 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 .cp-refresh{display:inline-flex;align-items:center;min-height:var(--tap);font-weight:600}
 .cp-list{display:grid;gap:1.25rem;align-content:start}
 .cp-sub{font-size:.75rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+/* the box of the plans not stored yet: its heading as a race's line (user, 24 Nov 2026) */
+.cp-pending>.cp-sub{min-height:var(--tap);font-size:1.125rem;font-weight:650;letter-spacing:0;text-transform:none;color:var(--text)}
 .cp-pending,.cp-plan{display:grid;gap:.125rem;min-width:0}
 .cp-plan-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 .375rem;min-height:var(--tap);padding-block:.375rem;font-size:1.0625rem}
 .cp-plan-head .label{font-weight:750}
@@ -398,10 +431,13 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 .cp-link:hover{background:var(--surface-2)}
 .cp-what{min-width:0;font-size:.9375rem;overflow-wrap:anywhere}
 .cp-link .chev{flex:none;margin-left:auto;color:var(--muted)}
+/* the live row's LIVE tag at its end, before the chevron, centred on the row (user, 23 Nov 2026) */
+.cp-link>.tag{flex:none;margin-left:auto;align-self:center;vertical-align:0;line-height:1.25}
+.cp-link>.tag+.chev{margin-left:0}
+.cp-link>.tag+.tag{margin-left:0}
 .cp-row.live>.cp-link{box-shadow:inset 3px 0 0 var(--ok-icon)}
 .cp-row.live .cp-what{font-weight:650}
 .cp-row.picked>.cp-link{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
-.cp-row>form,.cp-row>.cp-row-undo{flex:none;padding-left:.5rem}
 .cp-older>summary{min-height:var(--tap);padding-left:.5rem;font-size:.9375rem;font-weight:600;color:var(--muted)}
 .cp-older[open]>summary{margin-bottom:0}
 #over .cp-race{padding-top:.75rem}
@@ -414,12 +450,14 @@ div.race.later{padding-top:.5rem;border-top:1px solid var(--border)}
 .teamhead .btn{flex:none;margin-block:-.75rem}
 /* the team page's way to a plan under the race line (UI panel wave 3): "Upload a plan" at full
    width on phones, as wide as its words from 1024 px; with a planner link (races spec §4) "Plan on
-   ZwiftGopher" so, and the file upload a quiet link under it */
+   ZwiftGopher" and "Upload a file" side by side when they fit, else the upload under it (user, 23 Nov
+   2026) */
 .headacts{display:flex;gap:.5rem}
 .headacts>.btn{flex:1 1 0;min-width:0}
-.headacts.planner{flex-direction:column;align-items:stretch;gap:.25rem}
+.headacts.planner{flex-wrap:wrap;align-items:center;gap:.5rem}
 .headacts.planner>.btn{flex:none}
-.headacts.planner>.btn.quiet{align-self:flex-start}
+/* on a phone the planner button takes the line's rest, so wrapped it stands at full width as before */
+@media not all and (min-width:1024px){.headacts.planner>.btn.primary{flex:1 1 auto}}
 /* the breadcrumb (ui.mjs placeNav): from 1024 px only, where it replaces the back bar and the kicker */
 .crumbs ol{display:flex;flex-wrap:wrap;align-items:center;gap:0 .375rem;font-size:.9375rem;font-weight:600;color:var(--muted)}
 .crumbs li{display:inline-flex;align-items:center;gap:.375rem;min-width:0}
@@ -466,6 +504,11 @@ a.tile:hover{border-color:var(--control)}
 .todo-acts>.discard{margin-left:auto}
 .todo-acts:has(>.discard){gap:1.5rem}
 .todo-acts>.discard.armed{margin-left:0}
+/* a plan waiting (the hub, user 23 Nov 2026): Review and store and Discard on one line on a phone
+   too, Discard at its other end; below 1024 px the line takes the row's whole width (under the icon
+   as well), so both fit at 375 px; an armed Discard's strip still takes a line of its own (from
+   1024 px the pair sits together at the row's end: the min-width:1024px block) */
+@media not all and (min-width:1024px){.todo-acts:has(>.discard){grid-column:1/-1}.todo-acts:has(>.discard:not(.armed)){flex-wrap:nowrap;gap:1rem}}
 /* the columns as wide as their words; a word longer than its share breaks rather than widen the page */
 .racetable{overflow-wrap:anywhere}
 .racetable td{overflow-wrap:break-word}
@@ -501,6 +544,10 @@ a.tile:hover{border-color:var(--control)}
 .log .team{font-weight:600}
 .value{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .value .i{color:var(--muted)}
+/* the settings pages' columns of cards (user, 23 Nov 2026): from 1180 px only; below that the boxes
+   give their cards to the page, which keeps its one column (.setend: the team's ZwiftGopher link and
+   the danger zone at the end) */
+.setcols,.setend{display:contents}
 .danger-zone{border:1px solid var(--danger-bd);background:var(--danger-soft);border-radius:var(--r3);padding:1.125rem 1rem;display:grid;gap:.75rem;justify-items:start}
 .danger-zone h2{display:flex;align-items:center;gap:.5rem;font-size:1.125rem;color:var(--danger-text)}
 .danger-zone>form.armed{justify-self:stretch}
@@ -533,13 +580,43 @@ a.tile:hover{border-color:var(--control)}
   /* the breadcrumb where the kicker was, the same height, so the title stays where it is */
   .app .crumbs{min-height:1.25rem;margin:-.375rem 0 -.625rem}
   .app .crumbs~.pagehead .kicker{display:none}
+  /* a kicker that names the page, not the club (Team settings over the team's name, user 23 Nov 2026) */
+  .app .crumbs~.pagehead .kicker.keep{display:flex}
+  /* the team page has no breadcrumb: the sidebar names the club and the team (user, 23 Nov 2026) */
+  .app .cockpit>.pagehead .kicker{display:none}
   .headacts>.btn{flex:none}
   .headacts.planner{align-items:flex-start}
+  /* a plan waiting (the hub, user 23 Nov 2026): Review and store and Discard side by side, the small
+     gap between them, at the row's end; an armed Discard's strip goes on a line of its own under
+     them while its trigger keeps its place (hidden), so Review and store does not move (review M8) */
+  .todo-acts:has(>.discard){display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.5rem}
+  .todo-acts:has(>.discard)>a{grid-column:2}
+  .todo-acts>.discard{grid-column:3;margin-left:0}
+  .todo-acts>.discard.armed{display:contents}
+  .todo-acts>.discard.armed>[data-arm-open]{display:inline-flex;visibility:hidden;grid-column:3;grid-row:1}
+  .todo-acts>.discard.armed>[data-arm-strip]{grid-column:1/-1}
+  /* the team page's head (user, 23 Nov 2026): the title line holds the title, "Updated 19:16" small and
+     raised beside it, and Team settings at its end; Plan on ZwiftGopher and Upload a file side by side,
+     right-aligned on a row of their own under it (from 1180 px on the title line: below); the stale
+     line, when shown, under all of it at the head's whole width */
+  .app .cockpit>.pagehead{display:grid;grid-template-columns:minmax(0,auto) auto 1fr auto auto;grid-template-areas:"title fresh . . set" "acts acts acts acts acts" "stale stale stale stale stale";align-items:center;gap:.375rem .5rem}
+  .app .cockpit>.pagehead h1{grid-area:title}
+  .app .cockpit>.pagehead .teamhead>.btn{grid-area:set;margin-left:.75rem}
+  .app .cockpit>.pagehead>.fresh{grid-area:fresh;align-self:start;margin-top:.125rem;font-size:.8125rem}
+  .app .cockpit>.pagehead>.headacts{grid-area:acts;justify-self:end;flex-direction:row;align-items:center;gap:.5rem}
+  .app .cockpit>.pagehead>.stale-banner{grid-area:stale}
   /* a question's Cancel beside its confirm button */
   .confirm-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
   /* the hub: the team tiles give way to the sidebar */
   .hub-teams{display:none}
   .app>.page.wide{max-width:67rem}
+  /* the settings pages at the wide pages' scale (user, 23 Nov 2026: "they seem bigger"): buttons as
+     the hub's and the team page's (.btn.small: 15 px, 44 px high), labels and card text 15 px, inputs
+     15 px and as high as the buttons beside them; hints and headings as they are. Phones keep
+     theirs (inputs 17 px, so iOS does not zoom) */
+  .page.settings .btn:not(.small){min-height:var(--tap);padding:.5rem .875rem;font-size:.9375rem}
+  .page.settings :is(.card,.danger-zone,label.field){font-size:.9375rem}
+  .page.settings input:not([type=checkbox],[type=radio],[type=hidden],[type=file]),.page.settings select{min-height:var(--tap);padding:.5rem .75rem;font-size:.9375rem}
   .nojs{max-width:51rem;margin:0 0 0 18.5rem;padding:.75rem 2.5rem 0}
   /* the head: kicker, then the title and the action beside it; the inner boxes give their items to it */
   .app :is(.pagehead,.clubhead){display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:.375rem 1.25rem;padding:0;margin:0}
@@ -549,11 +626,12 @@ a.tile:hover{border-color:var(--control)}
   .app .kicker{min-height:1.25rem;margin:0}
   /* the action as tall as the title, so the title sits where it does on a page without one */
   .app :is(.pagehead,.clubhead) .btn{flex:none;margin-block:calc((2.3rem - var(--tap)) / 2)}
-  /* the planner pair is no action beside the title: its two lines keep their whole 44 px */
-  .app .pagehead .headacts.planner>.btn{margin-block:0}
   .page.wide{max-width:62rem;padding:2rem 2.5rem 3rem}
 }
 @media (min-width:1180px){
+  /* the team page's head: Plan on ZwiftGopher and Upload a file on the title line, before Team
+     settings, above the card's column, so the list starts as high as the page's head (user, 23 Nov 2026) */
+  .app .cockpit>.pagehead{grid-template-areas:"title fresh . acts set" "stale stale stale stale stale"}
   /* the hub: one line per thing to do, where the words keep 12rem; the buttons in a column of their
      own width, so an open strip wraps under them and moves nothing (below this, stacked as on phones) */
   .todo>li{grid-template-columns:1.25rem minmax(7rem,11rem) minmax(12rem,1fr) 21rem;align-items:start}
@@ -566,22 +644,64 @@ a.tile:hover{border-color:var(--control)}
      right column's rows keep their own heights. No close link: the live version is a click on its
      row (spec §5.3b). The race line on one line (A7: "Thu 19 Nov · 19:30 · started · open since
      19:00" beside its ⋯) */
-  .cp{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto 1fr;gap:0 1.5rem}
-  .cp>.cp-list{grid-column:1;grid-row:1 / span 3}
+  .cp{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(calc(var(--btn) + .75rem),auto) auto auto auto 1fr;gap:0 1.5rem}
+  .cp>.cp-list{grid-column:1;grid-row:1 / -1}
+  /* the settings pages in the wide frame (user, 23 Nov 2026): the team page's width and left edge,
+     their cards flowing into as many columns as fit (24rem or more each: two in the frame's width),
+     in the page's order down each column, a card never split, a band kept with the card under it;
+     the danger zone last at the whole width */
+  .app>.page.settings{max-width:67rem}
+  .setcols{display:block;columns:24rem;column-gap:1.5rem}
+  .setcols>*{break-inside:avoid;margin:0 0 1rem}
+  .setcols>.band{break-after:avoid;margin-top:0}
+  .setend{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1rem 1.5rem;align-items:start}
   .cp>:not(.cp-list){grid-column:2}
+  /* one action row under the title (user, 23 Nov 2026): the ways to a plan at its left, at the list's
+     top (the head's give way), the card's actions at its right end above the card, its right edge on
+     the card's; the row keeps its height without any action. #panel-acts gives its parts to the grid:
+     the bar to that row, the hold note under the card. A question of the bar's actions (Make live,
+     Discard) opens as a panel floating under the buttons over the card's top, its right edge on the
+     card's: nothing moves, the buttons stay where the mouse is (user, 24 Nov 2026). The card ends
+     with its body, framed */
+  .cp>#panel{grid-row:2}
+  .cp>#panel-body{grid-row:3}
+  .cp>#panel-acts{display:contents}
+  .cp>#panel-acts>.cp-bar{grid-column:2;grid-row:1;align-self:start;justify-content:flex-end;margin:0 0 .75rem;padding:0;border:0;border-radius:0;background:none}
+  .cp>#panel-acts>.cp-bar::before{display:none}
+  .cp>#panel-acts>.cp-bar form[data-arm].armed{flex-basis:auto;width:auto}
+  .cp>#panel-acts>.cp-bar form[data-arm].armed>[data-arm-open]{display:inline-flex}
+  .cp>#panel-acts>.cp-bar form.discard.armed{order:0;padding-right:.75rem}
+  /* the one-shot message ("is live", a Store result) floats over the card's top, right under the action
+     row, on the card's width, below an open question (z-index 5), with a close ×: the card, the list and
+     the row do not move (user, 24 Nov 2026) */
+  .cp>#panel{position:relative}
+  .cp>#panel .cp-note{position:absolute;z-index:4;top:-.375rem;left:0;right:0;margin:0;display:grid;gap:.5rem;padding:.5rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);box-shadow:var(--shadow-pop)}
+  .cp>#panel .cp-note>:is(.flash,.result){margin:0}
+  .cp>#panel .cp-note>.result{padding:0 .5rem .25rem}
+  .cp>#panel .cp-note-x{top:.5rem;right:.5rem}
+  .cp>#panel-acts>.cp-bar .arm-strip{position:absolute;z-index:5;top:calc(100% + .375rem);right:0;flex-basis:auto;width:26rem;max-width:100%;background:var(--surface);box-shadow:var(--shadow-pop)}
+  .cp>#panel-acts>.cp-bar .arm-btns{justify-content:flex-end}
+  /* the row's buttons as small as the ways to a plan beside them (user, 24 Nov 2026: one size on the line) */
+  .cp>#panel-acts>.cp-bar{min-height:var(--tap)}
+  .cp>#panel-acts>.cp-bar>.btn,.cp>#panel-acts>.cp-bar form>[data-arm-open]{min-height:var(--tap);padding:.5rem .875rem;font-size:.9375rem}
+  .cp>#panel-acts>.cp-hold{grid-column:2;grid-row:4}
+  .cp-body.has-acts{border-bottom:1px solid var(--border);border-radius:0 0 var(--r3) var(--r3)}
+  /* as high as the action row over the card (less the list's gap), so the list's first box and the
+     card start on one line (user, 24 Nov 2026) */
+  .cp-ways{display:block;height:calc(var(--btn) + .75rem);margin-bottom:-1.25rem}
+  .cp-ways>.headacts{flex-direction:row;align-items:center;gap:.5rem}
+  .app .cockpit>.pagehead>.headacts{display:none}
   .cp-close{display:none}
-  .cp-list p.race{font-size:1rem}
-  /* a later race's fold in the list's column: one column */
-  .cockpit .cols{grid-template-columns:minmax(0,1fr)}
+  .cp-list p.race,.cp-list .cp-pending>.cp-sub{font-size:1rem}
 }
 /* the cockpit on phones and narrow windows (team cockpit spec §5.5): the list is the page; with a
    selection the panel is a sheet, a page mode of the body's classes (no overlay, no :has()), so it
-   works without the script and the script's swap flips it (and keeps the list's scroll place). Only the picked row's path stays in the
-   list: .sel-race, .sel-rows and .picked name it (the script moves them), and of a received plan's
-   row only its Store form. A version's sheet is the panel alone (the list gives all of it way) */
+   works without the script and the script's swap flips it (and keeps the list's scroll place). The
+   sheet is the panel alone, for a version and for a plan not stored yet with its Store form (the
+   list gives all of it way) */
 @media (max-width:1179.98px){
   body.cockpit.has-sel .topbar,body.cockpit.has-sel main>:not(.cp,.pagehead,.banner),body.cockpit.has-sel .pagehead>:not(.stale-banner),
-  body.cockpit.has-sel:not(.sel-e) .cp-list{display:none}
+  body.cockpit.has-sel .cp-list{display:none}
   /* the head's stale line and the DST banner stay (the Store sheet has time fields); a title of two
      lines keeps the close link at its right, never under it */
   .cp-head{flex-wrap:nowrap;align-items:flex-start}
@@ -589,28 +709,26 @@ a.tile:hover{border-color:var(--control)}
   .cp-close{margin-left:auto}
   body.cockpit.has-sel .cp{display:flex;flex-direction:column}
   body.cockpit.has-sel #panel{position:sticky;top:0;z-index:5;max-height:45vh;overflow-y:auto;padding-block:.25rem;background:var(--bg);border-bottom:1px solid var(--border)}
-  /* the sheet is the page: its card has no frame */
-  body.cockpit.has-sel :is(.cp-top,.cp-body){background:none;border:0;border-radius:0;box-shadow:none;padding-inline:0}
+  /* the sheet is the page: its card has no frame (its action bar neither, the line above it kept) */
+  body.cockpit.has-sel :is(.cp-top,.cp-body,#panel-acts>.cp-bar){background:none;border:0;border-radius:0;box-shadow:none;padding-inline:0}
+  body.cockpit.has-sel #panel-acts>.cp-bar::before{left:0;right:0}
+  body.cockpit.has-sel #panel-acts{margin-top:-1rem}
   /* a head that holds a Store result (many lines, the ways to the teams still to do) flows with the
      page instead of scrolling inside its 45vh (M3) */
   body.cockpit.has-sel #panel[data-result]{position:static;max-height:none;overflow:visible}
-  body.cockpit.has-sel .cp-list>:not(.sel-race),
-  body.cockpit.sel-e .sel-race>:not(.cp-pending),
-  body.cockpit.sel-e .sel-race>.cp-pending>:not(.sel-rows),
-  body.cockpit.sel-e .sel-rows>:not(.picked),
-  body.cockpit.sel-e .sel-rows>.picked>:not(.cp-pick){display:none}
+  /* the Store bar (Make live, Store, Discard) on one line down to 360 px (user, 23 Nov 2026) */
+  .cp-bar .btn{padding-inline:.875rem}
   /* nothing picked: the list's blocks and the panel's parts are the grid's own items (the list's box
-     goes, its region name stays), so the flash stays on top and the card (the nearest race's live
+     goes, its region name stays), so the card (its head with the message under it; the nearest race's live
      version, its riders) follows the nearest race, before the later races, Over and the help (M1);
      its row is marked as live, not as picked: no sheet is open. From 1180 px the list is one item in
      the left column */
   body.cockpit:not(.has-sel) .cp{gap:1.25rem}
   body.cockpit:not(.has-sel) :is(.cp-list,#panel){display:contents}
   body.cockpit:not(.has-sel) .cp-list>*{order:3;min-width:0}
-  body.cockpit:not(.has-sel) .cp-list>.cp-race:first-child{order:1}
-  body.cockpit:not(.has-sel) :is(#panel>.cp-top,#panel-body){order:2}
-  body.cockpit:not(.has-sel) #panel-body{margin-top:-1.25rem}
-  body.cockpit:not(.has-sel) #panel>:is(.flash,.result){margin:0}
+  body.cockpit:not(.has-sel) .cp-list>:is(.cp-race:first-child,.cp-ways+.cp-race,.cp-pending:first-child,.cp-ways+.cp-pending,.cp-pending:first-child+.cp-race,.cp-ways+.cp-pending+.cp-race){order:1}
+  body.cockpit:not(.has-sel) :is(#panel>.cp-top,#panel-body,#panel-acts){order:2}
+  body.cockpit:not(.has-sel) :is(#panel-body,#panel-acts){margin-top:-1.25rem}
   body.cockpit:not(.has-sel) .cp-row.picked>.cp-link{background:none;box-shadow:inset 3px 0 0 var(--ok-icon)}
   body.cockpit:not(.has-sel) .cp-row.picked>.cp-link:hover{background:var(--surface-2)}
 }

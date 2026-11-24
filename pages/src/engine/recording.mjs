@@ -12,6 +12,12 @@ export const MAX_AGE_MS = 15000;
 // in practice my team: the teams start apart.
 export const FALLBACK_RANGE_M = 300;
 export const FALLBACK_MAX = 15;
+// Traffic: riders near me who are not me and not a plan rider (other teams, and the fallback and
+// watched riders, whom the upload strips from `riders`), TRAFFIC_AHEAD_M ahead to TRAFFIC_BEHIND_M
+// behind, the TRAFFIC_MAX nearest.
+export const TRAFFIC_AHEAD_M = 100;
+export const TRAFFIC_BEHIND_M = 50;
+export const TRAFFIC_MAX = 20;
 
 
 export function planIds(plan) {
@@ -156,12 +162,55 @@ export function makeTick(nearby, ids, now, {fallback = false} = {}) {
 }
 
 
+// The riders near me who are not me and not plan riders, as anonymous rows {n, gap, speed, power,
+// draft, sg}, nearest first. `keptIds`: the athlete ids of me and the plan riders only (the tick's
+// rows with `self` or `inPlan`). The fallback and watched rows of the tick are not passed: the
+// upload strips them, so as traffic they go up anonymised. Why: on 22 Nov 2026
+// other teams caused the disorder at the end of a race, and the recordings held only the team.
+// Privacy: a row has no Zwift ID, no name and no map position. `n` is a number per rider within one
+// recording (`pseudo`: {epoch, next, ids}, epoch = start of the numbering), so a rider can be
+// followed from tick to tick; the id -> number map lives only in memory and is never written
+// anywhere. Only a rider in the returned list gets a number. `sg`: he is in my event subgroup.
+// `pseudo` null starts a new numbering; the input is not mutated.
+export function trafficStep(pseudo, list, keptIds, now) {
+    const ids = new Map(pseudo ? pseudo.ids : []);
+    let next = pseudo ? pseudo.next : 1;
+    const sgOf = x => Number(x.eventSubgroupId || x.state?.eventSubgroupId) || null;
+    const mySg = selfSubgroupId(list);
+    // rounded: speed to 0.1 km/h, power and draft to whole watts (digits is the decimals kept)
+    const num = (v, digits = 0) => Number.isFinite(v) ? Math.round(v * 10 ** digits) / 10 ** digits : null;
+    const traffic = (list || [])
+        .filter(x => x.self !== true && !keptIds.has(String(x.athleteId)) && Number.isFinite(x.gapDistance) &&
+                     x.gapDistance >= -TRAFFIC_AHEAD_M && x.gapDistance <= TRAFFIC_BEHIND_M &&
+                     (x.age ?? 0) <= MAX_AGE_MS)
+        .sort((a, b) => Math.abs(a.gapDistance) - Math.abs(b.gapDistance))
+        .slice(0, TRAFFIC_MAX)
+        .map(x => {
+            const id = String(x.athleteId);
+            if (!ids.has(id)) {
+                ids.set(id, next++);
+            }
+            return {
+                n: ids.get(id),
+                gap: Math.round(x.gapDistance) || 0,      // || 0: no -0
+                speed: num(x.state?.speed, 1),
+                power: num(x.state?.power),
+                draft: num(x.state?.draft),
+                sg: mySg !== null && sgOf(x) === mySg,
+            };
+        });
+    return {pseudo: {epoch: pseudo ? pseudo.epoch : now, next, ids}, traffic};
+}
+
+
 // The det fields that name a rider: each one goes into the recording only when it is a rider of the
 // current plan (`ids`: starters and bench) or me, else null (final review 18 Nov 2026: no Zwift ID
 // of a rider in no plan in the recording; the rows already keep only those riders). The rotation's
 // chain and the gap warnings follow plan riders only, but state carried over a plan change (the
 // wheel cue) can still name a rider of the plan before. `gap` keeps its numbers, without the id.
-// `order.out` (riders sitting out, 20 Nov 2026) keeps only the ids that pass.
+// `order.out` (riders sitting out, 20 Nov 2026) keeps only the ids that pass. The turn clocks' fields
+// (23 Nov 2026) follow the same rule: `turn.change.from/to`, `turn.hanging`, `turn.out` and the old
+// core's `old.puller`, `old.frontId` and `old.out`.
 export const DET_ID_FIELDS = ['puller', 'frontId', 'wheel', 'wheelObs', 'wheelCue'];
 
 export function detPlanOnly(det, ids, selfId) {
@@ -181,6 +230,31 @@ export function detPlanOnly(det, ids, selfId) {
     }
     if (out.order && typeof out.order === 'object' && Array.isArray(out.order.out)) {
         out.order = {...out.order, out: out.order.out.filter(id => id != null && known(id))};
+    }
+    const keep = ids => ids.filter(id => id != null && known(id));
+    const t = out.turn;
+    if (t && typeof t === 'object') {
+        out.turn = {...t};
+        if (t.change && typeof t.change === 'object') {
+            out.turn.change = {...t.change, from: ok(t.change.from), to: ok(t.change.to)};
+        }
+        for (const k of ['hanging', 'out']) {
+            if (Array.isArray(t[k])) {
+                out.turn[k] = keep(t[k]);
+            }
+        }
+    }
+    const o = out.old;
+    if (o && typeof o === 'object') {
+        out.old = {...o};
+        for (const k of ['puller', 'frontId']) {
+            if (k in o) {
+                out.old[k] = ok(o[k]);
+            }
+        }
+        if (Array.isArray(o.out)) {
+            out.old.out = keep(o.out);
+        }
     }
     return out;
 }

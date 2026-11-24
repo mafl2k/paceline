@@ -4,7 +4,7 @@
 // Pure: it reads the club and the checks it is given, and the clock is passed in. Plain text: the
 // page (Task 7) escapes it.
 import {t} from './pages.mjs';
-import {teamView, raceDates, byRaceOrder, newerNotLive, atLabel, dateDay, entryInfo, undoOffer} from './team-view.mjs';
+import {teamView, raceDates, byRaceOrder, newerNotLive, atLabel, dateDay, entryInfo} from './team-view.mjs';
 import {raceBase, tableBase, shownTarget} from './plan-table.mjs';
 import {diffVersions, diffSummary} from './diff.mjs';
 import {plansOf} from './plans.mjs';
@@ -20,15 +20,6 @@ const param = (params, key) => {
     const v = params.get(key);
     return typeof v === 'string' && v !== '' ? v : null;
 };
-
-
-// The Undo the cockpit offers (undoOffer) while the race of the version it changed is still to race:
-// a race that is over takes no Undo (makeLive refuses it, race-done), so the page offers none, with
-// a version picked or not. null otherwise.
-export function undoInRace(club, slug, now) {
-    const u = undoOffer(club, slug, now);
-    return u !== null && !raceOver(club, slug, u.live.date, now) ? u : null;
-}
 
 
 // What the page's URL picks (shapes: `?v=` wins over `?e=`, `?e=` over `?r=`): {kind: 'version', id}
@@ -98,9 +89,9 @@ export function pendingFor(club, slug, now) {
 }
 
 
-// One version's row (spec §5.2): `at` when it was stored; `liveLine` "live since 19:14" for the
-// race's live version ("live" without a liveAt: stored before it existed), "was live 18:57" for
-// another that was live, else null; `has` "4/6 have it" on the live version's row once its race's
+// One version's row (spec §5.2): `at` when it was stored; `live` for the race's live version (the
+// page tags its row LIVE at its end, user 23 Nov 2026; no "live since" or "was live" in the list: the
+// opened version's card says it); `has` "4/6 have it" on the live version's row once its race's
 // gate is open (spec §5.3b: opening another version never hides the count), else null; `summary` the
 // one-line difference against the race's live version, comparing the targets as the rider table
 // shows them (plan-table.mjs shownTarget, spec §7: a W/kg export and the next in watts is no change),
@@ -108,7 +99,8 @@ export function pendingFor(club, slug, now) {
 // version not live (newerNotLive), never in a race that is over (`over`: nothing can be made live
 // there); `picked` the row the card shows, `sheet` when the URL picked it (a phone's sheet: with
 // nothing picked the live row is picked, but no sheet is open); `race` the live row's race date (its
-// link is the race's live pointer, `?r=`), else null; `undo` (cockpitView) when the row offers Undo.
+// link is the race's live pointer, `?r=`), else null. No row has a form (user, 23 Nov 2026: Make live
+// only in the card's action bar, no Undo anywhere), so every row has the same shape.
 function versionRow(club, [id, s], {liveId, noticeId, pickedId, sheet, over, has, now}) {
     const tz = club.tz;
     const when = iso => {
@@ -116,9 +108,6 @@ function versionRow(club, [id, s], {liveId, noticeId, pickedId, sheet, over, has
         return Number.isFinite(ms) ? atLabel(ms, now, tz) : null;
     };
     const live = id === liveId;
-    const liveAt = s.liveAt == null ? null : when(s.liveAt);
-    const liveLine = live ? (liveAt === null ? t('cp-live') : t('cp-live-since', {at: liveAt}))
-        : liveAt === null ? null : t('cp-was-live', {at: liveAt});
     let summary = null;
     if (liveId !== null && !live) {
         try {
@@ -128,8 +117,8 @@ function versionRow(club, [id, s], {liveId, noticeId, pickedId, sheet, over, has
             // a version normalizePlan cannot read: its row stays, without a summary
         }
     }
-    return {id, n: s.n, at: when(s.at) ?? '–', live, race: live ? s.date : null, liveLine, has: live ? has : null, summary, notice: !over && id === noticeId,
-        picked: id === pickedId, sheet: sheet && id === pickedId, undo: false};
+    return {id, n: s.n, at: when(s.at) ?? '–', live, race: live ? s.date : null, has: live ? has : null, summary, notice: !over && id === noticeId,
+        picked: id === pickedId, sheet: sheet && id === pickedId};
 }
 
 
@@ -156,7 +145,7 @@ function raceList(club, slug, date, {over, pending, pickedId, sheet, has = null,
         const rows = [...p.versions].reverse().map(v => versionRow(club, v, {liveId, noticeId, pickedId, sheet, over, has, now}));
         const keep = (r, i) => i < SHOWN_VERSIONS || r.live || r.picked;
         return {
-            planId: p.id, label: p.label, live: p.live !== null,
+            planId: p.id, label: p.label, type: p.type, live: p.live !== null,
             shown: rows.filter(keep), older: rows.filter((r, i) => !keep(r, i)),
         };
     });
@@ -168,9 +157,8 @@ function raceList(club, slug, date, {over, pending, pickedId, sheet, has = null,
 // spec §5.3b): a received or uploaded plan ('entry'), a gone one ('gone'; also another team's entry,
 // which the route sends elsewhere), or a version: {kind: 'version', id, planId, date, isLive (its
 // race's live version), over (the race is over: read only), base (tableBase: what the table marks it
-// against; the live version itself, nothing), undo (the Undo of the team's last change, offered on
-// the version that change made live while its race is still to race: a race that is over takes
-// none), dflt (nothing picked: the nearest race's live version, drawn as if picked), rv (the race
+// against; the live version itself, nothing), dflt (nothing picked: the nearest race's live version,
+// drawn as if picked), rv (the race
 // view of its race while it is ahead: its count and, after the gate, its riders' states; null for a
 // race that is over)}. Nothing picked: the nearest race's live version (dflt); without one 'none'
 // ({date, close: false}: "Nothing live for <day> yet") when the race has plans, else 'blank' (no
@@ -203,12 +191,11 @@ function panelOf(club, slug, sel, view, now) {
     }
     const s = club.sheets[id];
     const isLive = raceBase(club, slug, s.date).id === id;
-    const u = isLive ? undoInRace(club, slug, now) : null;
     const dflt = sel.kind === 'none';
     const rv = view.races.find(r => r.live && r.live.id === id) ?? null;
     return {
         kind: 'version', id, planId: s.plan, date: s.date, isLive, over: raceOver(club, slug, s.date, now),
-        base: tableBase(club, slug, id), undo: u !== null && u.live === s, dflt, rv,
+        base: tableBase(club, slug, id), dflt, rv,
     };
 }
 
@@ -219,10 +206,7 @@ function panelOf(club, slug, sel, view, now) {
 // newest first: read only, no plans waiting there), `sel` and `panel` (panelOf). The plans not
 // stored yet (pendingFor) sit with the race an upload was made for, else with lists[0]. The row the
 // panel draws is picked: the selection's, or with nothing picked the nearest race's live version
-// (spec §5.3b). The Undo of the team's last switch (undoInRace) is offered once per page: on the
-// card when the card shows the version it made live, else on that version's row (`undo` 'shown'); the
-// row draws it also then, hidden ('hidden'), so a swap that takes the card's away can show it (the
-// fragment holds no list rows).
+// (spec §5.3b).
 export function cockpitView(club, slug, {now, seen = {}, sel = {kind: 'none'}}) {
     const view = teamView(club, slug, {now, seen});
     const {ahead, over, regular} = raceDates(club, slug, now);
@@ -241,18 +225,5 @@ export function cockpitView(club, slug, {now, seen = {}, sel = {kind: 'none'}}) 
     }));
     const overLists = over.map(date => raceList(club, slug, date, {over: true, pending: [], pickedId, sheet, now}));
     const out = {...view, lists, overLists, sel};
-    const panel = panelOf(club, slug, sel, out, now);
-    // the Undo of the last switch on the switched race's live row, always while it is offered (a swap
-    // can take the card's away), hidden while the card offers it (the script shows and hides it)
-    const u = undoInRace(club, slug, now);
-    const onRow = u === null ? null : raceBase(club, slug, u.live.date).id;
-    const inCard = panel.kind === 'version' && panel.undo;
-    for (const list of [...lists, ...overLists]) {
-        for (const p of list.plans) {
-            for (const r of [...p.shown, ...p.older]) {
-                r.undo = r.id === onRow ? (inCard ? 'hidden' : 'shown') : false;
-            }
-        }
-    }
-    return {...out, panel};
+    return {...out, panel: panelOf(club, slug, sel, out, now)};
 }

@@ -144,6 +144,14 @@ test('checkRecording: the rule', async () => {
 });
 
 
+test('checkRecording: a tick\'s traffic rows pass, unchecked against the plan', async () => {
+    const tick = {riders: OK_ROWS, traffic: [{n: 1, gap: -12, speed: 42.3, power: 210, draft: 80, sg: true}], trafficEpoch: 1};
+    const gz = gzipSync(JSON.stringify(HEAD) + '\n' + JSON.stringify(tick) + '\n');
+    const stats = {dropped: 0};
+    assert.equal(await checkRecording(gz, {athleteId: '1001', maxBytes: 100000, stats}), 'ok');
+    assert.equal(stats.dropped, 0);
+});
+
 test('checkRecording: heartrate and cadence anywhere, nesting bounded', async () => {
     const check = gz => checkRecording(gz, {athleteId: '1001', maxBytes: 1000000});
     const lines = (...xs) => gzipSync(xs.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join('\n') + '\n');
@@ -1484,6 +1492,15 @@ const gzLines = xs => gzipSync(xs.map(x => JSON.stringify(x)).join('\n') + '\n')
 const linesOf = file => unz(fs.readFileSync(file)).split('\n').filter(Boolean).map(l => JSON.parse(l));
 
 
+test('withoutRiders: a tick\'s traffic rows and their epoch stay byte for byte', () => {
+    const traffic = [{n: 1, gap: -12, speed: 42.3, power: 210, draft: 80, sg: true}, {n: 2, gap: 30, speed: 40, power: 250, draft: 0, sg: false}];
+    const tick = {ts: 1, riders: [{id: '1001', self: true, power: 250}, {id: '1002', power: 240}], traffic, trafficEpoch: 1};
+    const out = withoutRiders(tick, new Set(['1002']));
+    assert.deepEqual(out.riders.map(r => r.id), ['1001']);
+    assert.equal(JSON.stringify(out.traffic), JSON.stringify(traffic));
+    assert.equal(out.trafficEpoch, 1);
+});
+
 test('withoutRiders: rows, plan entries, ID fields and maps by ID go; numbers elsewhere, plan codes and other riders stay', () => {
     const gone = new Set([HUGO]);
     const head = hugoHead();
@@ -1507,6 +1524,27 @@ test('withoutRiders: rows, plan entries, ID fields and maps by ID go; numbers el
     // nothing of his: the very same value
     const clean = hugoTick(1);
     assert.equal(withoutRiders(clean, new Set(['999'])), clean);
+});
+
+
+test('withoutRiders: the turn clocks\' det (det.turn, det.old) loses his ID; from/to elsewhere stay', () => {
+    const gone = new Set([HUGO]);
+    const n = Number(HUGO);
+    const det = {planSig: 'AAAAAA', puller: '1003',
+        turn: {change: {kind: 'next', from: HUGO, to: '1003'}, disp: {why: 'gap', at: 5}, hanging: [HUGO, '1001'], out: [n]},
+        old: {puller: HUGO, since: 4, frontId: n, reason: null, chaos: false, out: [HUGO], cd: {t: 12.5, standing: false}}};
+    const tick = withoutRiders({ts: 1, det}, gone);
+    assert.deepEqual(tick.det.turn, {change: {kind: 'next', from: null, to: '1003'}, disp: {why: 'gap', at: 5}, hanging: ['1001'], out: []});
+    assert.deepEqual(tick.det.old, {puller: null, since: 4, frontId: null, reason: null, chaos: false, out: [], cd: {t: 12.5, standing: false}});
+    // his change into the turn: `to` goes, as a number too
+    assert.deepEqual(withoutRiders({det: {turn: {change: {kind: 'skip', from: '1001', to: n}}}}, gone).det.turn.change,
+        {kind: 'skip', from: '1001', to: null});
+    // `from`/`to` outside det.turn.change are no ID fields: a number there stays
+    const other = {range: {from: n, to: n}, det: {change: {from: n}, turn: {from: n}}};
+    assert.equal(withoutRiders(other, gone), other);
+    // a det.turn without his ID: the very same value
+    const clean = {det: {turn: {change: {kind: 'next', from: '1001', to: '1003'}, hanging: [], out: []}}};
+    assert.equal(withoutRiders(clean, gone), clean);
 });
 
 

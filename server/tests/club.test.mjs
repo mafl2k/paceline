@@ -10,7 +10,6 @@ import {
 } from '../club.mjs';
 import {plansOf, planOfId, freeVersionId, teamTypes, previousVersion} from '../plans.mjs';
 import {plannedStart, servable, pickForRider} from '../select.mjs';
-import {undoOffer} from '../team-view.mjs';
 import {riderCodeHash, nameKey} from '../ids.mjs';
 import {normalizePlan} from '../../pages/src/engine/plan.mjs';
 import {club, sheet, planJson, T, CODE_SECRET, liveId, race, assertRaceShape} from './helpers.mjs';
@@ -876,8 +875,7 @@ test('liveAt: the time a version last became its race\'s live version; a Store t
     assert.deepEqual([c.sheets[v2].liveAt, c.sheets[v1].liveAt], [z('10:10'), z('10:00')]);
     makeLive(c, slug, v1, at('10:12'), {version: v()});                                                               // an older version, directly
     assert.deepEqual([race(c, slug, DATE).live, c.sheets[v1].liveAt], [v1, z('10:12')]);
-    const u = undoOffer(c, slug, at('10:13'));
-    makeLive(c, slug, u.id, at('10:13'), {version: u.version, undo: false});                                          // Undo brings v2 back
+    makeLive(c, slug, v2, at('10:13'), {version: v()});                                                               // back to v2: its Make live (no Undo)
     assert.deepEqual([race(c, slug, DATE).live, c.sheets[v2].liveAt], [v2, z('10:13')]);
     makeLive(c, slug, v1, at('10:20'), {version: v()});
     const same = upload(c, slug, planJson('Rollers', ['1001', '1003']), {as: v1, live: true}, {now: at('10:25'), newId});   // v2's file again, with the box
@@ -908,7 +906,7 @@ test('makeLive: an older version of another plan of the race becomes the live ve
     assert.equal(race(c, slug, DATE).live, b1.id);
     assert.deepEqual(servable(c, NOW2).map(s => s.id), [b1.id]);
     assert.equal(pickForRider(c, '1001', {now: NOW2}).sheet.label, 'Rollers · slow');
-    assert.equal(undoOffer(c, slug, at('10:11')).id, a2.id);
+    assert.equal(Object.hasOwn(c.teams[slug], 'liveBefore'), false, 'nothing kept for an Undo');
     assert.deepEqual([c.sheets[a2.id].liveAt, c.sheets[b1.id].liveAt, Object.hasOwn(c.sheets[b2.id], 'liveAt')],
         ['2026-11-19T10:01:00.000Z', '2026-11-19T10:10:00.000Z', false]);
 });
@@ -926,11 +924,11 @@ test('uploadSheet: a version without a link leaves the race\'s event fields as t
     unpin(c, slug, v2.id, NOW);
     assert.equal(learnEvent(c, v2.id, 111, T('2026-11-19T11:30:00.000Z')), true);
     upload(c, slug, planJson('Rollers fast', ['1004']), {as: v1.id, live: false}, {newId});
-    assert.deepEqual(race(c, slug, DATE), {start: null, pinnedEventId: null, eventId: 111, boundAt: '2026-11-19T11:30:00.000Z', live: v2.id});
+    assert.deepEqual(race(c, slug, DATE), {start: '19:30', pinnedEventId: null, eventId: 111, boundAt: '2026-11-19T11:30:00.000Z', live: v2.id});
     // a plan that is not live: the same
     race(c, slug, DATE).live = null;
     upload(c, slug, planJson('Rollers fast', ['1005']), {as: v1.id, live: false}, {newId});
-    assert.deepEqual(race(c, slug, DATE), {start: null, pinnedEventId: null, eventId: 111, boundAt: '2026-11-19T11:30:00.000Z', live: null});
+    assert.deepEqual(race(c, slug, DATE), {start: '19:30', pinnedEventId: null, eventId: 111, boundAt: '2026-11-19T11:30:00.000Z', live: null});
 });
 
 
@@ -1531,12 +1529,13 @@ test('uploadSheet: a special team\'s new plan needs its start time; the race kee
         clubError('race-over-time'));
     assert.equal(race(c, cogs, '2026-11-18'), null, 'a refusal sets nothing');
     assert.equal(upload(c, cogs, json, {date: '2026-11-18', start: '20:15', type: 'b'}, {now: T('2026-11-18T21:15:00Z'), newId}).created, true);
-    // a weekly team's race takes a posted time of its own too; the team's time stores none
+    // a weekly team's race takes a posted time of its own too; the team's time is stored as the race's
+    // own (user, 23 Nov 2026: a race's start time is pinned, the team's is only the default)
     const w = upload(c, 'rollers', planJson('Rollers', ['1003']), {start: '21:00'}, {newId});
     assert.equal(race(c, 'rollers', DATE).start, '21:00');
     assert.equal(plannedStart(c, c.sheets[w.id]), T('2026-11-19T20:00:00Z'));
     upload(c, 'rollers', planJson('Rollers', ['1004']), {as: w.id, start: '19:30'}, {newId});
-    assert.equal(race(c, 'rollers', DATE).start, null);
+    assert.equal(race(c, 'rollers', DATE).start, '19:30');
     assert.equal(plannedStart(c, c.sheets[w.id]), T('2026-11-19T18:30:00Z'));
 });
 
@@ -1700,7 +1699,7 @@ test('every operation leaves the race shape', () => {
     // a new plan with a link makes its race, with the link
     const a = upload(c, slug, planJson('Rollers fast', ['1001', '1002']), {pinnedEventId: 4567890}, {newId});
     assertRaceShape(c);
-    assert.deepEqual(race(c, slug, DATE), {start: null, pinnedEventId: 4567890, eventId: null, boundAt: null, live: a.id});
+    assert.deepEqual(race(c, slug, DATE), {start: '19:30', pinnedEventId: 4567890, eventId: null, boundAt: null, live: a.id});
     // a version without a link: the race keeps its link
     const a2 = upload(c, slug, planJson('Rollers fast', ['1002', '1001']), {as: a.id}, {newId});
     assertRaceShape(c);
@@ -1837,7 +1836,7 @@ test('setRace: the race moves with all its plans; a date the team races and a ti
     const {c, slug, a, v} = two();
     race(c, slug, '2026-11-19').eventId = 4567001;                     // learned from a rider's check
     const r = setRace(c, slug, '2026-11-19', {to: '2026-11-21', start: '17:00'}, NOW, {version: v()});
-    assert.deepEqual(r, {date: '2026-11-21', start: '17:00', was: {date: '2026-11-19', start: null}, plans: 1});
+    assert.deepEqual(r, {date: '2026-11-21', start: '17:00', was: {date: '2026-11-19', start: '19:30'}, plans: 1});
     assert.equal(race(c, slug, '2026-11-19'), null);
     assert.deepEqual(race(c, slug, '2026-11-21'), {start: '17:00', pinnedEventId: null, eventId: null, boundAt: null, live: a});
     assert.equal(c.sheets[a].date, '2026-11-21');
@@ -1849,35 +1848,38 @@ test('setRace: the race moves with all its plans; a date the team races and a ti
 });
 
 
-test('setRace: every plan and version moves; the team\'s time stores none; the link stays; no change does nothing', () => {
+test('setRace: every plan and version moves; the team\'s time is stored as the race\'s own; the link stays; no change does nothing', () => {
     const {c, slug, newId, a, b, v} = two();
     const a2 = upload(c, slug, planJson('Rollers', ['1002', '1001']), {as: a}, {newId}).id;
     const x = upload(c, slug, planJson('Rollers tempo', ['1004']), {type: 'tempo', live: false, pinnedEventId: 5123456}, {newId}).id;
     learnEvent(c, b, 4567002, NOW);
-    // a time only: the 22 Nov race at the team's 19:30 stores none, its learned event goes
+    // a time only: the 22 Nov race at the team's 19:30 stores 19:30 as its own (pinned, user 23 Nov
+    // 2026), its learned event goes
     const version = v();
     assert.deepEqual(setRace(c, slug, '2026-11-22', {to: '2026-11-22', start: '19:30'}, NOW, {version}),
-        {date: '2026-11-22', start: null, was: {date: '2026-11-22', start: '18:00'}, plans: 1});
-    assert.deepEqual(race(c, slug, '2026-11-22'), {start: null, pinnedEventId: null, eventId: null, boundAt: null, live: b});
+        {date: '2026-11-22', start: '19:30', was: {date: '2026-11-22', start: '18:00'}, plans: 1});
+    assert.deepEqual(race(c, slug, '2026-11-22'), {start: '19:30', pinnedEventId: null, eventId: null, boundAt: null, live: b});
     assert.equal(v(), version + 1);
     assert.deepEqual([c.log.at(-1).what, c.log.at(-1).label], ['race-move', 'Sun 22 Nov 18:00 → Sun 22 Nov 19:30']);
     // nothing changed: no bump, no log
     const logged = c.log.length;
     assert.deepEqual(setRace(c, slug, '2026-11-22', {to: '2026-11-22', start: ''}, NOW, {version: v()}),
-        {date: '2026-11-22', start: null, was: {date: '2026-11-22', start: null}, plans: 1});
+        {date: '2026-11-22', start: '19:30', was: {date: '2026-11-22', start: '19:30'}, plans: 1});
     assert.deepEqual([v(), c.log.length], [version + 1, logged]);
-    // a date: two plans and all their versions move; the link stays, the live plan too
+    // a date: two plans and all their versions move; the link stays, the live plan too; a blank time
+    // keeps the race's own (19:30, pinned when the race was made)
     const r = setRace(c, slug, '2026-11-19', {to: '2026-11-20', start: ''}, NOW, {version: v()});
-    assert.deepEqual(r, {date: '2026-11-20', start: null, was: {date: '2026-11-19', start: null}, plans: 2});
+    assert.deepEqual(r, {date: '2026-11-20', start: '19:30', was: {date: '2026-11-19', start: '19:30'}, plans: 2});
     assert.deepEqual([a, a2, x].map(id => c.sheets[id].date), ['2026-11-20', '2026-11-20', '2026-11-20']);
-    assert.deepEqual(race(c, slug, '2026-11-20'), {start: null, pinnedEventId: 5123456, eventId: null, boundAt: null, live: a2});
+    assert.deepEqual(race(c, slug, '2026-11-20'), {start: '19:30', pinnedEventId: 5123456, eventId: null, boundAt: null, live: a2});
     assert.deepEqual(Object.keys(c.teams[slug].races).sort(), ['2026-11-20', '2026-11-22']);
     assertRaceShape(c);
-    // a race that stored the team's own time explicitly, posted blank: the same time, nothing logged
-    race(c, slug, '2026-11-22').start = '19:30';
+    // a race stored before times were pinned (no time of its own: it follows the team's), posted
+    // blank: it keeps following the team's time (no rewrite), nothing logged
+    race(c, slug, '2026-11-22').start = null;
     const quiet = [v(), c.log.length];
     assert.deepEqual(setRace(c, slug, '2026-11-22', {to: '2026-11-22', start: ''}, NOW, {version: v()}),
-        {date: '2026-11-22', start: null, was: {date: '2026-11-22', start: '19:30'}, plans: 1});
+        {date: '2026-11-22', start: null, was: {date: '2026-11-22', start: null}, plans: 1});
     assert.deepEqual([v(), c.log.length], quiet);
     assert.equal(race(c, slug, '2026-11-22').start, null);
     // a weekly time that is no time, and a special team's race without one
@@ -1912,7 +1914,7 @@ test('setRaceEvent: sets, changes and removes the race\'s link; a learned event 
     const {c, slug, a, v} = two();
     learnEvent(c, a, 4567003, NOW);
     assert.deepEqual(setRaceEvent(c, slug, '2026-11-19', 5123456, NOW, {version: v()}), {was: null});
-    assert.deepEqual(race(c, slug, '2026-11-19'), {start: null, pinnedEventId: 5123456, eventId: null, boundAt: null, live: a});
+    assert.deepEqual(race(c, slug, '2026-11-19'), {start: '19:30', pinnedEventId: 5123456, eventId: null, boundAt: null, live: a});
     assert.deepEqual([c.log.at(-1).what, c.log.at(-1).label], ['race-link', 'Thu 19 Nov · 5123456']);
     const version = v();
     assert.deepEqual(setRaceEvent(c, slug, '2026-11-19', 5123457, NOW, {version}), {was: 5123456});
@@ -1960,7 +1962,7 @@ test('renamePlan: every version\'s type and label; unique within the race; a bla
 });
 
 
-test('uploadSheet: a weekly team\'s race takes its own time; the team\'s time stores none; a link names the plans that share it', () => {
+test('uploadSheet: a weekly team\'s race takes its own time; the team\'s time is stored as its own; a link names the plans that share it', () => {
     const {c, slug, newId, b} = two();
     assert.equal(race(c, slug, '2026-11-22').start, '18:00');
     assert.equal(plannedStart(c, c.sheets[b]), T('2026-11-22T17:00:00Z'));
@@ -1973,16 +1975,17 @@ test('uploadSheet: a weekly team\'s race takes its own time; the team\'s time st
     // blank keeps the race's time
     const v2 = upload(c, slug, planJson('Rollers', ['1005']), {as: r.id, start: ''}, {newId});
     assert.deepEqual([v2.startMoved, race(c, slug, '2026-11-22').start], [null, '17:00']);
-    // the team's time stores none
+    // the team's time is stored as the race's own (pinned, user 23 Nov 2026)
     const v3 = upload(c, slug, planJson('Rollers', ['1006']), {as: r.id, start: '19:30'}, {newId});
-    assert.equal(race(c, slug, '2026-11-22').start, null);
+    assert.equal(race(c, slug, '2026-11-22').start, '19:30');
     assert.deepEqual(v3.startMoved, {date: '2026-11-22', start: '19:30', was: '17:00', others: ['Kettenfett Rollers']});
     assert.throws(() => upload(c, slug, planJson('Rollers', ['1006']), {as: r.id, start: '7pm'}, {newId}), clubError('bad-start'));
-    // a new race: its own time, or none
+    // a new race: its own time, or the team's at that moment, stored as its own (never empty while
+    // the team has a time: user, 23 Nov 2026)
     upload(c, slug, planJson('Rollers', ['1007']), {date: '2026-11-26', start: '18:15', live: false}, {newId});
     assert.equal(race(c, slug, '2026-11-26').start, '18:15');
     upload(c, slug, planJson('Rollers', ['1007']), {date: '2026-11-27', start: '', live: false}, {newId});
-    assert.equal(race(c, slug, '2026-11-27').start, null);
+    assert.equal(race(c, slug, '2026-11-27').start, '19:30');
     // a link on a race with plans says so, with the plans that share it
     const linked = upload(c, slug, planJson('Rollers', ['1008']), {as: r.id, pinnedEventId: 5123456}, {newId});
     assert.deepEqual(linked.linkMoved, {date: '2026-11-22', id: 5123456, was: null, others: ['Kettenfett Rollers']});
@@ -2009,24 +2012,31 @@ test('uploadSheet: Store and make live is the race\'s; the other race keeps its 
     const same = upload(c, slug, planJson('Rollers', ['1001', '1003']), {as: b, live: true}, {newId});
     assert.deepEqual([same.same, same.id, same.live], [true, v2.id, true]);
     assert.deepEqual([race(c, slug, '2026-11-19').live, race(c, slug, '2026-11-22').live], [a, v2.id]);
-    assert.deepEqual(undoOffer(c, slug, NOW), {id: r.id, prev: c.sheets[r.id], live: c.sheets[v2.id], version: c.teams[slug].version});
+    assert.equal(Object.hasOwn(c.teams[slug], 'liveBefore'), false, 'nothing kept for an Undo');
 });
 
 
-test('Undo is the race\'s: after Make live in one race it brings back that race\'s plan and leaves the other race', () => {
+test('Make live is the race\'s and keeps nothing for an Undo; a switch is taken back by Make live of the version before (user, 23 Nov 2026)', () => {
     const {c, slug, newId, a, b, v} = two();
     const x = upload(c, slug, planJson('Rollers tempo', ['1004']), {type: 'tempo', live: false}, {newId}).id;
     makeLive(c, slug, x, NOW, {version: v()});
-    const u = undoOffer(c, slug, NOW);
-    assert.deepEqual(u, {id: a, prev: c.sheets[a], live: c.sheets[x], version: v()});
-    makeLive(c, slug, u.id, NOW, {version: u.version, undo: false});
+    assert.deepEqual([race(c, slug, '2026-11-19').live, race(c, slug, '2026-11-22').live], [x, b]);
+    assert.equal(Object.hasOwn(c.teams[slug], 'liveBefore'), false);
+    makeLive(c, slug, a, NOW, {version: v()});
     assert.deepEqual([race(c, slug, '2026-11-19').live, race(c, slug, '2026-11-22').live], [a, b]);
-    assert.equal(undoOffer(c, slug, NOW), null);
-    // Make live in the other race: its Undo names that race's plan
+    // Make live in the other race leaves this one
     const y = upload(c, slug, planJson('Rollers', ['1005']), {date: '2026-11-22', type: 'tempo', live: false}, {newId}).id;
     makeLive(c, slug, y, NOW, {version: v()});
-    assert.deepEqual(undoOffer(c, slug, NOW), {id: b, prev: c.sheets[b], live: c.sheets[y], version: v()});
-    assert.equal(race(c, slug, '2026-11-19').live, a);
+    assert.deepEqual([race(c, slug, '2026-11-19').live, race(c, slug, '2026-11-22').live], [a, y]);
+    assert.equal(Object.hasOwn(c.teams[slug], 'liveBefore'), false);
+    // a club stored with the old record of an Undo (team.liveBefore): Make live and Store work, the
+    // record is left as it is, unread (no migration)
+    const old = {id: b, version: v(), at: '2026-11-19T17:00:00.000Z'};
+    c.teams[slug].liveBefore = structuredClone(old);
+    makeLive(c, slug, x, NOW, {version: v()});
+    const z = upload(c, slug, planJson('Rollers', ['1006']), {date: '2026-11-22', type: 'tempo', as: c.sheets[y].plan, live: true}, {newId}).id;
+    assert.deepEqual([race(c, slug, '2026-11-19').live, race(c, slug, '2026-11-22').live], [x, z]);
+    assert.deepEqual(c.teams[slug].liveBefore, old);
 });
 
 
@@ -2117,4 +2127,33 @@ test('setRace: a race without any time moved to a past date says race-over, with
     });
     // a later date is fine without a time
     assert.deepEqual(setRace(c, slug, DATE, {to: '2026-11-20', start: ''}, NOW).date, '2026-11-20');
+});
+
+
+test('a race\'s start time is pinned when the race is made: the team\'s time is only the default (user, 23 Nov 2026)', () => {
+    const {c, rollers, newId} = specialSetup();
+    // made by a Store with a blank time: the team's time then, stored as the race's own
+    const a = upload(c, rollers, planJson('Rollers', ['1001']), {start: ''}, {newId});
+    assert.equal(race(c, rollers, DATE).start, '19:30');
+    // made by a Store with the team's time posted (the form's prefill): the same
+    const b = upload(c, rollers, planJson('Rollers', ['1002']), {date: '2026-11-26', start: '19:30'}, {newId});
+    assert.equal(race(c, rollers, '2026-11-26').start, '19:30');
+    // a race stored before (no time of its own) keeps following the team's time on read
+    c.teams[rollers].races['2026-11-29'] = {start: null, pinnedEventId: null, eventId: null, boundAt: null, live: null};
+    // the team's time changes: no race already made moves, the old one follows
+    setRhythm(c, rollers, {kind: 'weekly', weekday: 4, start: '20:15'}, NOW);
+    assert.equal(plannedStart(c, c.sheets[a.id]), T('2026-11-19T18:30:00Z'));
+    assert.equal(plannedStart(c, c.sheets[b.id]), T('2026-11-26T18:30:00Z'));
+    assert.equal(plannedStart(c, {team: rollers, date: '2026-11-29'}), T('2026-11-29T19:15:00Z'));
+    // a new race now takes 20:15; a blank time on a race already made keeps its own
+    upload(c, rollers, planJson('Rollers', ['1003']), {date: '2026-11-28', start: ''}, {newId});
+    assert.equal(race(c, rollers, '2026-11-28').start, '20:15');
+    upload(c, rollers, planJson('Rollers', ['1001', '1004']), {as: a.id, start: ''}, {newId});
+    assert.equal(race(c, rollers, DATE).start, '19:30');
+    // a weekly team without any start time has nothing to pin: a blank stays none (riders get nothing
+    // until it has one); a special team still needs a time
+    const owls = addTeam(c, {name: 'Owls', start: null}, {slugTaken: noneTaken, now: NOW});
+    upload(c, owls, planJson('Owls', ['1009']), {start: ''}, {newId});
+    assert.equal(race(c, owls, DATE).start, null);
+    assert.throws(() => upload(c, specialSetup().cogs, planJson('Cogs', ['1001']), {start: ''}, {newId}), clubError('bad-start'));
 });

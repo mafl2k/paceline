@@ -15,7 +15,7 @@ const CODE = '7Q4MZ2KX9B';
 function row(id, name, more = {}) {
     return {
         id, name, joined: false, via: null, addedAt: 50, changedAt: 50, joinedAt: null, hinted: false,
-        lists: true, private: false, code: null, codeState: null, ...more,
+        lists: true, teams: null, private: false, code: null, codeState: null, ...more,
     };
 }
 
@@ -126,6 +126,34 @@ test('merge: the newer changedAt wins per row', () => {
 });
 
 
+test('answers: team names (server 0.5.1) are kept per club, null from an older server', () => {
+    const st = deepFreeze(table(
+        row(K, 'Kettenfett RC', {joined: true, via: 'rider', joinedAt: 60, changedAt: 60}),
+        row(S, 'Spokesmen CC', {changedAt: 70}),
+    ));
+    const r1 = applyAnswer(st, {circles: [
+        {id: K, name: 'Kettenfett RC', lists: true, teams: ['Rollers', 'Cogs', 'Rollers', 7, '', 'x'.repeat(61)]},
+        {id: S, name: 'Spokesmen CC', lists: true, teams: []},
+    ]}, 1000);
+    assert.deepEqual(byId(r1, K).teams, ['Rollers', 'Cogs']);
+    assert.deepEqual(byId(r1, S).teams, []);
+    assert.equal(byId(r1, K).changedAt, 60);
+    // an older server: no list, so null (unknown), not "no team"
+    const r2 = applyAnswer(r1, {circles: [{id: K, name: 'Kettenfett RC', lists: true}]}, 2000);
+    assert.equal(byId(r2, K).teams, null);
+    // a club the answer doesn't name: no teams any more
+    assert.deepEqual(byId(r2, S).teams, []);
+    // a new listing club gets its teams; stored rows are cleaned
+    const N = 'a1b2c3d4e5';
+    const r3 = applyAnswer(st, {circles: [{id: N, name: 'Rollers Club', lists: true, teams: ['Wheelies']}]}, 1000);
+    assert.deepEqual(byId(r3, N).teams, ['Wheelies']);
+    const many = Array.from({length: 12}, (_, i) => `Team ${i}`);
+    assert.deepEqual(normalizeClubs({server: SERVER, clubs: [row(K, 'Kettenfett RC', {teams: many})]}, SERVER).clubs[0].teams,
+        many.slice(0, 10));
+    assert.equal(normalizeClubs({server: SERVER, clubs: [row(K, 'Kettenfett RC', {teams: 'Rollers'})]}, SERVER).clubs[0].teams, null);
+});
+
+
 test('answers: new rows unticked, names refreshed, rows dropped only on gone', () => {
     const st = deepFreeze(table(
         row(K, 'Kettenfett RC', {joined: true, via: 'rider', joinedAt: 60, changedAt: 60}),
@@ -148,7 +176,7 @@ test('answers: new rows unticked, names refreshed, rows dropped only on gone', (
     const r4 = applyAnswer(st, {circles: [{id: N, name: 'Rollers Club', lists: true}]}, 1000);
     assert.deepEqual(byId(r4, N), {
         id: N, name: 'Rollers Club', joined: false, via: null, addedAt: 1000, changedAt: 1000, joinedAt: null,
-        hinted: false, lists: true, private: false, code: null, codeState: null,
+        hinted: false, lists: true, teams: null, private: false, code: null, codeState: null,
     });
     // a new id that doesn't list is not added
     const r5 = applyAnswer(st, {circles: [{id: N, name: 'Rollers Club', lists: false}]}, 1000);
@@ -373,12 +401,15 @@ test('add club by code', () => {
     const r2 = addByCode(had, answer, '7Q4MZ2KX9B', 2000);
     assert.deepEqual(byId(r2.state, S), {
         id: S, name: 'Spokesmen CC', joined: true, via: 'code', addedAt: 40, changedAt: 2000, joinedAt: 2000,
-        hinted: true, lists: false, private: true, code: '7Q4MZ2KX9B', codeState: 'ok',
+        hinted: true, lists: false, teams: null, private: true, code: '7Q4MZ2KX9B', codeState: 'ok',
     });
     assert.deepEqual(r2.added, {id: S, name: 'Spokesmen CC'});
     // an already ticked row keeps its joinedAt
     const ticked = table(row(S, 'Spokesmen CC', {joined: true, via: 'rider', joinedAt: 70, changedAt: 70}));
     assert.equal(byId(addByCode(ticked, answer, CODE, 3000).state, S).joinedAt, 70);
+    // the answer's team names come along (server 0.5.1)
+    const withTeams = deepFreeze({circles: [{...entry, lists: true, teams: ['Spokes']}], plans: [], hint: []});
+    assert.deepEqual(byId(addByCode(empty, withTeams, CODE, 4000).state, S).teams, ['Spokes']);
 
     // no echo: nothing
     const open = deepFreeze({circles: [{id: S, name: 'Spokesmen CC', lists: true}], plans: [], hint: []});

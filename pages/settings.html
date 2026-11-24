@@ -173,7 +173,11 @@
             <section id="pl-clubs">
                 <div class="pl-head"><strong data-s="clubsHeading"></strong></div>
                 <div class="pl-note" data-s="clubsHelp"></div>
-                <ul id="pl-clubs-list"></ul>
+                <!-- One row per club: tick and name (a private club's code line under it), your teams there, since when. -->
+                <table id="pl-clubs-table">
+                    <thead><tr><th data-s="clubsColClub"></th><th data-s="clubsColTeams"></th><th data-s="clubsColSince"></th></tr></thead>
+                    <tbody id="pl-clubs-list"></tbody>
+                </table>
                 <div id="pl-clubs-empty" class="pl-note" hidden></div>
                 <div id="pl-clubs-several" class="pl-clubs-several" data-s="clubsSeveral" hidden></div>
                 <label class="pl-field pl-club-code"><span data-s="clubCodeLabel"></span>
@@ -181,6 +185,21 @@
                     <button id="pl-club-code-add" type="button" data-s="clubCodeAdd"></button></label>
                 <div class="pl-note" data-s="clubCodeHelp"></div>
                 <div id="pl-club-code-msg" class="pl-slot" role="status"></div>
+            </section>
+
+            <!-- The upload and the rides on this computer: the upload matters, so it is out in the open
+                 (user, 23 Nov 2026), with the full text of what is sent one click away. -->
+            <section id="pl-rec">
+                <div class="pl-head"><strong data-s="recHeading"></strong></div>
+                <label class="pl-check pl-upload"><input id="pl-log-upload" type="checkbox"/> <span data-s="logUploadLabel"></span></label>
+                <!-- One line that keeps its place: why, or what the box needs while the plan server is off. -->
+                <div id="pl-upload-why" class="pl-note"></div>
+                <details id="pl-upload-what">
+                    <summary data-s="logUploadWhat"></summary>
+                    <div class="pl-note" data-s="logUploadHelp"></div>
+                </details>
+                <div id="pl-rec-err" class="pl-error" hidden></div>
+                <ul id="pl-rec-list"></ul>
             </section>
 
             <section id="pl-demo">
@@ -202,16 +221,8 @@
                 <section id="pl-server">
                     <label class="pl-field"><span data-s="serverUrlLabel"></span>
                         <input id="pl-server-url" type="url" spellcheck="false" autocomplete="off"/></label>
-                    <label class="pl-check"><input id="pl-log-upload" type="checkbox"/> <span data-s="logUploadLabel"></span></label>
-                    <div class="pl-note" data-s="logUploadHelp"></div>
                     <label class="pl-check"><input id="pl-rec-no-plan" type="checkbox"/> <span data-s="recNoPlanLabel"></span></label>
                     <div class="pl-note" data-s="recNoPlanHelp"></div>
-                </section>
-
-                <section id="pl-rec">
-                    <div class="pl-head"><strong data-s="recHeading"></strong></div>
-                    <div id="pl-rec-err" class="pl-error" hidden></div>
-                    <ul id="pl-rec-list"></ul>
                 </section>
             </details>
 

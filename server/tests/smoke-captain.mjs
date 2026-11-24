@@ -22,11 +22,14 @@
 //        the button switches to that club, whose footer offers Kettenfett RC, which switches back;
 //        Log out of the open club lands on the other club's overview;
 //   1d.  the team page's "Plan on ZwiftGopher" (the primary button in its head, at full width at 390,
-//        the quiet "Upload a file instead" under it; in an empty team's card the main button) opens the
+//        the bordered "Upload a file" under it; from 1024 px the title line holds the title, "Updated"
+//        small and raised beside it and Team settings at its end, the pair side by side at the right,
+//        under that line, from 1180 px on it before Team settings; in an empty team's card the main
+//        button) opens the
 //        planner in a new tab with the team's token, and the upload page has none; two plans pushed
 //        with it (POST /api/v3/push) are listed on the team page under "Not stored yet", newest
 //        first, and counted in the switcher and the sidebar (their Discard, 24 px from Store, is in
-//        each one's Store form: 12d); the club hub lists Cogs to fix (given a plan without a start
+//        each one's card: 12d); the club hub lists Cogs to fix (given a plan without a start
 //        time; without one it is neutral, spec §8) and the two plans waiting, with
 //        the team tiles at 390 only; with --shots
 //        captain-team-{empty,plans}-{390,1280}-light.png (Cogs, Rollers before the pushes),
@@ -35,16 +38,23 @@
 //   3.   the upload page takes the JSON only (no text export field) and stays when the file is chosen
 //        (no auto-Continue); Continue goes on to the team page with the plan picked (?e=<id>#panel),
 //        whose Store form shows the moves and what is still to do, has no "Update preview" button,
-//        and redraws in place (one panel request, no page load) when the plan radio or the live box
-//        changes, keeping the scroll position, the focused field and a typed type (a new version has
-//        no type field: it keeps its plan's type); the race date, the start time and the event link
-//        are in a closed fold, the form's last block, its summary naming the race ("Race: Thu 19 Nov ·
-//        19:30 · Change"), and a click on the summary opens it; a redraw keeps it open (raceOpen, also
-//        when the focus goes outside it: the live box); the race date typed digit by digit redraws it
-//        once, a second after the last digit and never midway, or at once when the captain leaves
-//        the field (What happens in the card, above its action bar); Store and make live lands on the race's live pointer (?r=), v2 live; at 1280 a
+//        and redraws in place (one panel request, no page load) when the plan radio changes, keeping
+//        the scroll position, the focused field and a typed type (a new version has no type field: it
+//        keeps its plan's type); it has no Make live box: its action bar has Make live (primary,
+//        "Store and make live" for screen readers) and Store (quiet; user, 23 Nov 2026), and What
+//        happens says what Make live does, then what Store alone does; the race date, the start time
+//        and the event link are in a closed fold, the form's last block, its summary naming the race
+//        ("Race: Thu 19 Nov · 19:30 · Change"), and a click on the summary opens it; a redraw keeps it
+//        open (raceOpen, also for the next race again); a version has no race fold (it takes its
+//        plan's race, user 23 Nov 2026); the race date typed digit
+//        by digit redraws it once, a second after the last digit and never midway, or at once when
+//        the captain leaves the field (only warning lines in the card, above its action bar: no "What
+//        happens", user 23 Nov 2026); in the race
+//        window with 'Rollers' live, Make live asks first in its place (the strip in the action bar,
+//        its confirm focused and described) and its confirm (confirm=1) lands on the race's live
+//        pointer (?r=), v2 live; at 1280 a
 //        page below the hub has one breadcrumb line above its head instead of the back bar and the
-//        kicker, its crumb before the page where the phone's bar goes (a New version's upload page
+//        kicker, its crumb before the page where the phone's bar goes (an upload page opened for a plan, as a hole's link or a link of the former New version
 //        goes back to the team), the hub has none; (dropped with the assign page: its "What changed"
 //        fold, the rider table shows what changed, 12h; the redraw as a GET of the page, 12h)
 //   3b.  the reshuffle of spec §10: "Upload for Sprockets" in the Store flash carries the plan and its
@@ -53,7 +63,7 @@
 //        races it; the form was drawn for another race, so it is drawn for that date, its race fold
 //        open, the flash in view, the team page's URL in the address bar) keeps the typed type through the next redraw; a date as from the calendar
 //        (its change, no key) redraws at once, and a click in the date field opens the calendar
-//        (showPicker); an event link pasted and left redraws the form, What happens naming the
+//        (showPicker); an event link pasted and left redraws the form, its warnings naming the
 //        race's new link; the race fold closed right after editing the link stays closed through
 //        the redraw that leaving it sent; Store with a required field empty in the closed fold opens
 //        it and posts nothing; Discard, on Store's line at least 24 px right of it, asks first in its place;
@@ -62,9 +72,12 @@
 //        strip (a plan's Delete) and after one with a typed field; the date and time strip writes
 //        the day and time;
 //   5.   the stale line when offline;
-//   3d.  Make live in the panel and "Make v2 live" beside a row ask in their place first (the strip
-//        where the button was, the panel's whole width at 390, the confirm button focused and
-//        described by the words), post confirm=1, and change team.live only when pressed;
+//   3d.  Make live in the panel asks in its place first (the strip where the button was, the panel's
+//        whole width at 390, the confirm button focused and described by the words), posts confirm=1,
+//        and changes team.live only when pressed; every row of the list is its link alone (the newer
+//        version's "v2 · not live" without a Make live beside it, user 23 Nov 2026), and that
+//        version's card's Make live (it reads "Make live", the version for screen readers) asks and
+//        posts the same way;
 //   6.   Make live without the script: a second tab with script execution disabled opens the page
 //        with a version picked, posts the panel's Make live (the strip stays hidden), gets the
 //        server's confirm page, and confirms; team.live changes only then;
@@ -78,17 +91,18 @@
 //        Esc and Cancel close it (the focus back on the trigger), a press of the confirm button
 //        within 450 ms of arming is ignored, one strip at a time (a plan ⋯'s Delete closes the
 //        panel's), the Remove strip follows the Zwift ID edited after arming, a double click on a
-//        confirm button posts once; before the gate the panel's plain Make live goes at once and
-//        its flash's Undo takes it back; with --shots the open strips of the team, team settings
-//        and club settings pages at 390 and 1280 (captain-<page>-armed-<w>-light.png) and the Undo
-//        flash (captain-team-undo-{390,1280}-light.png: after Make live the page lands on the
-//        panel, its Undo there, in view below the top bar; Undo says "Undone" there).
+//        confirm button posts once; before the gate the panel's plain Make live goes at once, the
+//        page lands on the panel with its flash in view below the top bar and nothing of an Undo
+//        (user, 23 Nov 2026), and Make live of the version live before takes it back; with --shots
+//        the open strips of the team, team settings and club settings pages at 390 and 1280
+//        (captain-<page>-armed-<w>-light.png) and the flash of the switch
+//        (captain-team-switch-{390,1280}-light.png).
 //   10.  the hub with nothing to do and nothing waiting (Spokesmen CC with one team and its live
 //        plan) says so in one line; with --shots captain-hub-empty-{390,1280}-light.png;
 //   11.  races (races spec §4, §7): Rollers gets a second race, Sun 22 Nov 18:00 with the event link
 //        5123456 ('Rollers · sunday' live, 'Rollers · sunday B'), Sprockets a race of Wed 18 Nov
 //        that is over (one plan, stored before it); all of it goes again at the end:
-//   11a. the Rollers page shows #race-2026-11-19 and #race-2026-11-22, the later race's fold
+//   11a. the Rollers page shows #race-2026-11-19 and #race-2026-11-22, the later race without a fold
 //        closed; at 390 px it fits and its controls are 44 px, also with the race's ⋯ and a plan's
 //        ⋯ open;
 //   11b. the race ⋯ closes on Esc (the focus back on its button) and on a click outside; while it
@@ -100,13 +114,12 @@
 //   11d. without the script (a second tab, as in 6) the same POST gets the server's question page,
 //        and confirming there moves the race back;
 //   11e. a plan ⋯'s Rename changes the block's label; the panel's Make live acts at once (the race's
-//        gate is closed, nothing warns), and Thu 19 Nov keeps its own live plan; its Undo is on
-//        Sunday's live row on the bare page, in Sunday's card once a click on that row (?r=) swaps it
-//        in, never twice; from Sunday's page (?r=, the Undo in its card) a swap away, Thursday's row at
-//        1280 or the sheet's ✕ at 390, shows it on Sunday's row, once;
+//        gate is closed, nothing warns), and Thu 19 Nov keeps its own live plan; no Undo of it
+//        anywhere: not on Sunday's live row, not in Sunday's card (a click on that row, ?r=), not
+//        after a swap away (Thursday's row at 1280, the sheet's ✕ at 390), and no row holds a form;
 //   11f. Sprockets' race of Wed 18 Nov is under "Over", without a race ⋯, its plan's ⋯ offers Delete
 //        only and its version's panel is read only;
-//   11g. the Store form of a plan pushed for Rollers shows the race radios before the plans, the
+//   11g. the Store form of a plan pushed for Rollers, as a new plan, has the race radios first in its race fold (after the plans), the
 //        nearest checked, its race fold closed; choosing the other race redraws it once, in place,
 //        the fold then open, its summary "Race: Sun 22 Nov · 18:00 · Event 5123456 · Change";
 //   11h. while that form (drawn with the Sunday race at 18:00) is open, a second tab moves the race
@@ -138,20 +151,22 @@
 //   12k. after the team's version changed behind the page's back, a click on a row loads the whole
 //        page (the fragment answers 409) with that row picked;
 //   12r. a refused Store (a bad event link, answered at /manage/inbox/<id>) puts the cockpit's URL
-//        in the address bar, and the form's next redraw asks the cockpit's panel, never /manage/inbox;
+//        in the address bar, and the form's next redraw asks the cockpit's panel, never /manage/inbox,
+//        and draws the form in the card again, the entry's row its link alone;
 //   12i. with a version picked the guarded reload loads the page again after one interval (35 s),
-//        the URL still ?v=<id>; with the pushed plan picked (the Store form open, its Store button
-//        one of the form's elements) nothing loads in 35 s, and a click on the live row releases the
+//        the URL still ?v=<id>; with the pushed plan picked (the Store form open in the card, its
+//        Store button one of the form's elements) nothing loads in 35 s, and a click on the live row releases the
 //        hold; a page loaded with ?e= has data-refresh and no meta refresh, and after a swap to a
 //        version it reloads within 35 s;
 //   12d. at 390 (with the script) a tap on a version row changes no page and the document shows only
 //        the sheet: #panel and #panel-body (the top bar, the page's head and .cp-list have no
 //        height); the close link is at least 44 x 44 px, a ✕ without words, and, tapped, brings the
 //        list back (the live row marked) without a page load, the focus on the row that was picked; a
-//        tap on a plan not stored yet: from the top the close link, the Store form's first field, its
-//        race fold (the form's last block), the table, "What happens", Store, and Discard on Store's
-//        line 24 px or more from it; nothing wider than the screen, every control 44 px, also with the
-//        race fold open;
+//        tap on a plan not stored yet opens the same sheet (the list gone, user 23 Nov 2026): from the
+//        top the close link, the table, the Store form's first field, for "New plan" its race fold
+//        (the form's last block; a version has none), its warnings (when any), Store, and Discard on Store's
+//        line 24 px or more from it; nothing wider than the screen, every control 44 px, also with
+//        the race fold open;
 //   12e. the same without the script (a second tab as in 6): a tap on a version row loads
 //        ?v=<id> and shows the same sheet, the close link is a plain link to the page without a
 //        selection, a tap on the plan not stored yet loads ?e=<id> with its sheet, fit holds for both;
@@ -168,20 +183,20 @@
 //   12s. layout stability at 1280 (team cockpit spec §5.3b): the card's left, top and width, its table
 //        header's distance from its top and its action bar's from its bottom are the same (within
 //        1 px) for the live version, a version, a received plan and a version whose caption takes two
-//        lines (another plan of the race); the race head is one line; opening the Store form's race
-//        fold (in the list's column) moves neither the card nor its action bar;
+//        lines (another plan of the race); the race head is one line; the list keeps its height and
+//        every row its place whatever is picked (the Store form is in the card, user 23 Nov 2026);
+//        opening the Store form's race fold (in the card) moves neither the card's top nor the list;
 //   12f. Make live from the panel with a version picked in place (the script, no page load): it asks
 //        in its place (the confirm button focused, described by the words), the live version
 //        unchanged; the confirm posts confirm=1 with the club, version and sheet fields (no from), the
-//        page lands on ?r=<race>#panel (the race's live pointer) with the flash "… is live for Rollers." and Undo in the panel,
-//        the version live, not refused as out of date;
+//        page lands on ?r=<race>#panel (the race's live pointer) with the flash "… is live for Rollers." in the panel and
+//        no Undo, the version live, not refused as out of date;
 //   12g. the same without the script (a second tab): the button posts, the answer is the server's
 //        confirm page (the live version unchanged), and confirming there lands on ?r=<race>#panel with
 //        the version live;
-//   12h. a plan not stored yet picked at 1280: the Store form inside .cp-list, the table in the right
-//        column; choosing another plan radio sends one panel request, loads no page, and What
-//        happens names that plan; Store lands on ?v=<new id> with the result on the page, the version
-//        in the store and the entry gone, its Make live a secondary button; nothing reloads in 35 s
+//   12h. a plan not stored yet picked at 1280: the Store form in the card in the right column, under
+//        the rider table and above its warnings; choosing another plan radio sends one panel request, loads no page, and the form is drawn for it; Store lands on ?v=<new id> with the result on the page, the version
+//        in the store and the entry gone, its Make live the primary button; nothing reloads in 35 s
 //        while the result (with a warning: the plan has no pull watts) is on the page, which says so
 //        under the card with Refresh (44 px), and Refresh loads it again without the result,
 //        nothing holding the reload;
@@ -194,11 +209,13 @@
 //        captain-cockpit-live-armed-390-light.png (the strip open at 390) and
 //        captain-cockpit-result-1280-light.png (the Store result).
 //   8.   (with --shots) a special team's Store form: date and time side by side, a neutral line while
-//        they are empty, the date and then the time redraw the preview, Store sets the race's start,
-//        a version with another time says the race moves; Add a team hides the weekly fields while
+//        they are empty, the date and then the time redraw the preview, Make live (at once: nothing
+//        is live in that race) sets the race's start,
+//        a version has no date or time field (it takes its plan's race); Add a team hides the weekly fields while
 //        special is checked.
 // Each check prints `ok …` or `FAIL …`; any FAIL exits 1. With --shots it saves
-// captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen),
+// captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen, taken
+// before the run changes anything: Rollers' live plan is the mod's demo plan),
 // captain-team-settings-390-{light,dark}.png, captain-team-cogs-390-light.png (Cogs, no start
 // time), a special team's settings (captain-team-settings-special-{390,1280}-light.png) and Add a
 // team with special checked (captain-new-team-special-390-light.png), and every captain page at
@@ -221,11 +238,20 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {startServer, fakeMailer, planJson, T, CODE_SECRET} from './helpers.mjs';
+import {startServer, fakeMailer, planJson, T, CODE_SECRET, RIDERS} from './helpers.mjs';
+import {sampleJson, samplePlan} from '../../pages/src/engine/demoplan.mjs';
 import {CID, makeClub, secondClub, upload} from './manage-helpers.mjs';
 import {uploadSheet, makeLive, addTeam, addEntry, discardEntry, deleteTeam, deleteSheet, receiveEntry, setRace, setRaceEvent} from '../club.mjs';
 import {randomId} from '../ids.mjs';
 import {racesOf} from '../races.mjs';
+
+// The riders of the mod's demo (pages/src/engine/demoplan.mjs), so the README's pictures of the mod and
+// of the plan server show the same team (user, 24 Nov 2026). Only in this run: the unit tests keep
+// their short names, and no check here reads a name.
+Object.assign(RIDERS, {
+    '1001': 'Alma Keller', '1002': 'Ben Richter', '1003': 'Cleo Maier', '1004': 'Dana Lorenz',
+    '1005': 'Eli Sommer', '1006': 'Finn Weber', '1007': 'Gina Hoff', '1008': 'Hugo Brandt', '1009': 'Ida Wolf',
+});
 
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const NOW = T('2026-11-19T18:12:00Z');
@@ -249,7 +275,9 @@ if (!fs.existsSync(CHROME)) {
 
 // ---- the club: three teams; Rollers with two plans of its race, Sprockets with one; riders seen ----
 const c = makeClub({teams: [['Rollers', '19:30'], ['Sprockets', '19:30'], ['Cogs', null]]});
-const rollersLive = upload(c.club, 'rollers', {type: 'fast', riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:00:00Z')});
+// Rollers' live plan is the mod's demo plan (its pulls and watts, without its bench), so the plan
+// server's pictures show the plan code of the mod's demo pictures (user, 24 Nov 2026)
+const rollersLive = upload(c.club, 'rollers', {type: 'fast', json: {...sampleJson(), team: {name: 'Rollers fast'}, roster: {}}, at: T('2026-11-18T20:00:00Z')});
 const rollersSlow = upload(c.club, 'rollers', {type: 'slow', riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:02:00Z'), live: false});
 const sprocketsLive = upload(c.club, 'sprockets', {riders: ['1007', '1008', '1009'], at: T('2026-11-18T20:05:00Z')});
 const fastPlan = c.club.sheets[rollersLive].plan;
@@ -280,6 +308,7 @@ const see = (aid, at, entry) => {
     clock.now = NOW;
 };
 const rSig = c.club.sheets[rollersLive].sig;
+report(rSig === samplePlan().sig, 'Rollers\' live plan has the plan code of the mod\'s demo plan', `${rSig} / ${samplePlan().sig}`);
 for (const aid of ['1001', '1002', '1003', '1004']) {
     see(aid, '2026-11-19T18:05:00Z', {sig: rSig, mod: '0.3.0', sheet: rollersLive, inEvent: true, event: 4567001});
 }
@@ -527,6 +556,9 @@ async function clean(p, {wide = false} = {}) {
 // Arm in place (UI panel wave 2): an action that asks first, its form found by `pick` (a predicate on
 // the form[data-arm], in the page). The mouse at the middle of a rect {x, y, width, height}.
 const ARM = pick => `[...document.querySelectorAll('form[data-arm]')].find(${pick})`;
+// a part of the armed form `f` (an expression in the page): inside it, or outside it and its own
+// (the Store form's Make live, its confirm and its strip in the action bar: form="<id>", data-for="<id>")
+const PART = (f, sel) => `(${f}.querySelector('${sel}') ?? [...document.querySelectorAll('${sel}')].find(e => e.form === ${f} || (${f}.id !== '' && e.dataset.for === ${f}.id)))`;
 async function clickAt(r, on = tab) {
     for (const type of ['mousePressed', 'mouseReleased']) {
         await on.send('Input.dispatchMouseEvent', {type, x: r.x + r.width / 2, y: r.y + r.height / 2, button: 'left', clickCount: 1});
@@ -536,16 +568,16 @@ async function clickAt(r, on = tab) {
 const rectOf = async (sel, center = true) => JSON.parse(await tab.evaluate(`JSON.stringify((() => { const el = ${sel};
   ${center ? 'el.scrollIntoView({block: "center"});' : ''} const r = el.getBoundingClientRect(); return {x: r.x, y: r.y, width: r.width, height: r.height, pageY: r.y + scrollY}; })())`));
 const strip = pick => `JSON.stringify((() => {
-  const f = ${ARM(pick)}, st = f.querySelector('[data-arm-strip]'), yes = f.querySelector('[data-arm-yes]');
+  const f = ${ARM(pick)}, st = ${PART('f', '[data-arm-strip]')}, yes = ${PART('f', '[data-arm-yes]')};
   const words = document.getElementById(yes.getAttribute('aria-describedby'));
   const s = st.getBoundingClientRect(), b = yes.getBoundingClientRect();
   return {open: !st.hidden && f.classList.contains('armed'), top: s.top + scrollY, inView: b.height > 0 && b.bottom <= innerHeight && b.top >= 0,
     focused: document.activeElement === yes, described: Boolean(words) && st.contains(words) && words.textContent.trim().length > 0,
     group: st.getAttribute('role') === 'group' && (st.getAttribute('aria-label') ?? '').startsWith('Confirm: '),
-    triggerGone: f.querySelector('[data-arm-open]').getClientRects().length === 0,
+    triggerGone: ${PART('f', '[data-arm-open]')}.getClientRects().length === 0,
     others: document.querySelectorAll('form[data-arm].armed').length - (f.classList.contains('armed') ? 1 : 0),
     button: yes.textContent.trim(), width: Math.round(s.width),
-    row: Math.round(f.parentElement.clientWidth - parseFloat(getComputedStyle(f.parentElement).paddingLeft) - parseFloat(getComputedStyle(f.parentElement).paddingRight))};
+    row: (box => Math.round(box.clientWidth - parseFloat(getComputedStyle(box).paddingLeft) - parseFloat(getComputedStyle(box).paddingRight)))(f.contains(st) ? f.parentElement : st.parentElement)};
 })())`;
 // open the ⋯ menu (races spec §4) that holds the form `pick` with the mouse on its summary; nothing
 // when the form is in none, or its menu is open already
@@ -560,7 +592,7 @@ async function openMenuOf(pick) {
 // group, triggerGone, others, button})
 async function openConfirm(pick, {wait = 500} = {}) {
     await openMenuOf(pick);
-    const t = await rectOf(`${ARM(pick)}.querySelector('[data-arm-open]')`);
+    const t = await rectOf(PART(ARM(pick), '[data-arm-open]'));
     await clickAt(t);
     await sleep(wait);
     const st = JSON.parse(await tab.evaluate(strip(pick)));
@@ -571,7 +603,7 @@ async function openConfirm(pick, {wait = 500} = {}) {
 // page followed
 async function pressConfirm(pick) {
     tab.posts.length = 0;
-    const r = await rectOf(`${ARM(pick)}.querySelector('[data-arm-yes]')`, false);
+    const r = await rectOf(PART(ARM(pick), '[data-arm-yes]'), false);
     const loaded = tab.once('Page.loadEventFired', 4000);
     await clickAt(r);
     const got = await loaded;
@@ -597,7 +629,32 @@ async function cleanPublic(p, status = 200) {
     report(!f.small.length, `${p} tap targets >= 44 px`, f.small.join(' | '));
 }
 
+// A screenshot of page p at width w into shotsDir (full: the whole page)
+const shoot = async (name, p, w, scheme, full) => {
+    await open(p, {w, scheme});
+    let h = 844;
+    if (full) {
+        h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
+        await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
+        await sleep(300);
+    }
+    const r = await tab.send('Page.captureScreenshot', {format: 'png'});
+    fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
+    console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
+};
+
+
 try {
+    // ---- the first screens, before anything changes: Rollers' live plan is still v1, the mod's
+    // demo plan, so its plan code is the one on the mod's pictures (user, 24 Nov 2026) ----
+    if (shotsDir) {
+        for (const scheme of ['light', 'dark']) {
+            await shoot(`captain-teams-390-${scheme}.png`, '/manage', 390, scheme, false);
+            await shoot(`captain-team-390-${scheme}.png`, '/manage/team/rollers', 390, scheme, false);
+            await shoot(`captain-team-settings-390-${scheme}.png`, '/manage/team/rollers/settings', 390, scheme, true);
+        }
+    }
+
     // ---- 1 and 2: the pages load clean, run the script, fit 390 px ----
     for (const p of ['/manage', '/manage/team/rollers', '/manage/team/cogs', '/manage/settings', '/manage/upload?team=rollers',
         `/manage/team/rollers?v=${rollersSlow}`]) {
@@ -623,6 +680,8 @@ try {
             const [[left, right] = [-1, -1]] = JSON.parse(await tab.evaluate(panelIn));
             report(f.sw <= f.iw && left >= 0 && right <= f.iw, `${p}: ${id}'s panel inside 390 px`, `left ${left}, right ${right}, scrollWidth ${f.sw}`);
             report(!f.small.length, `${p}: ${id}'s controls >= 44 px`, f.small.join(' | '));
+            // no upload link in either ⋯ (user, 23 Nov 2026: no New version, no "Upload a file for this race")
+            report(await tab.evaluate(`!document.getElementById(${JSON.stringify(id)}).querySelector('a[href*="/manage/upload"]')`), `${p}: ${id} has no upload link`);
         }
         const last = ids.at(-1);
         await key('Escape', 'Escape', 27);
@@ -725,26 +784,63 @@ try {
         const link = JSON.parse(await tab.evaluate(planner('header .headacts')));
         report(link !== null && link.href.startsWith('https://zwiftgopher.com/TTT/?paceline=') && link.href.endsWith('&plhost=paceline.example.org')
             && link.target === '_blank' && link.rel === 'noopener noreferrer', 'the team page links to ZwiftGopher in a new tab, in its head', JSON.stringify(link));
-        // the head's ways to a plan (races spec §4): "Plan on ZwiftGopher" the primary button, at full
-        // width on a phone, and under it the quiet link "Upload a file instead", both under the team's
-        // rhythm line (each race's line is in its own block below the head); from 1024 px the button
-        // as wide as its words
+        // the head's ways to a plan (races spec §4): "Plan on ZwiftGopher" the primary button and
+        // "Upload a file" a secondary (bordered) one (user, 23 Nov 2026); on a phone side by side under
+        // the title when they fit, else the primary at full width and Upload a file under it (user, 23
+        // Nov 2026; no rhythm line: each race's line is in its own block below the head); from 1024 px
+        // the title line holds the title, "Updated" small and raised beside it and Team settings at its
+        // end, and the pair stands side by side, right-aligned under the title line below 1180 px; from
+        // 1180 px the head's pair gives way to its copy at the list's top, left in the row under the
+        // title line (user, 23 Nov 2026: one action row)
         const headActs = `JSON.stringify((() => {
-          const row = document.querySelector('header .headacts'), [a, b] = row.querySelectorAll('a.btn'), race = document.querySelector('header .rhythm');
+          const row = document.querySelector('header .headacts'), [a, b] = row.querySelectorAll('a.btn'), race = document.querySelector('header .teamhead');
+          const head = document.querySelector('header.pagehead').getBoundingClientRect(), h1 = document.querySelector('header.pagehead h1').getBoundingClientRect();
           const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), rr = row.getBoundingClientRect();
-          return {primary: a.matches('.btn.primary'), quiet: b.matches('.btn.quiet') && b.getAttribute('href') === '/manage/upload?team=rollers',
+          return {primary: a.matches('.btn.primary'), secondary: b.matches('.btn.secondary') && b.getAttribute('href') === '/manage/upload?team=rollers',
             below: rb.top >= ra.bottom - 0.5, left: Math.abs(rb.left - ra.left) < 1, full: Math.round(ra.width) === Math.round(rr.width),
-            under: ra.top >= race.getBoundingClientRect().bottom, words: a.innerText.trim(), name: a.getAttribute('aria-label'), upload: b.innerText.trim(),
+            under: ra.top >= race.getBoundingClientRect().bottom, beside: Math.abs(rb.top - ra.top) < 1 && rb.left > ra.right && rb.left - ra.right <= 12,
+            end: Math.round(head.right - rb.right), titleRow: Math.abs((ra.top + ra.bottom) / 2 - (h1.top + h1.bottom) / 2) <= 4,
+            set: (st => ({end: Math.round(head.right - st.right), row: Math.abs((st.top + st.bottom) / 2 - (h1.top + h1.bottom) / 2) <= 4, after: st.left >= rb.right}))(race.querySelector('.btn').getBoundingClientRect()),
+            fresh: (f => ({beside: f.left > h1.right && f.left - h1.right <= 16, raised: f.top >= h1.top - 2 && f.bottom < (h1.top + h1.bottom) / 2 + 4, size: parseFloat(getComputedStyle(document.querySelector('header .fresh')).fontSize)}))(document.querySelector('header .fresh').getBoundingClientRect()),
+            words: a.innerText.trim(), name: a.getAttribute('aria-label'), upload: b.innerText.trim(),
             heights: [Math.round(ra.height), Math.round(rb.height)]};
         })())`;
         const phoneHead = JSON.parse(await tab.evaluate(headActs));
-        report(phoneHead.primary && phoneHead.quiet && phoneHead.below && phoneHead.left && phoneHead.full && phoneHead.under && phoneHead.words === 'Plan on ZwiftGopher'
-            && phoneHead.name === 'Plan on ZwiftGopher (opens a new tab)' && phoneHead.upload === 'Upload a file instead' && phoneHead.heights.every(h => h >= 44),
-            'at 390 Plan on ZwiftGopher at full width under the rhythm line, the quiet Upload a file instead under it', JSON.stringify(phoneHead));
-        await open('/manage/team/rollers', {w: 1280});
+        report(phoneHead.primary && phoneHead.secondary && phoneHead.under && phoneHead.words === 'Plan on ZwiftGopher'
+            && phoneHead.name === 'Plan on ZwiftGopher (opens a new tab)' && phoneHead.upload === 'Upload a file' && phoneHead.heights.every(h => h >= 44)
+            && (phoneHead.beside || (phoneHead.below && phoneHead.left && phoneHead.full)),
+            `at 390 Plan on ZwiftGopher and the bordered Upload a file under the title, ${phoneHead.beside ? 'side by side' : 'too wide for one line: the primary at full width, Upload a file under it'}`, JSON.stringify(phoneHead));
+        await open('/manage/team/rollers', {w: 1024});
         const deskHead = JSON.parse(await tab.evaluate(headActs));
-        report(deskHead.primary && deskHead.quiet && deskHead.below && deskHead.left && !deskHead.full && deskHead.under && deskHead.words === 'Plan on ZwiftGopher',
-            'at 1280 Plan on ZwiftGopher as wide as its words, Upload a file instead under it', JSON.stringify(deskHead));
+        report(deskHead.primary && deskHead.secondary && deskHead.beside && !deskHead.full && deskHead.words === 'Plan on ZwiftGopher' && deskHead.heights.every(h => h >= 44)
+            && deskHead.set.row && Math.abs(deskHead.set.end) <= 1 && deskHead.fresh.beside && deskHead.fresh.raised && deskHead.fresh.size < 14
+            && !deskHead.titleRow && Math.abs(deskHead.end) <= 1,
+            'at 1024 the title line: the title, Updated small and raised beside it, Team settings at its end; Plan on ZwiftGopher and Upload a file side by side right-aligned under it', JSON.stringify(deskHead));
+        await open('/manage/team/rollers', {w: 1280});
+        const wideHead = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const h1 = document.querySelector('header.pagehead h1').getBoundingClientRect(), head = document.querySelector('header.pagehead').getBoundingClientRect();
+          const st = document.querySelector('header .teamhead .btn').getBoundingClientRect(), f = document.querySelector('header .fresh').getBoundingClientRect();
+          const ways = document.querySelector('.cp-ways .headacts'), [a, b] = ways ? ways.querySelectorAll('a.btn') : [], ra = a?.getBoundingClientRect(), rb = b?.getBoundingClientRect();
+          return {headWays: document.querySelector('header .headacts').getBoundingClientRect().height,
+            set: {end: Math.round(head.right - st.right), row: Math.abs((st.top + st.bottom) / 2 - (h1.top + h1.bottom) / 2) <= 4},
+            fresh: {beside: f.left > h1.right && f.left - h1.right <= 16, raised: f.top >= h1.top - 2 && f.bottom < (h1.top + h1.bottom) / 2 + 4},
+            ways: ra ? {primary: a.matches('.btn.primary'), upload: b.innerText.trim(), left: Math.round(ra.left - h1.left), under: ra.top >= h1.bottom, beside: Math.abs(rb.top - ra.top) < 1 && rb.left > ra.right && rb.left - ra.right <= 12,
+              heights: [Math.round(ra.height), Math.round(rb.height)]} : null};
+        })())`));
+        report(wideHead.headWays === 0 && wideHead.set.row && Math.abs(wideHead.set.end) <= 1 && wideHead.fresh.beside && wideHead.fresh.raised
+            && wideHead.ways?.primary && wideHead.ways.upload === 'Upload a file' && Math.abs(wideHead.ways.left) <= 1 && wideHead.ways.under && wideHead.ways.beside && wideHead.ways.heights.every(h => h >= 44),
+            'at 1280 the title line: the title, Updated small and raised beside it, Team settings at its end; under it at the left Plan on ZwiftGopher and Upload a file side by side (the head\'s pair hidden)', JSON.stringify(wideHead));
+        // the stale line (what the script shows when the page cannot be refreshed) stays readable: a
+        // line of its own under the head's rows, as wide as the head
+        const staleAt = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const s = document.querySelector('header [data-stale]'), head = document.querySelector('header.pagehead').getBoundingClientRect();
+          s.hidden = false;
+          const r = s.getBoundingClientRect(), rows = [...document.querySelectorAll('header h1, header .headacts, header .teamhead .btn')].map(e => e.getBoundingClientRect().bottom);
+          const out = {shown: r.height > 0, width: Math.round(r.width) === Math.round(head.width), under: r.top >= Math.max(...rows) - 0.5, text: s.innerText.length > 0};
+          s.hidden = true;
+          return out;
+        })())`));
+        report(staleAt.shown && staleAt.width && staleAt.under && staleAt.text, 'at 1280 the stale line is a line of its own under the head, as wide as it', JSON.stringify(staleAt));
         report(await tab.evaluate('document.querySelectorAll(".uplinks, .uplink").length === 0'), 'no links under the plans any more');
         await open('/manage/team/rollers');
         await open('/manage/team/cogs');
@@ -753,8 +849,8 @@ try {
         await open('/manage/upload?team=rollers');
         const onUpload = await tab.evaluate('document.querySelectorAll(\'a[href^="https://zwiftgopher.com/"]\').length');
         report(empty !== null && empty.href.includes('?paceline=') && onUpload === 0
-            && emptyWays === 'btn primary block: Plan on ZwiftGopher | btn quiet small: Upload a file instead',
-        'an empty team\'s card has it as its main button, Upload a file instead after it; the upload page has none', JSON.stringify({empty, emptyWays, onUpload}));
+            && emptyWays === 'btn primary block: Plan on ZwiftGopher | btn secondary small: Upload a file',
+        'an empty team\'s card has it as its main button, Upload a file after it; the upload page has none', JSON.stringify({empty, emptyWays, onUpload}));
         if (shotsDir) {
             for (const w of [390, 1280]) {
                 await open('/manage/team/cogs', {w});
@@ -777,7 +873,7 @@ try {
         // Store form, 24 px below Store: 12d)
         const rows = JSON.parse(await tab.evaluate('JSON.stringify([...document.querySelectorAll(".cp-pending .cp-row .cp-what")].map(p => p.textContent))'));
         const marks = await tab.evaluate('[...document.querySelectorAll(".newplans")].filter(x => x.textContent === "2 new plans").length');
-        report(String(statuses) === '201,201' && rows.join('|') === 'Sent 19:12 · \'Rollers slow\' · 4 riders|Sent 19:12 · \'Rollers fast\' · 6 riders' && marks === 2,
+        report(String(statuses) === '201,201' && rows.join('|') === 'Received 19:12 · \'Rollers slow\' · 4 riders|Received 19:12 · \'Rollers fast\' · 6 riders' && marks === 2,
             'two pushed plans: listed newest first, counted in the switcher and sidebar', JSON.stringify({statuses, rows, marks}));
         if (shotsDir) {
             for (const w of [390, 1280]) {
@@ -804,7 +900,7 @@ try {
             await open('/manage', {w});
             const h = JSON.parse(await tab.evaluate(hub));
             report(h.todo.length === 1 && h.todo[0].startsWith('Cogs') && h.todo[0].includes('No start time and no live plan') && h.recv.length === 2
-                && h.recv.every(x => x.startsWith('Rollers Sent') && x.includes('Review and store')) && h.races === 1 && h.tiles === (w === 390) && h.add,
+                && h.recv.every(x => x.startsWith('Rollers Received') && x.includes('Review and store')) && h.races === 1 && h.tiles === (w === 390) && h.add,
             `at ${w} the hub: Cogs to fix, two plans waiting, tonight's race; team tiles ${w === 390 ? 'under them' : 'only in the sidebar'}`, JSON.stringify(h));
             if (w === 390) {
                 tab.logs.length = 0;
@@ -813,6 +909,20 @@ try {
             if (shotsDir) {
                 await shootNow(`captain-hub-${w}-light.png`, w);
             }
+        }
+        // a plan waiting on a phone (user, 23 Nov 2026): Review and store and Discard on one line, the
+        // same height (44 px), Discard at the row's other end, nothing wider than the screen
+        const pair = `JSON.stringify([...document.querySelectorAll('#recv-h ~ .todo > li')].map(li => {
+          const a = li.querySelector('.todo-acts > a').getBoundingClientRect(), d = li.querySelector('.todo-acts > .discard [data-arm-open]').getBoundingClientRect();
+          const row = li.getBoundingClientRect();
+          return {top: Math.round(d.top - a.top), h: [Math.round(a.height), Math.round(d.height)], gap: Math.round(d.left - a.right), end: Math.round(row.right - d.right),
+            sw: document.documentElement.scrollWidth, iw: innerWidth};
+        }))`;
+        for (const w of [375, 390]) {
+            await open('/manage', {w});
+            const rows = JSON.parse(await tab.evaluate(pair));
+            report(rows.length === 2 && rows.every(r => r.top === 0 && r.h[0] === r.h[1] && r.h[0] >= 44 && r.gap >= 16 && Math.abs(r.end) <= 1 && r.sw <= r.iw),
+                `at ${w} a plan waiting: Review and store and Discard on one line, the same height, Discard at the other end`, JSON.stringify(rows));
         }
         // review I1: from 1024 px the rows' words keep at least 12rem (192 px), the race table's cells
         // one line each; review M8: opening a row's Discard moves neither Review and store nor the words
@@ -830,6 +940,10 @@ try {
             const ws = JSON.parse(await tab.evaluate(widths));
             report(ws.todo.length === 1 && ws.recv.length === 2 && [...ws.todo, ...ws.recv].every(x => x >= 192) && ws.tall.length === 0,
                 `at ${w} the hub's words are at least 12rem wide, the race table's cells one line`, JSON.stringify(ws));
+            // the pair together at the row's end (user, 23 Nov 2026): the small gap, Discard at the end
+            const together = JSON.parse(await tab.evaluate(pair));
+            report(together.length === 2 && together.every(r => r.top === 0 && r.gap > 0 && r.gap <= 12 && Math.abs(r.end) <= 1 && r.sw <= r.iw),
+                `at ${w} a plan waiting: Review and store and Discard side by side at the row's end`, JSON.stringify(together));
             const before = await tab.evaluate(reviewAt);
             await openConfirm('f => f.matches(".discard") && f.closest("#recv-h ~ .todo")');
             const after = await tab.evaluate(reviewAt);
@@ -859,14 +973,14 @@ try {
         'Continue goes on to the team page with the plan picked (its Store form)', assignAt);
     report(tab.posts.filter(x => x.url.startsWith('/manage/upload')).length === 1, 'one upload sent', JSON.stringify(tab.posts.map(x => x.url)));
     // the Store form (the plan ⋯ and the race ⋯ have fields of the same names: every field is the form's)
-    const F = '.cp-pick form[data-assign]';
-    // "What happens": its lines, without the heading
+    const F = '.cp-form form[data-assign]';
+    // the warning lines above the card's action bar (user, 23 Nov 2026: no "What happens" heading)
     // (in the card, above its action bar: team cockpit spec §5.3b)
-    const what = () => tab.evaluate('document.querySelector("#panel-body .as-what .pv-list")?.innerText ?? ""');
+    const what = () => tab.evaluate('document.querySelector("#panel-body .cp-what .pv-list")?.innerText ?? ""');
     let wh = await what();
-    report(wh.includes('moves from') && wh.includes('Still to do'), 'What happens shows the moves and what is still to do', JSON.stringify(wh));
+    report(wh.includes('moves from') && wh.includes('Still to do') && !/What happens|Make live:|Store:/.test(wh), 'the warnings above the bar show the moves and what is still to do, no routine line', JSON.stringify(wh));
     await clean(assignAt);
-    // (the "What changed" fold under What happens went with the assign page: the rider table shows
+    // (the "What changed" fold under the former What happens went with the assign page: the rider table shows
     // what changed, 12h)
     const noButton = await tab.evaluate('!document.querySelector("[data-redraw], [formmethod]") && !document.body.innerText.includes("Update preview")');
     report(noButton, 'the Store form has no "Update preview" button');
@@ -878,7 +992,7 @@ try {
     // and he types a type
     report(await tab.evaluate(`!document.querySelector("${F} input[name=type]") && !document.querySelector("${F} datalist")`), 'a new version of a plan asks for no type');
     const state = `JSON.stringify({y: Math.round(scrollY), type: document.querySelector('${F} input[name=type]')?.value ?? null,
-      live: document.querySelector('${F} input[name=live]').checked, as: document.querySelector('${F} input[name=as]:checked')?.value ?? null,
+      box: Boolean(document.querySelector('${F} input[name=live]')), as: document.querySelector('${F} input[name=as]:checked')?.value ?? null,
       focus: document.activeElement?.name ?? null, focusValue: document.activeElement?.value ?? null, touched: document.querySelector('${F} input[name=touched]').value,
       url: location.pathname + location.search})`;
     const scrollTo = async () => {
@@ -919,7 +1033,6 @@ try {
     await tab.evaluate(`document.querySelector("${F} input[name=type]").focus()`);
     await tab.send('Input.insertText', {text: 'fast'});
     report(JSON.parse(await tab.evaluate(state)).touched === 'type', 'typing the type marks it touched');
-    report(s.live === false, 'a new plan next to the live plan: the box goes back to off');
     report(await tab.evaluate('!document.querySelector("[data-redraw], [formmethod]")'), 'still no "Update preview" button');
 
     // the race date typed digit by digit (in the field's order): no redraw while typing, one after it
@@ -978,30 +1091,37 @@ try {
     s = JSON.parse(await tab.evaluate(state));
     report(await panels() - asked0 === 1 && took < 900 && /[?&]date=2026-11-19(&|$)/.test(await lastPanel()) && s.focus === 'event',
         'leaving the date redraws at once, once, and focuses where the captain went', `${await panels() - asked0} redraws in ${took} ms, focus ${s.focus}`);
-
-    // the live box
-    y = await scrollTo();
-    at0 = await onScreen(`${F} input[name=live]`);
-    redrawn = await inPlace(`document.querySelector("${F} input[name=live]").click()`);
-    s = JSON.parse(await tab.evaluate(state));
-    at1 = await onScreen(`${F} input[name=live]`);
-    report(redrawn.asked === 1 && s.live === true && s.type === 'fast' && /[?&]touched=live%2Ctype(&|$)/.test(await lastPanel()),
-        'ticking the live box redraws the form, keeps it ticked and keeps the typed type', JSON.stringify(s));
-    report(Math.abs(s.y - y) <= 2 && Math.abs(at1 - at0) <= 2 && s.focus === 'live', 'the scroll position, the field\'s place and the focus stay', `scroll ${y} → ${s.y}, field ${at0} → ${at1}, ${s.focus}`);
-    // (the focus went to the box, outside the fold: only raceOpen keeps it open)
+    // the next race again: only raceOpen keeps the fold open across that redraw
     fs0 = await foldState();
     report(fs0?.open === true && fs0.field === '1' && /[?&]raceOpen=1(&|$)/.test(await lastPanel()), '3: a redraw keeps the race fold the captain opened open', JSON.stringify(fs0));
 
-    // back to the live plan: the box the captain touched stays, the type field goes (a version keeps its plan's)
+    // no Make live box (user, 23 Nov 2026): the action bar (#panel-acts) has Store (secondary, bordered
+    // in both themes) and Make live (primary, the rightmost, "Store and make live" for screen readers)
+    const bar3 = JSON.parse(await tab.evaluate(`JSON.stringify([...document.querySelectorAll('#panel-acts .cp-bar > button')]
+      .map(b => [b.textContent.trim(), b.className, b.getAttribute('aria-label'), b.getAttribute('form') === document.querySelector('${F}').id]))`));
+    report(!s.box && JSON.stringify(bar3) === JSON.stringify([['Store', 'btn secondary', null, true], ['Make live', 'btn primary', 'Store and make live', true]]),
+        '3: no Make live box; the action bar has Store and Make live (the rightmost), both posting the form', JSON.stringify({box: s.box, bar3}));
+    // back to the live plan: the type field goes (a version keeps its plan's), and so does the race
+    // fold: a version takes its plan's race (user, 23 Nov 2026)
     redrawn = await inPlace(`document.querySelector("${F} input[name=as][value='${fastPlan}']").click()`);
     s = JSON.parse(await tab.evaluate(state));
-    report(redrawn.asked === 1 && s.as === fastPlan && s.live === true && s.type === null, 'another plan choice keeps the touched box; a version has no type field', JSON.stringify(s));
+    report(redrawn.asked === 1 && s.as === fastPlan && s.type === null && !s.box, 'another plan choice redraws the form; a version has no type field', JSON.stringify(s));
+    report(await foldState() === null && await tab.evaluate(`!document.querySelector('${F} :is(input[name=date], input[name=start], input[name=event], input[name=startWas])')`),
+        '3: a version has no race fold: no date, start time or event link', JSON.stringify(await foldState()));
     wh = await what();
-    report(wh.startsWith('v2 of \'Rollers · fast\', live') && wh.includes('moves from') && wh.includes('Still to do'), 'What happens follows the choice', JSON.stringify(wh));
+    report(wh.includes('moves from') && wh.includes('Still to do') && !/Make live:|Store:/.test(wh),
+        'the warnings follow the choice: only what warns, no line about what Make live or Store does', JSON.stringify(wh));
     report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, 'redraws without errors', tab.logs.join('; '));
 
+    // Make live in the race window (the gate passed, 'Rollers' live): it asks first, in the action bar
+    // (user, 23 Nov 2026), and its confirm stores and makes live
     const before = liveOf('rollers');
-    await follow('document.querySelector("[data-submit]").click()');
+    const storeForm = 'f => f.matches("form[data-assign]")';
+    const asks3 = await openConfirm(storeForm);
+    report(asks3.open && asks3.inPlace && asks3.focused && asks3.described && asks3.triggerGone && asks3.button === 'Make live anyway' && liveOf('rollers') === before,
+        '3: Make live asks first in its place (the strip in the action bar, the confirm focused and described); nothing changes yet', JSON.stringify(asks3));
+    const made3 = await pressConfirm(storeForm);
+    report(made3.loaded && /^\/manage\/inbox\//.test(made3.post?.url ?? '') && /(^|&)confirm=1(&|$)/.test(made3.post.body), '3: its confirm posts the Store form with confirm=1', JSON.stringify(made3.post));
     let text = await pageText();
     report(text.includes('v2 is live') && await pathOf() === '/manage/team/rollers?r=2026-11-19', 'Store and make live: the team page at the race\'s live pointer (the new version), "v2 is live"',
         `${await pathOf()} ${JSON.stringify(text.slice(0, 200))}`);
@@ -1014,11 +1134,12 @@ try {
     await follow(`location.href = ${JSON.stringify(href)}`);
     await chooseAndContinue(sprocketsFile);
     wh = await what();
-    report(/^\/manage\/team\/sprockets\?e=/.test(await pathOf()) && wh.startsWith('v2 of \'Sprockets\', live') && !wh.includes('Still to do'),
+    report(/^\/manage\/team\/sprockets\?e=/.test(await pathOf()) && !/Make live:|Store:/.test(wh) && !wh.includes('Still to do'),
         'Sprockets: a new version of its live plan, no holes', JSON.stringify(wh));
-    await follow('document.querySelector("[data-submit]").click()');
+    await openConfirm(storeForm);
+    await pressConfirm(storeForm);
     text = await tab.evaluate('document.getElementById("panel").innerText');
-    report(text.includes('v2 is live') && !text.includes('Still to do'), 'Sprockets stored, nothing still to do', JSON.stringify(text.slice(0, 200)));
+    report(text.includes('v2 is live') && !text.includes('Still to do'), 'Sprockets stored (Make live, confirmed in its strip), nothing still to do', JSON.stringify(text.slice(0, 200)));
     for (const slug of ['sprockets', 'rollers']) {
         await open(`/manage/team/${slug}`);
         text = await pageText();
@@ -1039,7 +1160,11 @@ try {
     report(await tab.evaluate(`!document.querySelector("${F} input[name=type]")`), 'no plan chosen: no type field yet');
     redrawn = await inPlace(`document.querySelector("${F} input[name=as][value=new]").click()`);
     report(redrawn.asked === 1 && await tab.evaluate(`!!document.querySelector("${F} input[name=type]")`), 'New plan: the type field appears');
-    await tab.evaluate(`document.querySelector("${F} input[name=type]").focus()`);
+    // the type prefilled from the file's name, "Rollers tempo" without the team's name (user, 23 Nov 2026)
+    const prefilled = await tab.evaluate(`document.querySelector("${F} input[name=type]").value`);
+    report(prefilled === 'tempo', 'New plan: its type prefilled from the plan\'s name ("Rollers tempo" gives "tempo")', JSON.stringify(prefilled));
+    // typed over (selected first): the captain's own type
+    await tab.evaluate(`(() => { const i = document.querySelector("${F} input[name=type]"); i.focus(); i.select(); })()`);
     await tab.send('Input.insertText', {text: 'tempo'});
     // a new date typed, then Store pressed at once: the POST goes, no redraw (the race fold opened first)
     fs0 = await foldState();
@@ -1047,7 +1172,7 @@ try {
     report((await openFold())?.open === true, '3e: its summary opens it');
     await tab.evaluate(`(() => { const d = document.querySelector('${F} input[name=date]'); d.scrollIntoView({block: 'center'}); d.focus(); })()`);
     await typeDate('2026', '11', '20');
-    const store = JSON.parse(await tab.evaluate('(() => { const b = document.querySelector("[data-submit]"); b.scrollIntoView({block: "center"}); return JSON.stringify(b.getBoundingClientRect()); })()'));
+    const store = JSON.parse(await tab.evaluate('(() => { const b = document.querySelector("[data-submit=store]"); b.scrollIntoView({block: "center"}); return JSON.stringify(b.getBoundingClientRect()); })()'));
     navs = tab.navs.count;
     tab.posts.length = 0;
     const refusedAt = tab.once('Page.loadEventFired', 4000);
@@ -1083,7 +1208,7 @@ try {
     await sleep(200);
     report(await tab.evaluate('window.__pickers') === 1, 'a click in the race date field opens its calendar (showPicker)', String(await tab.evaluate('window.__pickers')));
     await key('Escape', 'Escape', 27);
-    // the event link pasted and left (a tap on the type): the form redraws once, and What happens says
+    // the event link pasted and left (a tap on the type): the form redraws once, and a warning line says
     // what the link does to the race before Store (review M4)
     await tab.evaluate(`(() => { const e = document.querySelector('${F} input[name=event]'); e.scrollIntoView({block: 'center'}); e.focus(); })()`);
     await tab.send('Input.insertText', {text: 'https://www.zwift.com/events/view/5123456'});
@@ -1091,7 +1216,7 @@ try {
     s = JSON.parse(await tab.evaluate(state));
     wh = await what();
     report(redrawn.asked === 1 && redrawn.loads === 0 && /[?&]event=https%3A%2F%2Fwww\.zwift\.com%2Fevents%2Fview%2F5123456(&|$)/.test(await lastPanel()) && s.focus === 'type'
-        && wh.includes('now has event link 5123456'), 'leaving the event link redraws once; What happens names the race\'s new link', JSON.stringify({focus: s.focus, wh}));
+        && wh.includes('now has event link 5123456'), 'leaving the event link redraws once; a warning line names the race\'s new link', JSON.stringify({focus: s.focus, wh}));
     report(s.as === 'new' && s.type === 'tempo' && s.touched === 'type', 'the redraw keeps the typed type', JSON.stringify(s));
     // the race fold closed right after editing its link: the click on its summary leaves the link first,
     // which sends the redraw with the fold still open; the fold stays closed, the focus on its summary
@@ -1112,18 +1237,18 @@ try {
     navs = tab.navs.count;
     tab.posts.length = 0;
     await tab.evaluate(`(() => { const t = document.querySelector('${F} input[name=start]'); t.required = true; t.value = ''; })()`);
-    await clickAt(await rectOf('document.querySelector("[data-submit]")'));
+    await clickAt(await rectOf('document.querySelector("[data-submit=store]")'));
     await sleep(400);
     fs0 = await foldState();
     report(fs0?.open === true && tab.posts.length === 0 && tab.navs.count === navs, '3e: Store with a required field empty in the closed race fold opens the fold and posts nothing',
         JSON.stringify({...fs0, posts: tab.posts.length, navs: tab.navs.count - navs}));
     await tab.evaluate(`(() => { const t = document.querySelector('${F} input[name=start]'); t.required = false; t.value = '19:30'; })()`);
     const entry = new URLSearchParams(tempoAt.split('?')[1]).get('e');
-    // Discard: on Store's line in the card's action bar, at its other end (team cockpit spec §5.3b);
-    // it asks first in its place
-    const gap = JSON.parse(await tab.evaluate(`(() => { const a = document.querySelector('[data-submit]').getBoundingClientRect();
-      const b = document.querySelector('.cp-bar form.discard [data-arm-open]').getBoundingClientRect(); return JSON.stringify({dx: Math.round(b.left - a.right), dy: Math.round(b.top - a.top)}); })()`));
-    report(gap.dx >= 24 && Math.abs(gap.dy) <= 2, 'Discard sits on Store\'s line, at least 24 px right of it', JSON.stringify(gap));
+    // Discard: on Store's line in the card's action bar, before Store (Discard · Store · Make live: user,
+    // 23 Nov 2026), 24 px or more from it; it asks first in its place
+    const gap = JSON.parse(await tab.evaluate(`(() => { const a = document.querySelector('[data-submit=store]').getBoundingClientRect();
+      const b = document.querySelector('.cp-bar form.discard [data-arm-open]').getBoundingClientRect(); return JSON.stringify({dx: Math.round(a.left - b.right), dy: Math.round(b.top - a.top)}); })()`));
+    report(gap.dx >= 24 && Math.abs(gap.dy) <= 2, 'Discard sits on Store\'s line, at least 24 px left of it', JSON.stringify(gap));
     const discard = 'f => f.matches(".discard")';
     cf = await openConfirm(discard);
     report(cf.open && cf.focused && cf.button === 'Discard plan' && club().inbox.some(e => e.id === entry), 'Discard asks first; nothing discarded yet', JSON.stringify(cf));
@@ -1137,49 +1262,89 @@ try {
       const shown = el => Boolean(el) && el.getClientRects().length > 0;
       const a = document.querySelector('.app>.topbar .back'), club = document.querySelector('.app>.topbar .topbar-club'), h = document.querySelector('main h1');
       const nav = document.querySelector('nav.crumbs'), links = nav ? [...nav.querySelectorAll('a')] : [];
-      const kicker = [...document.querySelectorAll('main .pagehead .kicker')].some(shown);
+      // (a kicker that names the page, not the club, stays: "Team settings" over the team's name,
+      // user 23 Nov 2026)
+      const kicker = [...document.querySelectorAll('main .pagehead .kicker:not(.keep)')].some(shown);
+      const keep = [...document.querySelectorAll('main .pagehead .kicker.keep')].filter(shown).map(k => k.textContent.trim()).join() || null;
       return {bar: shown(a) ? a.getAttribute('href') : null, club: club ? shown(club) : null, crumbs: shown(nav) ? [...nav.querySelectorAll('li')].map(li => li.querySelector('a, [aria-current]').textContent).join(' › ') : null,
-        parent: links.length ? links.at(-1).getAttribute('href') : null, current: nav?.querySelector('[aria-current=page]')?.textContent ?? null,
+        parent: links.length ? links.at(-1).getAttribute('href') : null, current: nav?.querySelector('[aria-current=page]')?.textContent ?? null, keep, title: h?.textContent ?? null,
         above: shown(nav) && h ? nav.getBoundingClientRect().bottom <= h.getBoundingClientRect().top : null, kicker};
     })())`;
     for (const [p, href, crumbs] of [[`/manage/upload?team=rollers&plan=${fastPlan}`, '/manage/team/rollers', 'Kettenfett RC › Rollers › Upload'],
         ['/manage/upload?team=rollers', '/manage/team/rollers', 'Kettenfett RC › Rollers › Upload'],
         ['/manage/team/rollers/settings', '/manage/team/rollers', 'Kettenfett RC › Rollers › Team settings'], ['/manage/new-team', '/manage', 'Kettenfett RC › Add a team'],
-        ['/manage/settings', '/manage', 'Kettenfett RC › Club settings'], ['/manage/team/rollers', '/manage', 'Kettenfett RC › Rollers']]) {
+        ['/manage/settings', '/manage', 'Kettenfett RC › Club settings']]) {
         await open(p, {w: 1280});
         const wb = JSON.parse(await tab.evaluate(way));
-        report(wb.bar === null && wb.crumbs === crumbs && wb.parent === href && wb.above === true && !wb.kicker,
-            `at 1280 ${p}: the breadcrumb "${crumbs}" above its head, no back bar, no kicker`, JSON.stringify(wb));
+        const teamSet = p.endsWith('/settings') && p.startsWith('/manage/team/');
+        report(wb.bar === null && wb.crumbs === crumbs && wb.parent === href && wb.above === true && !wb.kicker
+            && (teamSet ? wb.keep === 'Team settings' && wb.title === 'Rollers' : wb.keep === null),
+            `at 1280 ${p}: the breadcrumb "${crumbs}" above its head, no back bar, no kicker of the club${teamSet ? '; "Team settings" over the team\'s name' : ''}`, JSON.stringify(wb));
         await open(p);
         const ph = JSON.parse(await tab.evaluate(way));
         // (the team page's bar is its switcher, whose back link goes to the hub)
         report(ph.crumbs === null && ph.bar === href, `at 390 ${p}: the bar goes where the crumb before the page goes, no breadcrumb`, JSON.stringify(ph));
     }
+    // the settings pages in the wide frame (user, 23 Nov 2026): at 1280 the team page's left edge and
+    // width, their cards flowing into columns (two in the frame), none split, the danger zone last at
+    // the whole width; at the wide pages' scale (15 px buttons as high as the hub's, inputs as high as
+    // the button beside them, every control 44 px); at 1100 and 390 one column as before, the inputs
+    // 17 px on a phone (iOS does not zoom)
+    const frameOf = `JSON.stringify((() => { const m = document.querySelector('main').getBoundingClientRect(); return {l: Math.round(m.left), w: Math.round(m.width)}; })())`;
+    await open('/manage/team/rollers', {w: 1280});
+    const teamFrame = JSON.parse(await tab.evaluate(frameOf));
+    const settingsGeo = `JSON.stringify((() => {
+      const m = document.querySelector('main').getBoundingClientRect(), cards = [...document.querySelectorAll('.setcols > section')].map(c => c.getBoundingClientRect());
+      const dz = document.querySelector('.danger-zone').getBoundingClientRect(), cols = document.querySelector('.setcols').getBoundingClientRect();
+      const lefts = [...new Set(cards.map(r => Math.round(r.left)))].sort((a, b) => a - b);
+      const btn = document.querySelector('.setcols .btn.primary'), bs = btn ? getComputedStyle(btn) : null;
+      const pair = document.querySelector('.setcols .inline-form'), pin = pair?.querySelector('input:not([type=hidden])'), pbtn = pair?.querySelector('.btn');
+      const lab = document.querySelector('.setcols label.field');
+      return {main: {l: Math.round(m.left), w: Math.round(m.width)}, columns: lefts.length, lefts, overlap: cards.some((a, i) => cards.some((b, j) => i !== j && a.left === b.left && a.top < b.bottom - 1 && b.top < a.bottom - 1)),
+        split: [...document.querySelectorAll('.setcols > section')].some(c => c.getClientRects().length > 1),
+        // the danger zone last: at the whole width, or with the team's ZwiftGopher link beside it (.setend)
+        dzFull: dz.top >= Math.max(...cards.map(r => r.bottom)) - 1 && (Math.abs(dz.width - cols.width) <= 1
+          || (() => { const e = document.querySelector('.setend'); if (!e) return false; const er = e.getBoundingClientRect(), k = [...e.children].map(x => x.getBoundingClientRect());
+            return Math.abs(er.width - cols.width) <= 1 && k.length === 2 && Math.abs(k[0].top - k[1].top) <= 1 && k[1].left > k[0].right; })()),
+        btn: bs ? {size: bs.fontSize, h: Math.round(btn.getBoundingClientRect().height)} : null,
+        pair: pin && pbtn ? {inH: Math.round(pin.getBoundingClientRect().height), btnH: Math.round(pbtn.getBoundingClientRect().height), inSize: getComputedStyle(pin).fontSize} : null,
+        label: lab ? getComputedStyle(lab).fontSize : null, sw: document.documentElement.scrollWidth, iw: innerWidth,
+        // the cards' controls (the breadcrumb keeps its desktop links, as on every page)
+        small: [...document.querySelectorAll('.setcols :is(.btn, input:not([type=hidden],[type=checkbox],[type=radio]), select), .danger-zone .btn')]
+          .filter(e => e.getClientRects().length && e.getBoundingClientRect().height < 44).map(e => (e.textContent.trim() || e.name) + ' ' + Math.round(e.getBoundingClientRect().height))};
+    })())`;
+    for (const p of ['/manage/settings', '/manage/team/rollers/settings']) {
+        await open(p, {w: 1280});
+        const g = JSON.parse(await tab.evaluate(settingsGeo));
+        report(g.main.l === teamFrame.l && g.main.w === teamFrame.w && g.columns === 2 && !g.overlap && !g.split && g.dzFull && g.sw <= g.iw,
+            `at 1280 ${p}: the team page's frame, its cards in two columns, none split, the danger zone last at the whole width`, JSON.stringify({teamFrame, g}));
+        report(g.btn?.size === '15px' && g.btn.h >= 44 && g.label === '15px' && (g.pair === null || (g.pair.inH === g.pair.btnH && g.pair.inSize === '15px')),
+            `at 1280 ${p}: 15 px buttons 44 px high, 15 px labels, an input as high as the button beside it`, JSON.stringify({btn: g.btn, label: g.label, pair: g.pair}));
+        report(!g.small.length, `at 1280 ${p}: every control of its cards 44 px or more`, g.small.join(' | '));
+        await open(p, {w: 1100});
+        const n = JSON.parse(await tab.evaluate(settingsGeo));
+        report(n.columns === 1 && n.btn?.size === '15px', `at 1100 ${p}: one column, as before`, JSON.stringify({columns: n.columns, lefts: n.lefts}));
+        await open(p, {w: 390});
+        const ph = JSON.parse(await tab.evaluate(settingsGeo));
+        const f = JSON.parse(await tab.evaluate(fit));
+        report(ph.columns === 1 && (ph.pair === null || ph.pair.inSize === '17px') && ph.btn?.size === '16px' && f.sw <= f.iw && !f.small.length,
+            `at 390 ${p}: one column, the phone's sizes (17 px inputs, 16 px buttons)`, JSON.stringify({columns: ph.columns, btn: ph.btn, pair: ph.pair}));
+    }
     await open('/manage', {w: 1280});
     report(JSON.parse(await tab.evaluate(way)).crumbs === null, 'at 1280 the hub has no breadcrumb');
+    // the team page has none either (user, 23 Nov 2026): the sidebar names the club and the team, and
+    // no kicker repeats the club over the title; at 390 its switcher's back link goes to the hub
+    await open('/manage/team/rollers', {w: 1280});
+    const teamWide = JSON.parse(await tab.evaluate(way));
+    report(teamWide.crumbs === null && teamWide.bar === null && !teamWide.kicker, 'at 1280 the team page: no breadcrumb, no back bar, no kicker', JSON.stringify(teamWide));
+    await open('/manage/team/rollers');
+    report(JSON.parse(await tab.evaluate(way)).bar === '/manage', 'at 390 the team page goes back to the hub', await tab.evaluate(way));
     await open(`/manage/upload?team=rollers&plan=${fastPlan}&from=plan`);
     const phone = JSON.parse(await tab.evaluate(way));
-    report(phone.bar === '/manage/team/rollers' && phone.club === true, 'at 390 a New version\'s upload page (also with a `from` of before) goes back to the team and names the club', JSON.stringify(phone));
+    report(phone.bar === '/manage/team/rollers' && phone.club === true, 'at 390 an upload page opened for a plan (also with a `from` of before) goes back to the team and names the club', JSON.stringify(phone));
 
     // ---- shots for a look next to the prototype's ----
     if (shotsDir) {
-        const shoot = async (name, p, w, scheme, full) => {
-            await open(p, {w, scheme});
-            let h = 844;
-            if (full) {
-                h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
-                await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
-                await sleep(300);
-            }
-            const r = await tab.send('Page.captureScreenshot', {format: 'png'});
-            fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
-            console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
-        };
-        for (const scheme of ['light', 'dark']) {
-            await shoot(`captain-teams-390-${scheme}.png`, '/manage', 390, scheme, false);
-            await shoot(`captain-team-390-${scheme}.png`, '/manage/team/rollers', 390, scheme, false);
-            await shoot(`captain-team-settings-390-${scheme}.png`, '/manage/team/rollers/settings', 390, scheme, true);
-        }
         await shoot('captain-team-cogs-390-light.png', '/manage/team/cogs', 390, 'light', true);
         // the team page with its switcher open (phones: the teams, All teams)
         await open('/manage/team/rollers');
@@ -1193,13 +1358,13 @@ try {
             {slugTaken: s2 => srv.store.slugTaken(s2), now: NOW}));
         const gearsEntry = (riders = ['1008', '1009']) => srv.store.change(CID, cl => addEntry(cl, {source: 'upload', team: gears, json: planJson('Gears', riders), text: null},
             {now: NOW, newId: () => randomId(6)}));
-        const what = `JSON.stringify([...document.querySelectorAll('#panel-body .as-what li')].map(li => [li.className, li.innerText.trim()]))`;
+        const what = `JSON.stringify([...document.querySelectorAll('#panel-body .cp-what li')].map(li => [li.className, li.innerText.trim()]))`;
         // set a field of the Store form as typed and left: the form redraws in place (the panel's
         // fragment; or not, then null after 3 s)
         const panelsNow = () => tab.evaluate('performance.getEntriesByType("resource").filter(r => /[?&]panel=1(&|$)/.test(r.name)).length');
         const setField = async (name, value) => {
             const n0 = await panelsNow();
-            await tab.evaluate(`(() => { const f = document.querySelector('.cp-pick input[name=${name}]'); f.focus(); f.value = '${value}';
+            await tab.evaluate(`(() => { const f = document.querySelector('.cp-form input[name=${name}]'); f.focus(); f.value = '${value}';
               f.dispatchEvent(new Event('input', {bubbles: true})); f.dispatchEvent(new Event('change', {bubbles: true})); })()`);
             for (let i = 0; i < 30 && await panelsNow() === n0; i++) {
                 await sleep(100);
@@ -1210,7 +1375,7 @@ try {
         const first = gearsEntry();
         await open(`/manage/team/${gears}?e=${first}`);
         const when = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-          const d = document.querySelector('.cp-pick .as-when input[name=date]'), s = document.querySelector('.cp-pick .as-when input[name=start]');
+          const d = document.querySelector('.cp-form .as-when input[name=date]'), s = document.querySelector('.cp-form .as-when input[name=start]');
           return {date: !!d && d.required, start: !!s && s.required};
         })())`));
         report(when.date && when.start, 'a special team\'s Store form asks for date and start time, side by side', JSON.stringify(when));
@@ -1222,19 +1387,18 @@ try {
         const byTime = await setField('start', '20:15');
         const filled = JSON.parse(await tab.evaluate(what));
         // (no race line: the date and the time are in their fields, team cockpit spec §5.3b)
-        const race = await tab.evaluate('JSON.stringify([document.querySelector(".cp-pick input[name=date]")?.value, document.querySelector(".cp-pick input[name=start]")?.value, Boolean(document.querySelector(".cp-pick .as-row"))])');
+        const race = await tab.evaluate('JSON.stringify([document.querySelector(".cp-form input[name=date]")?.value, document.querySelector(".cp-form input[name=start]")?.value, Boolean(document.querySelector(".cp-form .as-row"))])');
         report(byDate !== null && afterDate[0]?.[1] === 'Choose the start time.' && byTime !== null
-            && filled.some(([, text]) => text.startsWith('New plan \'Gears\', live for Sun 29 Nov 20:15.')) && race === '["2026-11-29","20:15",false]',
+            && !filled.some(([sev]) => sev === 'neutral') && filled.some(([, text]) => text.startsWith('Store: new plan \'Gears\', not live.')) && race === '["2026-11-29","20:15",false]',
             'the date and then the time redraw the preview, which uses the time', JSON.stringify({afterDate, filled, race}));
-        await follow('document.querySelector("[data-submit]").click()');
+        // Make live (nothing live in the race: at once, user 23 Nov 2026)
+        await follow('document.querySelector("[data-submit=live]").click()');
         const gearsPlan = Object.values(club().sheets).find(sh => sh.team === gears)?.plan;
         report(club().teams[gears].races?.['2026-11-29']?.start === '20:15' && gearsPlan, 'Store sets the race\'s start', JSON.stringify(club().teams[gears].races));
-        // a new version with another time: the race moves, the preview says so
+        // a new version takes its plan's race as it is (user, 23 Nov 2026): no date or time field
         const second = gearsEntry(['1008']);
-        await open(`/manage/team/${gears}?e=${second}&team=${gears}&as=${gearsPlan}&drawn=${gears}:${gearsPlan}&live=on`);
-        await setField('start', '21:15');
-        const moved = JSON.parse(await tab.evaluate(what));
-        report(moved.some(([, text]) => text === 'Race on Sun 29 Nov now starts at 21:15 (was 20:15).'), 'a version with another time: the preview says the race moves', JSON.stringify(moved));
+        await open(`/manage/team/${gears}?e=${second}&team=${gears}&as=${gearsPlan}&drawn=${gears}:${gearsPlan}`);
+        report(await tab.evaluate(`!document.querySelector('.cp-form :is(input[name=start], input[name=date], details.as-race)')`), 'a version of a special team\'s plan has no date or time field');
         for (const w of [390, 1280]) {
             await shoot(`captain-team-settings-special-${w}-light.png`, `/manage/team/${gears}/settings`, w, 'light', true);
         }
@@ -1314,7 +1478,7 @@ try {
     // the panel's Make live of 'Rollers · slow' (the gate is open: it asks): a strip outside any ⋯
     // (an open ⋯ holds the reload by itself)
     tab.logs.length = 0;
-    const slowPanel = 'f => f.closest("#panel-body") && f.getAttribute("action") === "/manage/live"';
+    const slowPanel = 'f => f.closest("#panel-acts") && f.getAttribute("action") === "/manage/live"';
     await open(`/manage/team/rollers?v=${rollersSlow}`);
     await tab.evaluate('window.__mark = 1');
     cf = await openConfirm(slowPanel);
@@ -1375,7 +1539,7 @@ try {
     report(stale.shown && stale.text.includes('Not updated since 19:12 · no connection'), 'stale line when offline', JSON.stringify(stale.text));
     report(stale.dim, 'the Updated line is marked stale');
 
-    // ---- 3d: Make live in the panel asks first (the gate is open); so does "Make v2 live" in a row ----
+    // ---- 3d: Make live in the panel asks first (the gate is open); so does the newer version's card's Make live (its row has none) ----
     await open(`/manage/team/rollers?v=${rollersSlow}`);
     liveNow = liveOf('rollers');
     cf = await openConfirm(slowPanel);
@@ -1387,19 +1551,29 @@ try {
     report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), 'Make live posts confirm=1', JSON.stringify(pressed.post));
     report(liveOf('rollers') === rollersSlow, '\'Rollers · slow\' is live', await flash());
 
-    // a newer version of the live plan that is not live: "Make v2 live" beside its row (its notice)
+    // a newer version of the live plan that is not live: its row says "v2 · not live", a link alone
+    // like every row (user, 23 Nov 2026); its Make live (the version for screen readers) is in its card's action bar
     srv.store.change(CID, cl => uploadSheet(cl, {
         slug: 'rollers', json: planJson('Rollers slow', ['1002', '1003', '1004', '1005', '1006']), text: null, as: slowPlan, live: false,
         base: cl.teams.rollers.version, pinnedEventId: null, via: 'file',
     }, {now: NOW, newId: () => randomId(6)}));
     const [slowV2] = newestOf(slowPlan);
     await open('/manage/team/rollers');
-    const newer = 'f => f.querySelector("[data-arm-open]").textContent.startsWith("Make v2 live")';
+    const rowsBare = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+      const rows = [...document.querySelectorAll('.cp-list .cp-row')];
+      const notice = document.querySelector('.cp-row[data-sel="v:${slowV2}"]');
+      return {rows: rows.length, withForm: rows.filter(r => r.querySelector('form, button')).length, notice: notice?.innerText.trim() ?? null,
+        kids: notice ? [...notice.children].map(e => e.localName).join() : null};
+    })())`));
+    report(rowsBare.rows > 3 && rowsBare.withForm === 0 && /^v2 · not live/.test(rowsBare.notice ?? '') && rowsBare.kids === 'a',
+        'every row is its link alone: the newer version\'s "v2 · not live" without a Make live beside it', JSON.stringify(rowsBare));
+    await open(`/manage/team/rollers?v=${slowV2}`);
+    const newer = 'f => f.closest(".cp-bar") && f.querySelector("[data-arm-open]").textContent === "Make live v2 of \'Rollers · slow\'"';
     cf = await openConfirm(newer);
-    report(cf.open && cf.inPlace && cf.focused, '"Make v2 live": the strip opens in its place', JSON.stringify(cf));
+    report(cf.open && cf.inPlace && cf.focused, 'v2\'s Make live in its card: the strip opens in its place', JSON.stringify(cf));
     report(liveOf('rollers') === rollersSlow, 'team.live unchanged until the button is pressed');
     pressed = await pressConfirm(newer);
-    report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), '"Make v2 live" posts confirm=1', JSON.stringify(pressed.post));
+    report(pressed.post?.url === '/manage/live' && /(^|&)confirm=1(&|$)/.test(pressed.post.body), 'v2\'s Make live posts confirm=1', JSON.stringify(pressed.post));
     report(liveOf('rollers') === slowV2, 'v2 of \'Rollers · slow\' is live', await flash());
 
     // ---- 6: Make live without the script: the server's confirm page ----
@@ -1427,7 +1601,7 @@ try {
             await plain.send('Input.dispatchMouseEvent', {type, x, y: yy, button: 'left', clickCount: 1});
         }
     };
-    const rowForm = `#panel-body form[action="/manage/live"]:has(input[name=sheet][value="${fastNewest}"])`;
+    const rowForm = `#panel-acts form[action="/manage/live"]:has(input[name=sheet][value="${fastNewest}"])`;
     report(await plain.evaluate(`document.querySelector(${JSON.stringify(rowForm)}) !== null && document.getElementById('panel-body').getClientRects().length > 0`),
         'without the script the page with the version picked has its Make live in the panel');
     const rowButton = await nodeOf(`${rowForm} [data-arm-open]`);
@@ -1510,7 +1684,8 @@ try {
     await open('/manage/team/rollers');
 
     // ---- 9: arm in place, by keyboard and touch: Esc, the 450 ms guard, one strip at a time; a
-    // switch before the gate goes at once and Undo takes it back; shots of the strips ----
+    // switch before the gate goes at once and Make live of the version before takes it back (no
+    // Undo); shots of the strips ----
     tab.logs.length = 0;
     // two more plans of tonight's race with the live plan's riders (no move, no mark: before the gate
     // they go at once)
@@ -1598,8 +1773,8 @@ try {
     await sleep(500);
     report(tab.posts.filter(x => x.url === '/manage/live').length === 1 && !(await flash()).includes('Nothing was changed'), 'a double click on the confirm button posts once',
         `${JSON.stringify(tab.posts)} ${await flash()}`);
-    // before the gate (18:40), a switch with nothing to warn about goes at once, with Undo: Axles,
-    // 19:30, two plans of riders no other team lists
+    // before the gate (18:40), a switch with nothing to warn about goes at once (no Undo, user 23 Nov
+    // 2026): Axles, 19:30, two plans of riders no other team lists
     let axles = null;
     srv.store.change(CID, cl => {
         axles = addTeam(cl, {name: 'Axles', start: '19:30'}, {slugTaken: s2 => srv.store.slugTaken(s2), now: NOW});
@@ -1610,17 +1785,19 @@ try {
     });
     clock.now = T('2026-11-19T17:40:00Z');
     const axlesB = Object.entries(club().sheets).find(([, sh]) => sh.team === axles && sh.type === 'b')[0];
+    const axlesA = Object.entries(club().sheets).find(([, sh]) => sh.team === axles && sh.type === 'a')[0];
     await open(`/manage/team/${axles}?v=${axlesB}`);
-    const plainRow = 'document.querySelector("#panel-body form[action=\'/manage/live\']:not([data-arm]) [type=submit]")';
+    const plainRow = 'document.querySelector("#panel-acts form[action=\'/manage/live\']:not([data-arm]) [type=submit]")';
     const hasPlain = await tab.evaluate(`${plainRow} !== null`);
     report(hasPlain, 'before the gate the panel\'s Make live is a plain button');
-    // where the panel and its Undo are once the page has come back (#panel): in the viewport, below
-    // the sticky top bar (Undo where the action was)
+    // where the panel and its flash are once the page has come back (#panel): in the viewport, below
+    // the sticky top bar; nothing of an Undo on the page
     const placed = `JSON.stringify((() => {
       const row = document.getElementById('panel'), line = row?.querySelector('.flash');
       const bar = [...document.querySelectorAll('.topbar')].find(b => b.getClientRects().length && getComputedStyle(b).position === 'sticky');
       const r = (line ?? row).getBoundingClientRect();
-      return {hash: location.hash, id: row?.id ?? null, undo: Boolean(line?.querySelector('form[action="/manage/live/undo"]')), text: line?.querySelector('p')?.textContent ?? '',
+      return {hash: location.hash, id: row?.id ?? null, text: line?.querySelector('p')?.textContent ?? '', form: Boolean(line?.querySelector('form')),
+        undo: Boolean(document.querySelector('form[action="/manage/live/undo"], [data-row-undo], .cp-undo, .flash.undo')),
         top: Math.round(r.top), bottom: Math.round(r.bottom), ih: innerHeight, bar: bar ? Math.round(bar.getBoundingClientRect().bottom) : 0,
         topFlash: [...document.querySelectorAll('.flash')].some(f => !f.closest('#panel'))};
     })())`;
@@ -1631,16 +1808,19 @@ try {
         await tab.evaluate('scrollTo(0, document.documentElement.scrollHeight)');
         await follow(`${plainRow}.click()`);
         let at = JSON.parse(await tab.evaluate(placed));
-        report(liveOf(axles) !== was && !/confirm=/.test(tab.posts.at(-1)?.body ?? 'confirm=') && at.undo && !at.topFlash && at.hash === `#${at.id}`,
-            `at ${w} it goes live at once and lands on the panel, its Undo there, no other flash`, JSON.stringify(at));
-        report(at.top >= at.bar && at.bottom <= at.ih, `at ${w} the panel's Undo is in view, below the top bar`, JSON.stringify(at));
+        report(liveOf(axles) !== was && !/confirm=/.test(tab.posts.at(-1)?.body ?? 'confirm=') && at.text.endsWith('is live for Axles.') && !at.form && !at.undo
+            && !at.topFlash && at.hash === `#${at.id}`,
+            `at ${w} it goes live at once and lands on the panel, its flash there without an Undo, no other flash`, JSON.stringify(at));
+        report(at.top >= at.bar && at.bottom <= at.ih, `at ${w} the panel's flash is in view, below the top bar`, JSON.stringify(at));
         if (shotsDir) {
-            await shootView(`captain-team-undo-${w}-light.png`);
+            await shootView(`captain-team-switch-${w}-light.png`);
         }
-        await follow('document.querySelector("#panel .flash.undo form [type=submit]").click()');
+        // the way back: the version live before, opened, and its own Make live (before the gate: at once)
+        await open(`/manage/team/${axles}?v=${axlesA}`, {w});
+        await follow(`${plainRow}.click()`);
         at = JSON.parse(await tab.evaluate(placed));
-        report(liveOf(axles) === was && at.text.startsWith('Undone:') && !at.undo && !at.topFlash && at.top >= at.bar && at.bottom <= at.ih,
-            `at ${w} Undo makes the version before live again, said in its panel`, JSON.stringify(at));
+        report(liveOf(axles) === was && at.text === '\'Axles · a\' v1 is live for Axles.' && !at.form && !at.undo && !at.topFlash && at.top >= at.bar && at.bottom <= at.ih,
+            `at ${w} Make live of the version before makes it live again, said in its panel`, JSON.stringify(at));
     }
     clock.now = NOW;
     srv.store.change(CID, cl => deleteTeam(cl, axles, NOW));
@@ -1678,14 +1858,15 @@ try {
             && club().teams.sprockets.races['2026-11-18']?.live === sprOld, '11: the fixture: Rollers races Thu 19 and Sun 22 Nov, Sprockets raced Wed 18 Nov',
         JSON.stringify({rollers: club().teams.rollers.races, sprockets: club().teams.sprockets.races}));
 
-        // 11a: both races on the Rollers page, the later one's fold closed; at 390 it fits and its
+        // 11a: both races on the Rollers page, the later one without a fold (user, 24 Nov 2026); at 390 it fits and its
         // controls are 44 px, also with the later race's ⋯ and a plan ⋯ open
         tab.logs.length = 0;
         await open('/manage/team/rollers');
         await clean('/manage/team/rollers (two races)');
         const races = JSON.parse(await tab.evaluate(`JSON.stringify({ids: [...document.querySelectorAll('main .race[id^="race-"]')].map(r => r.id),
-          fold: document.querySelector('#race-${sun} details.fold.race-more')?.open ?? null})`));
-        report(races.ids.join() === `race-2026-11-19,race-${sun}` && races.fold === false, '11a: the team page shows #race-2026-11-19 and #race-2026-11-22, the later race\'s fold closed',
+          fold: document.querySelector('details.fold.race-more') !== null, table: document.querySelector('#race-${sun} table') !== null,
+          row: document.querySelector('#race-${sun} .cp-row.live > a.cp-link')?.getAttribute('href') ?? null})`));
+        report(races.ids.join() === `race-2026-11-19,race-${sun}` && races.fold === false && races.table === false && /\?r=\d{4}-\d\d-\d\d#panel$/.test(races.row ?? ''), '11a: the team page shows #race-2026-11-19 and #race-2026-11-22, no fold and no riders table in the later race, its live row opens its card (?r=)',
             JSON.stringify(races));
         // (panelIn, summaryOf and openMenus: the ⋯ checks of 1-2)
         for (const id of [`menu-race-${sun}`, `menu-plan-${sunBPlan}`]) {
@@ -1809,10 +1990,10 @@ try {
         await tab.send('Input.insertText', {text: 'sunday C'});
         await follow(`document.querySelector('#menu-plan-${sunBPlan} form[action="/manage/plan/rename"] [type=submit]').click()`);
         const renamed = await tab.evaluate(`document.querySelector('#plan-${sunBPlan} .label')?.textContent ?? ''`);
-        report(renamed === 'Rollers · sunday C' && club().sheets[sunB].type === 'sunday C' && (await flash()) === 'Renamed to \'Rollers · sunday C\'.',
+        report(renamed === 'sunday C' && club().sheets[sunB].type === 'sunday C' && (await flash()) === 'Renamed to \'Rollers · sunday C\'.',
             '11e: Rename in the plan\'s ⋯ changes the row\'s label', `${JSON.stringify(renamed)} ${JSON.stringify(await flash())}`);
         const liveThu = raceOfRollers('2026-11-19').live;
-        const sunMake = '#panel-body form[action="/manage/live"]';
+        const sunMake = '#panel-acts form[action="/manage/live"]';
         await open(`/manage/team/rollers?v=${sunB}`);
         const asks = await tab.evaluate(`document.querySelector('${sunMake}')?.hasAttribute('data-arm') ?? null`);
         tab.posts.length = 0;
@@ -1820,36 +2001,26 @@ try {
         report(asks === false && tab.posts.at(-1)?.url === '/manage/live' && raceOfRollers(sun).live === sunB && raceOfRollers('2026-11-19').live === liveThu,
             '11e: its Make live acts at once (gate closed, nothing to warn); Sun 22 Nov gets it, Thu 19 Nov keeps its own live plan',
         JSON.stringify({asks, post: tab.posts.at(-1), sun: raceOfRollers(sun).live, thu: raceOfRollers('2026-11-19').live}));
-        // its Undo, the team's last switch, in a later race: on the bare page (the card is Thursday's) it
-        // is on Sunday's live row; a click on that row swaps in Sunday's card, which offers it, and the
-        // row's goes (the script); another version's card brings it back to the row. Once at a time.
-        const undoAt = `JSON.stringify((() => { const shown = [...document.querySelectorAll('form[action="/manage/live/undo"]')].filter(f => f.getClientRects().length > 0);
-          return {n: shown.length, where: shown.map(f => f.closest('.cp-row') ? 'row:' + f.closest('.cp-row').dataset.sel : f.closest('.cp-bar') ? 'bar' : 'other')}; })())`;
+        // no Undo of that switch (user, 23 Nov 2026): not on Sunday's live row on the bare page, not in
+        // Sunday's card swapped in by a click on that row, not after a swap away (Thursday's row at
+        // 1280, the sheet's ✕ at 390); no row of the list holds a form
+        const undoAt = `JSON.stringify({undo: document.querySelectorAll('form[action="/manage/live/undo"], [data-row-undo], .cp-undo, .flash.undo').length,
+          rowForms: document.querySelectorAll('.cp-list .cp-row form').length, url: location.pathname + location.search})`;
         await open('/manage/team/rollers', {w: 1280});
-        const onRow = JSON.parse(await tab.evaluate(undoAt));
+        const bare11 = JSON.parse(await tab.evaluate(undoAt));
         await tab.evaluate(`document.querySelector('.cp-row[data-sel="v:${sunB}"] > a.cp-link').click()`);
         await sleep(1200);
         const inCard = JSON.parse(await tab.evaluate(undoAt));
-        const sunUrl = await tab.evaluate('location.pathname + location.search');
         await tab.evaluate(`document.querySelector('.cp-row[data-sel="v:${liveThu}"] > a.cp-link').click()`);
         await sleep(1200);
-        const backOnRow = JSON.parse(await tab.evaluate(undoAt));
-        report(onRow.n === 1 && onRow.where[0] === `row:v:${sunB}` && sunUrl === `/manage/team/rollers?r=${sun}` && inCard.n === 1 && inCard.where[0] === 'bar'
-            && backOnRow.n === 1 && backOnRow.where[0] === `row:v:${sunB}`,
-        '11e: the later race\'s Undo is on its live row while the card shows another race, in its card once that is swapped in, never twice', JSON.stringify({onRow, sunUrl, inCard, backOnRow}));
-        // the other order: a page drawn with the Undo in its card (?r=<Sunday>, where Make live lands),
-        // then a swap away (Thursday's row at 1280, the sheet's ✕ at 390): the row's Undo shows, once
-        await open(`/manage/team/rollers?r=${sun}`, {w: 1280});
-        const landedAt = JSON.parse(await tab.evaluate(undoAt));
-        await tab.evaluate(`document.querySelector('.cp-row[data-sel="v:${liveThu}"] > a.cp-link').click()`);
-        await sleep(1200);
-        const awayWide = JSON.parse(await tab.evaluate(undoAt));
+        const away = JSON.parse(await tab.evaluate(undoAt));
         await open(`/manage/team/rollers?r=${sun}`, {w: 390});
+        const landedAt = JSON.parse(await tab.evaluate(undoAt));
         await tab.evaluate('document.querySelector("#panel a.cp-close").click()');
         await sleep(1200);
         const awayPhone = JSON.parse(await tab.evaluate(undoAt));
-        report(landedAt.n === 1 && landedAt.where[0] === 'bar' && awayWide.n === 1 && awayWide.where[0] === `row:v:${sunB}` && awayPhone.n === 1 && awayPhone.where[0] === `row:v:${sunB}`,
-            '11e: from a page with the Undo in its card, a swap away (another row, the sheet\'s ✕) shows it on the row, once', JSON.stringify({landedAt, awayWide, awayPhone}));
+        report([bare11, inCard, away, landedAt, awayPhone].every(x => x.undo === 0 && x.rowForms === 0) && inCard.url === `/manage/team/rollers?r=${sun}`,
+            '11e: no Undo of the later race\'s switch, on its row, in its card or after a swap away; no row holds a form', JSON.stringify({bare11, inCard, away, landedAt, awayPhone}));
 
         // 11f: Sprockets' race of Wed 18 Nov is under Over, without a race ⋯; its plan's ⋯ offers Delete
         // only, its version's panel is read only
@@ -1865,28 +2036,30 @@ try {
           links: [...document.querySelectorAll('#over details[data-menu] a')].map(a => a.textContent.trim())})`));
         report(offers.forms.join() === '/manage/sheet/delete' && offers.links.length === 0, '11f: the plan ⋯ of an over race offers Delete only', JSON.stringify(offers));
         await open(`/manage/team/sprockets?v=${sprOld}`);
-        const readOnly = await tab.evaluate('!document.querySelector("#panel-body form[action=\'/manage/live\']") && Boolean(document.querySelector("#panel-body .cp-over"))');
+        const readOnly = await tab.evaluate('!document.querySelector("#panel-acts form[action=\'/manage/live\']") && Boolean(document.querySelector("#panel-body .cp-over"))');
         report(readOnly, '11f: its version\'s panel is read only');
         await clean(`/manage/team/sprockets?v=${sprOld} (over)`);
 
-        // 11g: the Store form of a plan pushed for Rollers: the race radios before the plans, the nearest
+        // 11g: the Store form of a plan pushed for Rollers, as a new plan (a version takes its plan's race,
+        // user 23 Nov 2026): the race radios first in its race fold, after the plans, the nearest
         // checked; choosing the other race redraws it once, in place
         const pushed = srv.store.change(CID, cl => receiveEntry(cl, {team: 'rollers', via: 'zwiftgopher', json: planJson('Rollers', ['1001', '1002', '1003']), text: null},
             {now: NOW, newId: () => randomId(6)}));
         tab.logs.length = 0;
-        await open(`/manage/team/rollers?e=${pushed}`);
+        await open(`/manage/team/rollers?e=${pushed}&team=rollers&as=new&drawn=rollers:new`);
         const radios = `JSON.stringify((() => {
           const rs = [...document.querySelectorAll('${F} input[name=race]')], plans = document.querySelector('${F} input[name=as]')?.closest('fieldset');
           const set = rs[0]?.closest('fieldset');
           return {values: rs.map(r => r.value), checked: rs.filter(r => r.checked).map(r => r.value), startFor: document.querySelector('${F} input[name=startFor]')?.value ?? null,
-            above: Boolean(set && plans) && set.getBoundingClientRect().bottom <= plans.getBoundingClientRect().top, legend: set?.querySelector('legend')?.textContent ?? null,
+            inFold: Boolean(set && plans) && set.closest('details.as-race') !== null && Boolean(plans.compareDocumentPosition(set) & Node.DOCUMENT_POSITION_FOLLOWING),
+            legend: set?.querySelector('legend')?.textContent ?? null,
             // the start time is prefilled (the race's own, else the team's), with no hint under it (user, 22 Nov 2026)
             time: document.querySelector('${F} input[name=start]')?.value ?? null, timeHint: Boolean(document.querySelector('${F} input[name=start]')?.closest('label')?.querySelector('.hint'))};
         })())`;
         const choice = JSON.parse(await tab.evaluate(radios));
-        report(choice.values.join() === `2026-11-19,${sun}` && choice.checked.join() === '2026-11-19' && choice.above && choice.legend === 'Race' && choice.startFor === '2026-11-19'
+        report(choice.values.join() === `2026-11-19,${sun}` && choice.checked.join() === '2026-11-19' && choice.inFold && choice.legend === 'Race' && choice.startFor === '2026-11-19'
             && choice.time === '19:30' && choice.timeHint === false,
-            '11g: a pushed plan\'s Store form shows the race radios before the plans, the nearest checked', JSON.stringify(choice));
+            '11g: a pushed plan\'s Store form, as a new plan, has the race radios in its race fold after the plans, the nearest checked', JSON.stringify(choice));
         fs0 = await foldState();
         report(fs0?.open === false && fs0.last && fs0.summary.startsWith('Race: Thu 19 Nov · 19:30') && fs0.summary.endsWith(' · Change'),
             '11g: the nearest race checked: the race fold closed, its summary naming that race', JSON.stringify(fs0));
@@ -1917,7 +2090,7 @@ try {
         second.close();
         const entries = club().inbox.length;
         tab.posts.length = 0;
-        await follow('document.querySelector("[data-submit]").click()');
+        await follow('document.querySelector("[data-submit=store]").click()');
         const redrawnStart = JSON.parse(await tab.evaluate(`JSON.stringify({start: document.querySelector('${F} input[name=start]')?.value ?? null,
           was: document.querySelector('${F} input[name=startWas]')?.value ?? null})`));
         const staleFlash = await flash();
@@ -1927,21 +2100,21 @@ try {
         '11h: Store from a page drawn before another tab moved the race stores nothing and redraws with the race\'s time now',
         JSON.stringify({drawnWith, movedFlash, staleFlash, posts: tab.posts.length, start: raceOfRollers(sun)?.start, redrawnStart}));
 
-        // 11i: the same pushed plan stored, not live (the box starts off), for a new race on Wed 25 Nov:
+        // 11i: the same pushed plan stored, not live (its Store), for a new race on Wed 25 Nov:
         // the Store flash says so in red at once, 6 days ahead, with Make live under it (spec §8)
         const wed = '2026-11-25';
         await open(`/manage/team/rollers?e=${pushed}&team=rollers&as=new&drawn=rollers:new&date=${wed}`);
         const box = await tab.evaluate(`document.querySelector("${F} input[name=live]")?.checked ?? null`);
-        await follow('document.querySelector("[data-submit]").click()');
+        await follow('document.querySelector("[data-submit=store]").click()');
         const wedPlan = Object.entries(club().sheets).find(([, x]) => x.team === 'rollers' && x.date === wed)?.[0] ?? null;
         const notLive = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-          const line = document.querySelector('#panel .flash.err p'), make = document.querySelector('#panel-body form[action="/manage/live"]');
+          const line = document.querySelector('#panel .flash.err p'), make = document.querySelector('#panel-acts form[action="/manage/live"]');
           return {line: line?.innerText.trim() ?? null, make: make?.querySelector('[type=submit]')?.textContent.trim() ?? null,
             after: Boolean(line && make && (line.compareDocumentPosition(make) & Node.DOCUMENT_POSITION_FOLLOWING)),
             sheet: make?.querySelector('input[name=sheet]')?.value ?? null};
         })())`));
-        report(box === false && wedPlan !== null && raceOfRollers(wed)?.live === null && notLive.line === 'Stored as v1 of \'Rollers\'. Not live: riders get nothing until you press Make live.'
-            && notLive.make === 'Make v1 live' && notLive.after && notLive.sheet === wedPlan,
+        report(box === null && wedPlan !== null && raceOfRollers(wed)?.live === null && notLive.line === 'Stored as v1 of \'Rollers\'. Not live: riders get nothing until you press Make live.'
+            && notLive.make === 'Make live v1 of \'Rollers\'' && notLive.after && notLive.sheet === wedPlan,
         '11i: a Store that is not live has the red line "Not live: riders get nothing" with Make live under it', JSON.stringify({box, wedPlan, race: raceOfRollers(wed), notLive}));
 
         // the fixture goes again
@@ -2010,7 +2183,9 @@ try {
           const top = el => Math.round(el.getBoundingClientRect().top), bottom = el => Math.round(el.getBoundingClientRect().bottom);
           const kids = [...document.querySelectorAll('.cp-list > *')].filter(e => e.getBoundingClientRect().height > 0);
           const cardTop = document.querySelector('#panel .cp-top'), card = document.querySelector('.cp-body');
-          return {first: kids[0] ? {cls: kids[0].className, b: bottom(kids[0])} : null, rest: kids.slice(1).map(e => ({cls: e.className, t: top(e)})),
+          // the nearest race with the box of its plans not stored yet before it (user, 24 Nov 2026): both come before the card
+          const at = kids.findIndex(e => e.classList.contains('cp-race')), first = kids[at];
+          return {first: first ? {cls: first.className, b: bottom(first), lead: at} : null, rest: kids.slice(at + 1).map(e => ({cls: e.className, t: top(e)})),
             card: cardTop && card && card.getClientRects().length ? {t: top(cardTop), b: bottom(card), gap: top(card) - bottom(cardTop)} : null,
             title: document.querySelector('#panel .cp-title')?.textContent ?? '', sheet: document.body.classList.contains('has-sel'),
             close: Boolean(document.querySelector('#panel a.cp-close'))};
@@ -2062,7 +2237,7 @@ try {
         // no riders card under it, no states; the list's live row says the count (spec §5.3b)
         const after = JSON.parse(await tab.evaluate(layout));
         report(/\bhas-sel\b/.test(after.cls) && Boolean(after.top?.shown && after.card?.shown) && after.cards === 1 && after.states === 0
-            && !after.title.startsWith('Riders on') && / have it$/.test(after.liveRow), '12a: after the gate the picked version\'s card replaces the live one; the live row counts', JSON.stringify(after));
+            && !after.title.startsWith('Riders on') && / have it Live(SendingRiders get this plan now|StartedThe race has started)$/.test(after.liveRow), '12a: after the gate the picked version\'s card replaces the live one; the live row counts, its phase beside Live (user, 23 Nov 2026)', JSON.stringify(after));
         clock.now = T('2026-11-19T17:40:00Z');
         await open(`${cp}?v=${picked}`, {w: 1280});
         const before = JSON.parse(await tab.evaluate(layout));
@@ -2094,7 +2269,8 @@ try {
             await sleep(200);
         };
         const rowLink = sel => `document.querySelector('.cp-row[data-sel="${sel}"] > a.cp-link')`;
-        const titleOf = id => `'${club().sheets[id].label}' v${club().sheets[id].n} `;
+        // the team page names a version by its plan's type alone (user, 23 Nov 2026)
+        const titleOf = id => `${club().sheets[id].type == null ? '' : `'${club().sheets[id].type}' `}v${club().sheets[id].n} `;
 
         // 12b: a version row swaps the panel in place; two rows within 50 ms end on the second
         await open(cp, {w: 1280});
@@ -2173,23 +2349,26 @@ try {
 
         // 12r: a refused Store (an event link that does not parse) answers at /manage/inbox/<id> with
         // the cockpit; the address bar gets the cockpit's URL, and a redraw of the form asks the
-        // cockpit's panel, never /manage/inbox (the old Store a plan page)
-        await open(`${cp}?e=${pushedCp}`, {w: 1280});
+        // cockpit's panel, never /manage/inbox (the old Store a plan page); a new plan's (a version has
+        // no event link, user 23 Nov 2026)
+        await open(`${cp}?e=${pushedCp}&team=rollers&as=new&drawn=rollers:new&type=tempo`, {w: 1280});
         await front();
-        await tab.evaluate(`document.querySelector('.cp-pick input[name=event]').value = 'not a link'`);
-        const refusedLoad = await follow(`document.querySelector('button[form="store-${pushedCp}"]').click()`);
+        await tab.evaluate(`document.querySelector('.cp-form input[name=event]').value = 'not a link'`);
+        const refusedLoad = await follow(`document.querySelector('button[form="store-${pushedCp}"][data-submit=store]').click()`);
         const atRefusal = JSON.parse(await tab.evaluate(`JSON.stringify({url: location.pathname + location.search,
           flash: document.querySelector('#panel .flash.err')?.textContent.trim() ?? null, form: Boolean(document.getElementById('store-${pushedCp}'))})`));
         navs = tab.navs.count;
-        await tab.evaluate(`document.querySelector('.cp-pick input[name=as][value=new]').click()`);
+        const versionR = await tab.evaluate(`document.querySelector('.cp-form input[name=as]:not([value=new])').value`);
+        await tab.evaluate(`document.querySelector('.cp-form input[name=as]:not([value=new])').click()`);
         await sleep(1500);
         const redrawnR = JSON.parse(await tab.evaluate(`JSON.stringify({url: location.pathname + location.search,
           inbox: performance.getEntriesByType('resource').filter(r => r.name.includes('/manage/inbox')).map(r => r.name),
           panels: performance.getEntriesByType('resource').filter(r => /[?&]panel=1(&|$)/.test(r.name) && r.name.includes('${cp}?')).length,
-          checked: document.querySelector('.cp-pick input[name=as]:checked')?.value ?? null,
-          inRow: Boolean(document.querySelector('.cp-row[data-sel="e:${pushedCp}"] > .cp-pick form[data-assign]'))})`));
+          checked: document.querySelector('.cp-form input[name=as]:checked')?.value ?? null,
+          inCard: Boolean(document.querySelector('#panel-body > .cp-body > .cp-form > form[data-assign]')),
+          rowAlone: [...(document.querySelector('.cp-row[data-sel="e:${pushedCp}"]')?.children ?? [])].map(e => e.localName).join()})`));
         report(refusedLoad && atRefusal.url === `${cp}?e=${pushedCp}` && atRefusal.flash !== null && atRefusal.form && tab.navs.count === navs
-            && redrawnR.inbox.length === 0 && redrawnR.panels === 1 && redrawnR.checked === 'new' && redrawnR.inRow && redrawnR.url === `${cp}?e=${pushedCp}`,
+            && redrawnR.inbox.length === 0 && redrawnR.panels === 1 && redrawnR.checked === versionR && redrawnR.inCard && redrawnR.rowAlone === 'a' && redrawnR.url === `${cp}?e=${pushedCp}`,
         '12r: after a refused Store the address bar is the cockpit\'s, and a redraw asks its panel, never /manage/inbox', JSON.stringify({navs: tab.navs.count - navs, atRefusal, redrawnR}));
         // the 400 it expects stays out of the last check
         for (let i = tab.logs.length - 1; i >= 0; i--) {
@@ -2214,16 +2393,16 @@ try {
         await tab.evaluate(`${rowLink(`e:${pushedCp}`)}.click()`);
         await sleep(1500);
         const form = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-          const f = document.getElementById('store-${pushedCp}'), b = document.querySelector('button[form="store-${pushedCp}"]');
-          return {inRow: Boolean(f && f.closest('.cp-row[data-sel="e:${pushedCp}"] > .cp-pick')), hold: Boolean(f?.matches('[data-hold-reload]')),
+          const f = document.getElementById('store-${pushedCp}'), b = document.querySelector('button[form="store-${pushedCp}"][data-submit=store]');
+          return {inCard: Boolean(f && f.closest('#panel-body .cp-form') && !f.closest('.cp-list')), hold: Boolean(f?.matches('[data-hold-reload]')),
             owns: Boolean(f && b && !f.contains(b) && [...f.elements].includes(b))};
         })())`));
         const held0 = await st();
         await sleep(35000);
         const held = await st();
-        report(!held0.hidden && !held.hidden && form.inRow && form.hold && form.owns && held0.url === `${cp}?e=${pushedCp}` && /\bsel-e\b/.test(held0.cls) && held0.focus === 'panel'
+        report(!held0.hidden && !held.hidden && form.inCard && form.hold && form.owns && held0.url === `${cp}?e=${pushedCp}` && /\bhas-sel\b/.test(held0.cls) && held0.focus === 'panel'
             && tab.navs.count === navs && held.url === held0.url,
-        '12i: with the Store form open (swapped in) nothing loads in 35 s', JSON.stringify({navs: tab.navs.count - navs, form, held}));
+        '12i: with the Store form open (swapped in, in the card) nothing loads in 35 s', JSON.stringify({navs: tab.navs.count - navs, form, held}));
         // a click on the live row (a swap to the live version's card) releases the hold
         await tab.evaluate(`${rowLink(`v:${liveOf('rollers')}`)}.click()`);
         await sleep(1000);
@@ -2262,28 +2441,30 @@ try {
           // (display:contents, M1), its races and folds stay
           const listShown = [...(el('.cp-list')?.children ?? [])].some(e => e.getBoundingClientRect().height > 0);
           return {cls: document.body.className, url: location.pathname + location.search, topbar: shown('.topbar'), head: shown('.pagehead'), list: listShown,
-            mainKids: kids('main'), cpKids: kids('.cp'), listKids: kids('.cp-list'),
-            onlyPick: [...(el('.cp-list')?.children ?? [])].filter(e => e.getBoundingClientRect().height > 0).every(e => e.classList.contains('sel-race')),
+            mainKids: kids('main'), cpKids: kids('.cp'),
             scrolled: Math.round(scrollY), closeVp: cr ? Math.round(cr.top) : null,
             close: cr ? {w: Math.round(cr.width), h: Math.round(cr.height), href: c.getAttribute('href')} : null,
-            closeTop: top('#panel a.cp-close'), field: top([...document.querySelectorAll('.cp-pick form :is(input:not([type=hidden]),select,textarea)')].find(e => e.getBoundingClientRect().height > 0) ?? null),
-            what: top('#panel-body .as-what h3'), table: top('#panel-body table'), store: top('#panel-body [data-submit]'),
-            fold: top('.cp-pick details.as-race > summary'), foldLast: el('.cp-pick form')?.lastElementChild?.matches('details.as-race') ?? null,
-            storeR: el('#panel-body [data-submit]') ? Math.round(el('#panel-body [data-submit]').getBoundingClientRect().right) : null,
-            discard: top('#panel-body .cp-bar form.discard [data-arm-open]'),
-            discardL: el('#panel-body .cp-bar form.discard [data-arm-open]') ? Math.round(el('#panel-body .cp-bar form.discard [data-arm-open]').getBoundingClientRect().left) : null,
+            closeTop: top('#panel a.cp-close'), field: top([...document.querySelectorAll('#panel-body .cp-form form :is(input:not([type=hidden]),select,textarea)')].find(e => e.getBoundingClientRect().height > 0) ?? null),
+            what: top('#panel-body .cp-what li'), table: top('#panel-body table'), store: top('#panel-acts [data-submit=store]'),
+            fold: top('#panel-body .cp-form details.as-race > summary'), foldLast: el('#panel-body .cp-form form')?.lastElementChild?.matches('details.as-race') ?? null,
+            storeL: el('#panel-acts [data-submit=store]') ? Math.round(el('#panel-acts [data-submit=store]').getBoundingClientRect().left) : null,
+            discard: top('#panel-acts .cp-bar form.discard [data-arm-open]'),
+            discardR: el('#panel-acts .cp-bar form.discard [data-arm-open]') ? Math.round(el('#panel-acts .cp-bar form.discard [data-arm-open]').getBoundingClientRect().right) : null,
             picked: [...document.querySelectorAll('.cp-row.picked')].map(r => r.dataset.sel)};
         })())`;
         const sheetOf = async (on = tab) => JSON.parse(await on.evaluate(sheetJs));
         const fitOn = async (on = tab) => JSON.parse(await on.evaluate(fit));
-        const onlySheet = d => !d.topbar && !d.head && !d.list && d.mainKids.join() === 'cp' && d.cpKids.join() === 'panel,panel-body' && d.close !== null;
-        // a received plan's sheet in this order from the top (team cockpit spec §5.3b: What happens in
-        // the card's slot above its action bar): the close link, the form's first field, the table, What
-        // happens, Store; Discard on Store's line at the bar's other end, 24 px or more from it
-        // (the race fold the form's last block, above the table: user, 22 Nov 2026)
-        const storeOrder = d => [d.closeTop, d.field, d.fold, d.table, d.what, d.store];
-        const storeSheet = d => storeOrder(d).every(v => v !== null) && storeOrder(d).every((v, i, a) => i === 0 || v > a[i - 1]) && d.foldLast === true
-            && d.discard !== null && Math.abs(d.discard - d.store) <= 2 && d.discardL - d.storeR >= 24;
+        // (#panel-acts, the card's actions, shows when the card has any: user, 23 Nov 2026)
+        const onlySheet = d => !d.topbar && !d.head && !d.list && d.mainKids.join() === 'cp' && ['panel,panel-body', 'panel,panel-body,panel-acts'].includes(d.cpKids.join()) && d.close !== null;
+        // a received plan's sheet in this order from the top (team cockpit spec §5.3b: its warnings, when
+        // any, in the card's slot above its action bar; user, 23 Nov 2026: the form in the card under the
+        // table): the close link, the table, the form's first field, for a new plan its race fold (the
+        // form's last block: user, 22 Nov 2026; a version has none: it takes its plan's race, 23 Nov),
+        // the warnings (when any), Store; Discard on Store's line before it, 24 px or more from it (Discard ·
+        // Store · Make live: user, 23 Nov 2026)
+        const storeOrder = d => [d.closeTop, d.table, d.field, ...(d.fold === null ? [] : [d.fold]), ...(d.what === null ? [] : [d.what]), d.store];
+        const storeSheet = d => storeOrder(d).every(v => v !== null) && storeOrder(d).every((v, i, a) => i === 0 || v > a[i - 1]) && (d.fold === null || d.foldLast === true)
+            && d.discard !== null && Math.abs(d.discard - d.store) <= 2 && d.storeL - d.discardR >= 24;
         const bigClose = d => d.close !== null && d.close.w >= 44 && d.close.h >= 44;
         const tapOn = async (sel, on = tab) => {
             const r = JSON.parse(await on.evaluate(`JSON.stringify((() => { const el = ${sel}; el.scrollIntoView({block: 'center'}); const r = el.getBoundingClientRect(); return {x: r.x, y: r.y, width: r.width, height: r.height}; })())`));
@@ -2311,27 +2492,34 @@ try {
         report(!backSt.hidden && tab.navs.count === navs && back.url === cp && back.list && back.head && !/\bhas-sel\b/.test(back.cls) && back.picked.join() === `v:${liveOf('rollers')}` && back.close === null,
             '12d: the close link brings the list (and the live card after its race) back without a page load', JSON.stringify({navs: tab.navs.count - navs, back}));
         report(backSt.focusRow === `v:${extra}`, '12d: after the close link the focus is on the row that was picked', JSON.stringify({focus: backSt.focus, focusRow: backSt.focusRow}));
-        // a plan not stored yet: the Store form, the table, What happens, Store and Discard, in this order
+        // a plan not stored yet: the same sheet as a version's (the list gone), the table, the Store
+        // form, its warnings (when any), Store and Discard, in this order
         await tapOn(rowLink(`e:${pushedCp}`));
         await sleep(1500);
         await tab.evaluate('scrollTo(0, 0)');
         const es = await sheetOf();
-        report(!(await st()).hidden && tab.navs.count === navs && es.url === `${cp}?e=${pushedCp}` && /\bsel-e\b/.test(es.cls) && !es.topbar && !es.head && es.mainKids.join() === 'cp'
-            && es.cpKids.join() === 'panel,cp-list,panel-body' && es.listKids.length === 1 && es.onlyPick && es.picked.join() === `e:${pushedCp}` && storeSheet(es) && bigClose(es),
-            '12d: a plan not stored yet: close link, the Store form\'s first field, its race fold (the form\'s last block), the table, What happens, Store from the top, Discard on Store\'s line 24 px from it', JSON.stringify({navs: tab.navs.count - navs, order: storeOrder(es), es}));
+        report(!(await st()).hidden && tab.navs.count === navs && es.url === `${cp}?e=${pushedCp}` && /\bhas-sel\b/.test(es.cls) && onlySheet(es)
+            && es.picked.join() === `e:${pushedCp}` && storeSheet(es) && bigClose(es),
+            '12d: a plan not stored yet: the sheet alone as a version\'s, close link, the table, the Store form\'s first field, its warnings, Store from the top, Discard on Store\'s line 24 px from it', JSON.stringify({navs: tab.navs.count - navs, order: storeOrder(es), es}));
         f = await fitOn();
         report(f.sw <= f.iw && f.small.length === 0, '12d: the Store sheet fits 390 px, every control 44 px', JSON.stringify(f));
-        await tapOn('document.querySelector(".cp-pick details.as-race > summary")');
+        // New plan: its race fold, the form's last block, before its warnings
+        await tapOn('document.querySelector("#panel-body .cp-form input[name=as][value=new]")');
+        await sleep(1500);
+        await tab.evaluate('scrollTo(0, 0)');
+        const esNew = await sheetOf();
+        report(esNew.fold !== null && storeSheet(esNew), '12d: New plan: its race fold after the form\'s fields, before its warnings, Store and Discard as before', JSON.stringify({order: storeOrder(esNew), esNew}));
+        await tapOn('document.querySelector("#panel-body .cp-form details.as-race > summary")');
         await sleep(300);
         f = await fitOn();
-        report(await tab.evaluate('document.querySelector(".cp-pick details.as-race").open') && f.sw <= f.iw && f.small.length === 0,
+        report(await tab.evaluate('document.querySelector("#panel-body .cp-form details.as-race").open') && f.sw <= f.iw && f.small.length === 0,
             '12d: the race fold open, the Store sheet still fits 390 px, every control 44 px', JSON.stringify(f));
         await tab.evaluate('scrollTo(0, 0)');
         navs = tab.navs.count;
         await tapOn('document.querySelector("#panel a.cp-close")');
         await sleep(1200);
         const back2 = await sheetOf();
-        report(!(await st()).hidden && tab.navs.count === navs && back2.url === cp && back2.list && back2.head && back2.picked.join() === `v:${liveOf('rollers')}` && !/\bsel-e\b/.test(back2.cls),
+        report(!(await st()).hidden && tab.navs.count === navs && back2.url === cp && back2.list && back2.head && back2.picked.join() === `v:${liveOf('rollers')}` && !/\bhas-sel\b/.test(back2.cls),
             '12d: the close link of the Store sheet brings the list back without a page load', JSON.stringify({navs: tab.navs.count - navs, back2}));
 
         // 12e: the same without the script (a second tab, as in 6): every row and the close link load
@@ -2362,8 +2550,7 @@ try {
             const loadedE = await loadAfterTap(rowOf(`e:${pushedCp}`));
             await plain12.evaluate('scrollTo(0, 0)');
             const pe = await sheetOf(plain12);
-            report(loadedE && pe.url === `${cp}?e=${pushedCp}` && !pe.topbar && !pe.head && pe.mainKids.join() === 'cp' && pe.cpKids.join() === 'panel,cp-list,panel-body'
-                && pe.listKids.length === 1 && pe.onlyPick && storeSheet(pe) && bigClose(pe),
+            report(loadedE && pe.url === `${cp}?e=${pushedCp}` && onlySheet(pe) && pe.picked.join() === `e:${pushedCp}` && storeSheet(pe) && bigClose(pe),
             '12e: without the script a tap on the plan not stored yet loads ?e=<id>: the same Store sheet', JSON.stringify({loadedE, order: storeOrder(pe), pe}));
             f = await fitOn(plain12);
             report(f.sw <= f.iw && f.small.length === 0, '12e: the Store sheet fits 390 px, every control 44 px', JSON.stringify(f));
@@ -2376,7 +2563,7 @@ try {
         // 12p: the sheet in use on a short phone screen (the reviewer's cases)
         const place = sel => `JSON.stringify((() => {
           const row = ${sel}.closest('.cp-row'), r = row.getBoundingClientRect(), p = document.getElementById('panel').getBoundingClientRect();
-          const kid = [...document.querySelectorAll('.cp-pick form > *, #panel-body > *')].find(e => e.getBoundingClientRect().height > 0);
+          const kid = [...document.querySelectorAll('#panel-body > *')].find(e => e.getBoundingClientRect().height > 0);
           return {y: Math.round(scrollY), rowIn: r.height > 0 && r.top >= 0 && r.bottom <= innerHeight, rowTop: Math.round(r.top), panelBottom: Math.round(p.bottom),
             kidTop: kid ? Math.round(kid.getBoundingClientRect().top) : null, panelH: Math.round(p.height), url: location.pathname + location.search};
         })())`;
@@ -2440,7 +2627,7 @@ try {
         const liveFirst = liveOf('rollers');
         const scratchIds = [];                   // versions these checks stored: deleted again below
         const hasField = (post, name, value) => new RegExp(`(^|&)${name}=${value}(&|$)`).test(post?.body ?? '');
-        const panelForm = 'f => f.closest("#panel-body") !== null';
+        const panelForm = 'f => f.closest("#panel-acts") !== null';
         const landed = on => on.evaluate('location.pathname + location.search + location.hash');
 
         // 12j: after the gate, a version picked: its card alone in the right column; the count the live
@@ -2454,23 +2641,48 @@ try {
         const liveCount = await tab.evaluate('document.querySelector("#panel .cp-meta .count")?.textContent ?? ""');
         const [, has, of] = /^(\d+) of (\d+) ha/.exec(liveCount) ?? [];
         report(!(await st()).hidden && /\bhas-sel\b/.test(lay.cls) && Boolean(lay.top?.shown && lay.card?.shown && lay.list) && lay.cards === 1
-            && lay.top.l > lay.list.r && lay.states === 0 && Number(of) === ridersLive && lay.liveRow.endsWith(` · ${has}/${of} have it`),
+            && lay.top.l > lay.list.r && lay.states === 0 && Number(of) === ridersLive && new RegExp(` · ${has}/${of} have it Live(SendingRiders get this plan now|StartedThe race has started)$`).test(lay.liveRow),
         `12j: at 1280 after the gate, with a version picked, its card alone in the right column; the live row says "${has}/${of} have it", the live card's count`, JSON.stringify({lay, liveCount}));
+        // the phase tag beside Live in another colour than Live's green, uppercase as Live (user, 23 Nov 2026)
+        const tags12 = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const [live, phase] = document.querySelectorAll('.cp-row.live > a.cp-link > .tag');
+          const st = e => e ? (s => ({bg: s.backgroundColor, up: s.textTransform, shown: e.getBoundingClientRect().width > 0}))(getComputedStyle(e)) : null;
+          return {live: st(live), phase: st(phase), cls: phase?.className ?? null, race: document.querySelector('.cp-race p.race > span')?.textContent ?? ''};
+        })())`));
+        report(tags12.phase?.shown && tags12.phase.bg !== tags12.live.bg && tags12.phase.up === 'uppercase' && /^tag (sending|started)$/.test(tags12.cls) && !/open since|started/.test(tags12.race),
+            '12j: the live row\'s phase tag (Sending or Started) beside Live in its own colour; the race line says neither', JSON.stringify(tags12));
 
         // 12s: layout stability (team cockpit spec §5.3b): at 1280 the card stands in the same place with
-        // the same width for the live version, a version and a received plan, its action bar the same
-        // distance from its bottom; the race head is one line
+        // the same width for the live version, a version and a received plan; its actions in the row under
+        // the title (user, 23 Nov 2026: one action row), right-aligned on the card's right edge, above the
+        // card, on the line of the ways to a plan at the list's top (the head's hidden), the row as high
+        // with or without them; the race head is one line; the list never moves (user, 23 Nov 2026: the
+        // Store form is in the card): its height and every row's top the same whatever is picked
         const cardGeo = `JSON.stringify((() => {
           const top = document.querySelector('#panel .cp-top').getBoundingClientRect(), body = document.querySelector('.cp-body').getBoundingClientRect();
-          const bar = document.querySelector('.cp-body .cp-bar').getBoundingClientRect(), head = document.querySelector('.cp-race p.race > span');
+          const barEl = document.querySelector('#panel-acts .cp-bar'), bar = barEl?.getBoundingClientRect() ?? null, head = document.querySelector('.cp-race p.race > span');
+          const ways = document.querySelector('.cp-ways')?.getBoundingClientRect() ?? null, list = document.querySelector('.cp-list').getBoundingClientRect();
+          const headWays = document.querySelector('.pagehead .headacts');
           const thead = document.querySelector('.cp-body thead').getBoundingClientRect(), meta = document.querySelector('#panel .cp-meta');
           const lh = parseFloat(getComputedStyle(meta).lineHeight);
-          return {l: top.left, t: top.top + scrollY, w: top.width, bw: body.width, barToBottom: body.bottom - bar.top, barH: bar.height, theadToTop: thead.top - top.top, metaText: meta.textContent.trim(), metaLines: meta.querySelector('.cp-cap, .count')?.getClientRects().length ?? 0,
-            raceLines: head ? head.getClientRects().length : null, race: head?.textContent ?? null, kind: document.getElementById('panel').dataset.kind};
+          return {l: top.left, t: top.top + scrollY, w: top.width, bw: body.width, theadToTop: thead.top - top.top, metaText: meta.textContent.trim(), metaLines: meta.querySelector('.cp-cap, .count')?.getClientRects().length ?? 0,
+            bar: bar === null ? null : {r: Math.round(bar.right), cardR: Math.round(top.right), b: Math.round(bar.bottom + scrollY), t: Math.round(bar.top + scrollY), buttons: [...barEl.querySelectorAll(':scope > button, :scope > form > button, :scope > .as-discard button[data-arm-open]')].filter(b => b.getBoundingClientRect().height > 0).map(b => [...b.childNodes].filter(n => !n.classList?.contains('sr')).map(n => n.textContent).join('').trim())},
+            ways: ways === null || ways.height === 0 ? null : {l: Math.round(ways.left), t: Math.round(ways.top + scrollY), listL: Math.round(list.left)},
+            headWays: headWays === null ? null : headWays.getBoundingClientRect().height,
+            rowBtns: [...document.querySelectorAll('.cp-ways .headacts .btn, #panel-acts > .cp-bar > .btn, #panel-acts > .cp-bar form > [data-arm-open]')]
+              .filter(b => b.getClientRects().length > 0).map(b => [Math.round(b.getBoundingClientRect().height), getComputedStyle(b).fontSize, Math.round(b.getBoundingClientRect().top + scrollY)].join(' ')),
+            box: Math.round(document.querySelector('.cp-list>:is(.cp-pending,div.cp-race)').getBoundingClientRect().top + scrollY),
+            heads: [...document.querySelectorAll('.cp-list>.cp-pending>.cp-sub, .cp-list>div.cp-race>.racehead')].map(e => { const c = getComputedStyle(e.matches('.racehead') ? e.querySelector('p.race') : e);
+              return [c.fontSize, c.fontWeight, c.textTransform, Math.round(e.getBoundingClientRect().height)].join(' '); }),
+            raceLines: head ? head.getClientRects().length : null, race: head?.textContent ?? null, kind: document.getElementById('panel').dataset.kind,
+            // the list's content (its box spans the card's grid rows and stretches with the card)
+            listH: (() => { const l = document.querySelector('.cp-list'), k = [...l.children].filter(e => e.getBoundingClientRect().height > 0).at(-1);
+              return k ? Math.round(k.getBoundingClientRect().bottom - l.getBoundingClientRect().top) : null; })(),
+            rows: [...document.querySelectorAll('.cp-list .cp-row')].map(r => Math.round(r.getBoundingClientRect().top + scrollY)).join()};
         })())`;
-        // a version of another plan of the race: its caption ("Same riders, order, pulls and targets as
-        // live 'Rollers · easy' v1", or "Against live 'Rollers · easy' v1 · …") wraps beside the plan code
-        // (two lines of text): the two-line block keeps its table where the others have theirs
+        // a version of another plan of the race: its caption ("Against live 'easy' v1", or the longer
+        // "Same riders, order, pulls and targets as live 'easy' v1") sits beside the plan code; the
+        // two-line block keeps its table where the others have theirs, however many lines it takes
         const livePlan12 = club().sheets[liveOf('rollers')].plan;
         const otherPlanV = Object.entries(club().sheets).find(([, x]) => x.team === 'rollers' && x.date === '2026-11-19' && x.plan !== livePlan12)?.[0];
         const geos = [];
@@ -2480,23 +2692,95 @@ try {
             geos.push(JSON.parse(await tab.evaluate(cardGeo)));
         }
         const same = k => geos.every(g => Math.abs(g[k] - geos[0][k]) <= 1);
-        report(geos.map(g => g.kind).join() === 'version,version,entry,version' && same('l') && same('t') && same('w') && same('bw') && same('barToBottom') && same('barH') && same('theadToTop')
-            && geos[3].metaLines >= 2,
-            '12s: at 1280 the card has the same left, top and width for the live version, a version, a received plan and a version with a long caption (two lines), its table header the same distance from its top, its action bar from its bottom', JSON.stringify(geos));
+        report(geos.map(g => g.kind).join() === 'version,version,entry,version' && same('l') && same('t') && same('w') && same('bw') && same('theadToTop')
+            && geos[3].metaLines >= 1,
+            '12s: at 1280 the card has the same left, top and width for the live version, a version, a received plan and a version of another plan (the action row as high with or without actions), its table header the same distance from its top', JSON.stringify(geos));
+        const rowOk = g => g.bar !== null && Math.abs(g.bar.r - g.bar.cardR) <= 1 && g.bar.b <= g.t && g.ways !== null && Math.abs(g.ways.t - g.bar.t) <= 2 && Math.abs(g.ways.l - g.ways.listL) <= 1;
+        report(geos[0].bar === null && geos[0].ways !== null && geos.every(g => g.headWays === 0)
+            && rowOk(geos[1]) && geos[1].bar.buttons.join() === 'Make live' && rowOk(geos[2]) && geos[2].bar.buttons.join() === 'Discard,Store,Make live',
+            '12s: at 1280 one action row under the title: the ways to a plan at its left above the list (the head\'s hidden), the card\'s actions at its right on the card\'s right edge (Make live alone, or Discard · Store · Make live), none for the live version', JSON.stringify(geos.map(g => [g.kind, g.bar, g.ways, g.headWays])));
+        // the list in boxes (user, 24 Nov 2026): the plans not stored yet, then each race; the first box
+        // starts on the card's line, the boxes' headings alike
+        report(geos.every(g => Math.abs(g.box - g.t) <= 1 && g.heads.length >= 2 && new Set(g.heads).size === 1),
+            '12s: at 1280 the list\'s first box starts on the card\'s line; Not stored yet is headed like a race', JSON.stringify(geos.map(g => [g.kind, g.box, g.t, g.heads])));
+        // one size on the action row (user, 24 Nov 2026): the card's actions as the ways to a plan
+        report(geos.every(g => g.rowBtns.length >= 2 && new Set(g.rowBtns).size === 1) && geos.some(g => g.rowBtns.length >= 5) && geos.filter(g => g.bar?.buttons.join() === 'Make live').every(g => g.rowBtns.length === 3),
+            '12s: at 1280 every button on the action row has one height, one text size and one top', JSON.stringify(geos.map(g => [g.kind, g.rowBtns])));
         report(geos.every(g => g.raceLines === 1), '12s: at 1280 the race head is one line', JSON.stringify(geos.map(g => [g.race, g.raceLines])));
-        // the Store form's race fold (in the list's column) opened at 1280 moves neither the card nor its
-        // action bar (user, 22 Nov 2026; spec §5.3b)
-        await open(`${cp}?e=${pushedCp}`, {w: 1280});
+        report(same('listH') && geos.every(g => g.rows === geos[0].rows),
+            '12s: at 1280 the list keeps its height and every row its place, whatever is picked (a received plan too)', JSON.stringify(geos.map(g => [g.kind, g.listH, g.rows])));
+        // the Store form's race fold (in the card, above its warnings) opened at 1280 moves neither the
+        // card's top, nor the list, nor the action row above the card (user, 22 and 23 Nov 2026); a new
+        // plan's (a version has none)
+        await open(`${cp}?e=${pushedCp}&team=rollers&as=new&drawn=rollers:new`, {w: 1280});
         await front();
-        const barAt = `JSON.stringify((() => { const b = document.querySelector('.cp-body .cp-bar').getBoundingClientRect(), t = document.querySelector('#panel .cp-top').getBoundingClientRect();
+        const barAt = `JSON.stringify((() => { const b = document.querySelector('#panel-acts .cp-bar').getBoundingClientRect(), t = document.querySelector('#panel .cp-top').getBoundingClientRect();
           return {bar: Math.round(b.top + scrollY), barL: Math.round(b.left), barH: Math.round(b.height), top: Math.round(t.top + scrollY), w: Math.round(t.width),
-            open: document.querySelector('.cp-pick details.as-race')?.open ?? null}; })())`;
+            listH: (() => { const l = document.querySelector('.cp-list'), k = [...l.children].filter(e => e.getBoundingClientRect().height > 0).at(-1);
+              return k ? Math.round(k.getBoundingClientRect().bottom - l.getBoundingClientRect().top) : null; })(),
+            open: document.querySelector('#panel-body .cp-form details.as-race')?.open ?? null}; })())`;
         const shut = JSON.parse(await tab.evaluate(barAt));
-        await clickAt(await rectOf('document.querySelector(".cp-pick details.as-race > summary")'));
+        await clickAt(await rectOf('document.querySelector("#panel-body .cp-form details.as-race > summary")'));
         await sleep(200);
         const opened = JSON.parse(await tab.evaluate(barAt));
-        report(shut.open === false && opened.open === true && ['bar', 'barL', 'barH', 'top', 'w'].every(k => opened[k] === shut[k]),
-            '12s: at 1280 opening the Store form\'s race fold moves neither the card nor its action bar', JSON.stringify({shut, opened}));
+        report(shut.open === false && opened.open === true && ['bar', 'barL', 'barH', 'top', 'w', 'listH'].every(k => opened[k] === shut[k]),
+            '12s: at 1280 opening the Store form\'s race fold moves neither the card\'s top, nor the list, nor the action row', JSON.stringify({shut, opened}));
+        // below 1180 px the actions stay at the card's bottom, in the same order (user, 23 Nov 2026): at 1100
+        // the Store sheet's bar under the card body, Discard · Store · Make live from the left
+        await open(`${cp}?e=${pushedCp}`, {w: 1100});
+        await front();
+        const narrowBar = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const body = document.querySelector('.cp-body').getBoundingClientRect(), bar = document.querySelector('#panel-acts .cp-bar').getBoundingClientRect();
+          const xs = ['form.discard [data-arm-open]', '[data-submit=store]', '[data-submit=live]'].map(q => document.querySelector('#panel-acts .cp-bar ' + q)?.getBoundingClientRect() ?? null);
+          return {barT: Math.round(bar.top), bodyB: Math.round(body.bottom), xs: xs.map(r => r === null ? null : [Math.round(r.left), Math.round(r.top)])};
+        })())`));
+        report(narrowBar.barT >= narrowBar.bodyB - 1 && narrowBar.xs.every(x => x !== null) && narrowBar.xs[0][0] < narrowBar.xs[1][0] && narrowBar.xs[1][0] < narrowBar.xs[2][0]
+            && narrowBar.xs.every(x => Math.abs(x[1] - narrowBar.xs[0][1]) <= 2),
+            '12s: at 1100 the actions stand at the card\'s bottom, Discard · Store · Make live on one line', JSON.stringify(narrowBar));
+        // the card's actions asking first at 1280 (the race window): the question floats under the action
+        // row's buttons over the card's top and moves nothing, neither the card, nor the list, nor the row;
+        // the buttons stay where they are (user, 24 Nov 2026): Make live of a version, the Store form's Make
+        // live (another plan is live) and Discard
+        const askAt = `JSON.stringify((() => { const t = document.querySelector('#panel .cp-top').getBoundingClientRect(), bar = document.querySelector('#panel-acts .cp-bar').getBoundingClientRect();
+          const s = [...document.querySelectorAll('#panel-acts [data-arm-strip]')].find(e => !e.hidden), sr = s ? s.getBoundingClientRect() : null, yes = s?.querySelector('[data-arm-yes]')?.getBoundingClientRect() ?? null;
+          const btns = [...document.querySelectorAll('#panel-acts .cp-bar > button, #panel-acts .cp-bar > form > button, #panel-acts .cp-bar .as-discard [data-arm-open]')].map(b => b.getBoundingClientRect()).filter(r => r.height > 0);
+          return {top: Math.round(t.top + scrollY), barT: Math.round(bar.top + scrollY), barH: Math.round(bar.height), cardR: Math.round(t.right), nBtns: btns.length, xs: btns.map(r => Math.round(r.left) + '-' + Math.round(r.right)).join(), btnB: Math.round(Math.max(...btns.map(r => r.bottom)) + scrollY),
+            strip: sr === null ? null : {t: Math.round(sr.top + scrollY), b: Math.round(sr.bottom + scrollY), r: Math.round(sr.right), abs: getComputedStyle(s).position},
+            yes: yes === null ? null : {seen: yes.top >= 0 && yes.bottom <= innerHeight && yes.width > 0},
+            rows: [...document.querySelectorAll('.cp-list .cp-row')].map(r => Math.round(r.getBoundingClientRect().top + scrollY)).join()}; })())`;
+        const askPosts = tab.posts.length;
+        for (const [what, url, trigger] of [
+            ['Make live of a version', `${cp}?v=${extra}`, '#panel-acts form[data-arm] [data-arm-open]'],
+            ['the Store form\'s Make live', `${cp}?e=${pushedCp}&team=rollers&as=new&drawn=rollers:new`, '#panel-acts [data-submit=live]'],
+            ['Discard', `${cp}?e=${pushedCp}&team=rollers&as=new&drawn=rollers:new`, '#panel-acts form.discard [data-arm-open]'],
+        ]) {
+            await open(url, {w: 1280});
+            await front();
+            const calm = JSON.parse(await tab.evaluate(askAt));
+            await tab.evaluate(`document.querySelector(${JSON.stringify(trigger)}).click()`);
+            await sleep(300);
+            const asked = JSON.parse(await tab.evaluate(askAt));
+            if (what === 'Discard' && shotsDir) {
+                await shootView('captain-cockpit-armed-1280-light.png');
+            }
+            await tab.evaluate(`[...document.querySelectorAll('#panel-acts [data-arm-strip]')].find(e => !e.hidden)?.querySelector('[data-arm-cancel]')?.click()`);
+            await sleep(200);
+            const closed = JSON.parse(await tab.evaluate(askAt));
+            report(calm.strip === null && asked.strip !== null && asked.strip.abs === 'absolute' && asked.top === calm.top && asked.rows === calm.rows && asked.barH === calm.barH && asked.barT === calm.barT
+                && asked.nBtns === calm.nBtns && asked.strip.t >= asked.btnB && asked.strip.t - asked.btnB <= 16 && Math.abs(asked.strip.r - asked.cardR) <= 1 && asked.yes?.seen === true
+                && asked.xs === calm.xs && closed.xs === calm.xs && closed.strip === null && closed.top === calm.top && closed.nBtns === calm.nBtns && tab.posts.length === askPosts,
+            `12s: at 1280 ${what} asking first opens its question under its button over the card's top: card, list and action row stay, the buttons stay where they are (left and right edges), Cancel closes it`, JSON.stringify({calm, asked, closed, posts: tab.posts.length - askPosts}));
+        }
+        // a phone's head: Plan on ZwiftGopher and Upload a file side by side when they fit (user, 23 Nov 2026)
+        await open(cp, {w: 390});
+        await front();
+        const headPair = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
+          const box = document.querySelector('.pagehead .headacts'), bs = [...box.querySelectorAll(':scope > .btn')].map(b => b.getBoundingClientRect());
+          return {w: Math.round(box.getBoundingClientRect().width), ws: bs.map(r => Math.round(r.width)), tops: bs.map(r => Math.round(r.top))};
+        })())`));
+        const pairFits = headPair.ws.reduce((a, b) => a + b, 0) + 8 <= headPair.w;
+        report(headPair.ws.length === 2 && (pairFits ? headPair.tops[0] === headPair.tops[1] : headPair.tops[1] > headPair.tops[0]),
+            `12s: at 390 the head's headPair ${pairFits ? 'side by side' : 'wraps: Upload a file under the planner button'}`, JSON.stringify({headPair, pairFits}));
 
         if (shotsDir) {
             // the cockpit's shots: the page, a version, the Store form (390 is the sheet), the strip armed
@@ -2522,9 +2806,24 @@ try {
             await shootView('captain-cockpit-live-armed-390-light.png');
         }
 
+        // the card's one-shot message at 1280 (user, 24 Nov 2026): it floats over the card's top, right under
+        // the action row, on the card's width, with a close ×; the card, the list and the row do not move
+        const noteGeo = `JSON.stringify((() => {
+          const top = document.querySelector('#panel .cp-top').getBoundingClientRect(), n = document.querySelector('#panel .cp-note'), r = n ? n.getBoundingClientRect() : null;
+          const ways = document.querySelector('.cp-ways')?.getBoundingClientRect() ?? null, x = n?.querySelector('a[data-note-close]')?.getBoundingClientRect() ?? null;
+          return {top: Math.round(top.top + scrollY), l: Math.round(top.left), r: Math.round(top.right), rowB: ways ? Math.round(ways.bottom + scrollY) : null,
+            rows: [...document.querySelectorAll('.cp-list .cp-row')].map(e => Math.round(e.getBoundingClientRect().top + scrollY)).join(),
+            note: r === null ? null : {t: Math.round(r.top + scrollY), l: Math.round(r.left), r: Math.round(r.right), pos: getComputedStyle(n).position, auto: n.dataset.autoClose ?? null,
+              seen: r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight, x: x === null ? null : [Math.round(x.width), Math.round(x.height)]},
+            focus: document.activeElement?.id ?? '', hold: document.querySelector('[data-hold-reload]') !== null, holdNote: document.querySelector('.cp-hold') !== null,
+            label: n?.querySelector('a[data-note-close]')?.getAttribute('aria-label') ?? null, text: n?.querySelector('.flash')?.textContent.trim().slice(0, 80) ?? null, at: location.pathname + location.search};
+        })())`;
+        const noteOk = g => g.note !== null && g.note.pos === 'absolute' && g.note.seen && Math.abs(g.note.l - g.l) <= 1 && Math.abs(g.note.r - g.r) <= 1
+            && g.rowB !== null && Math.abs(g.note.t - g.rowB) <= 16 && g.note.x !== null && g.note.x[0] >= 44 && g.note.x[1] >= 44 && g.label === 'Close message';
+
         // 12f: Make live from the panel, a version picked in place (the script, no page load): it asks in
         // the button's place, nothing changes until confirmed, the page lands on the version with the
-        // flash and Undo in the panel, and the form the fragment brought is not refused as out of date
+        // flash in the panel (no Undo), and the form the fragment brought is not refused as out of date
         // (Review Focus 2: its version and club fields are the page's; it posts no from)
         await open(cp, {w: 1280});
         await front();
@@ -2540,14 +2839,28 @@ try {
         const made = await pressConfirm(panelForm);
         const at12f = await landed(tab);
         const flash12f = await flash();
-        const undo12f = await tab.evaluate('Boolean(document.querySelector("#panel form[action=\\"/manage/live/undo\\"]"))');
+        const undo12f = await tab.evaluate('Boolean(document.querySelector("form[action=\\"/manage/live/undo\\"], [data-row-undo], .cp-undo, .flash.undo, #panel .flash form"))');
         report(made.loaded && made.post?.url === '/manage/live' && hasField(made.post, 'confirm', '1') && hasField(made.post, 'version', tvNow) && hasField(made.post, 'sheet', extra)
             && !/(^|&)from=/.test(made.post.body) && /(^|&)club=\w/.test(made.post.body),
         '12f: the confirm posts confirm=1 with the club, version and sheet fields of the fragment, no from', JSON.stringify(made.post));
         report(at12f === `${cp}?r=2026-11-19#panel` && flash12f.includes(` is live for Rollers.`) && flash12f.startsWith(`'${club().sheets[extra].label}' v${club().sheets[extra].n} is live`)
-            && !flash12f.includes('changed since you opened') && undo12f && liveOf('rollers') === extra,
-        '12f: the page lands on ?r=<race>#panel (the version now live) with the flash "… is live for Rollers." and Undo in the panel, the version live, not refused as out of date', JSON.stringify({at12f, flash12f, undo12f, live: liveOf('rollers')}));
+            && !flash12f.includes('changed since you opened') && !undo12f && liveOf('rollers') === extra,
+        '12f: the page lands on ?r=<race>#panel (the version now live) with the flash "… is live for Rollers." in the panel, no Undo, the version live, not refused as out of date', JSON.stringify({at12f, flash12f, undo12f, live: liveOf('rollers')}));
         report(!tab.logs.length && !(await tab.evaluate('window.__csp')).length, '12f: no errors on the cockpit after Make live', tab.logs.join('; '));
+        // the green message (clean): floating over the card, a close ×, going by itself after 6 s; the
+        // card, the list and the row where they are without it (the same page loaded without the flash)
+        const green = JSON.parse(await tab.evaluate(noteGeo));
+        if (shotsDir) {
+            await shootView('captain-cockpit-note-live-1280-light.png');
+        }
+        await sleep(6700);
+        const greenGone = JSON.parse(await tab.evaluate(noteGeo));
+        await open(`${cp}?r=2026-11-19`, {w: 1280});
+        await front();
+        const greenCalm = JSON.parse(await tab.evaluate(noteGeo));
+        report(noteOk(green) && green.note.auto === '6000' && greenGone.note === null && Math.abs(green.top - greenCalm.top) <= 1 && Math.abs(greenGone.top - greenCalm.top) <= 1
+            && green.rows === greenCalm.rows && greenCalm.note === null,
+        '12f: at 1280 the green message floats over the card (absolute, the card\'s width, right under the action row, a 44 px × named Close message), moves neither the card nor the list, and goes by itself after 6 s', JSON.stringify({green, greenGone, greenCalm}));
 
         // 12g: the same without the script (a second tab): the button posts, the server asks on a page of
         // its own (nothing changes), confirming there lands on the cockpit with the first version live again
@@ -2555,10 +2868,10 @@ try {
         await plainG.send('Emulation.setScriptExecutionDisabled', {value: true});
         await open(`${cp}?v=${liveFirst}`, {w: 390, on: plainG});
         const noJsG = await plainG.evaluate('!document.documentElement.classList.contains("js")');
-        const stripHidden = await plainG.evaluate('document.querySelector("#panel-body [data-arm-strip]")?.getClientRects().length === 0');
+        const stripHidden = await plainG.evaluate('document.querySelector("#panel-acts [data-arm-strip]")?.getClientRects().length === 0');
         plainG.posts.length = 0;
         let loadedG = plainG.once('Page.loadEventFired');
-        await tapOn('document.querySelector("#panel-body form[action=\\"/manage/live\\"] [data-arm-open]")', plainG);
+        await tapOn('document.querySelector("#panel-acts form[action=\\"/manage/live\\"] [data-arm-open]")', plainG);
         await loadedG;
         await sleep(250);
         const askedG = await pageText(plainG);
@@ -2579,9 +2892,48 @@ try {
         plainG.close();
         await tab.send('Page.bringToFront');
 
-        // 12h: a plan not stored yet picked at 1280: the form in its row, the table in the right
-        // column; another plan chosen redraws in place (one panel request); Store lands on the new
-        // version with the result, the entry gone, its Make live secondary; nothing reloads while the
+        // 12g-phone: below 1180 px the card's message stands under the card's head, in the flow, with its own ×
+        // (user, 24 Nov 2026): the sheet's title and its close × stay at the sheet's top, the message under
+        // them, no auto-close (still there after 7 s, also at 1100); the × removes it, nothing above it moves,
+        // the focus is on the card. A Make live of the other version at 390, put back afterwards.
+        await open(`${cp}?v=${extra}`, {w: 390});
+        await front();
+        const askedP = await openConfirm(panelForm);
+        const madeP = await pressConfirm(panelForm);
+        const phoneGeo = `JSON.stringify((() => {
+          const r = q => { const e = document.querySelector(q); if (!e) { return null; } const b = e.getBoundingClientRect(); return {t: Math.round(b.top + scrollY), b: Math.round(b.bottom + scrollY), l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width), h: Math.round(b.height)}; };
+          const n = document.querySelector('#panel .cp-note');
+          return {title: r('#panel .cp-title'), close: r('#panel .cp-close'), meta: r('#panel .cp-meta'), note: r('#panel .cp-note'), x: r('#panel .cp-note a[data-note-close]'),
+            pos: n ? getComputedStyle(n).position : null, label: n?.querySelector('a[data-note-close]')?.getAttribute('aria-label') ?? null, auto: n?.dataset.autoClose ?? null,
+            focus: document.activeElement?.id ?? '', sel: document.body.classList.contains('has-sel'), iw: innerWidth, text: n?.querySelector('.flash')?.textContent.trim().slice(0, 60) ?? null};
+        })())`;
+        const phoneOk = g => g.title !== null && g.close !== null && g.note !== null && g.x !== null && g.pos === 'relative' && g.label === 'Close message'
+            && g.note.t >= (g.meta ?? g.title).b - 1 && g.title.t < g.note.t && g.close.t < g.note.t && g.x.w >= 44 && g.x.h >= 44 && g.x.r <= g.note.r + 1 && g.x.t >= g.note.t - 1 && g.note.r <= g.iw;
+        const p390 = JSON.parse(await tab.evaluate(phoneGeo));
+        if (shotsDir) {
+            await shootView('captain-cockpit-note-390-light.png');
+        }
+        await sleep(7000);
+        const p390Later = JSON.parse(await tab.evaluate(phoneGeo));
+        await tab.send('Emulation.setDeviceMetricsOverride', {width: 1100, height: 844, deviceScaleFactor: 2, mobile: false});
+        await sleep(400);
+        const p1100 = JSON.parse(await tab.evaluate(phoneGeo));
+        await tab.send('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
+        await sleep(400);
+        const navsP = tab.navs.count;
+        await clickAt(await rectOf(`document.querySelector('#panel .cp-note a[data-note-close]')`, false));
+        await sleep(400);
+        const p390Closed = JSON.parse(await tab.evaluate(phoneGeo));
+        report(askedP.open && madeP.loaded && p390.sel && phoneOk(p390) && p390.auto === '6000' && p390Later.note !== null && Math.abs(p390Later.title.t - p390.title.t) <= 1
+            && p1100.note !== null && phoneOk(p1100) && p390Closed.note === null && tab.navs.count === navsP && p390Closed.focus === 'panel'
+            && Math.abs(p390Closed.title.t - p390.title.t) <= 1 && Math.abs(p390Closed.close.t - p390.close.t) <= 1,
+        '12g: at 390 and 1100 the message after Make live stands under the card\'s head (title and sheet ×) in the flow with its own 44 px ×; it is still there after 7 s; the × removes it, the title and sheet × stay, the focus is on the card', JSON.stringify({p390, p390Later: p390Later.note, p1100, p390Closed}));
+        srv.store.change(CID, cl => { makeLive(cl, 'rollers', liveFirst, NOW, {}); });
+        report(liveOf('rollers') === liveFirst, '12g: the live version is put back after the phone message check', liveOf('rollers'));
+
+        // 12h: a plan not stored yet picked at 1280: the form in the card in the right column, under
+        // the table (user, 23 Nov 2026), above its warnings (when any); another plan chosen redraws in place (one panel request); Store lands on the new
+        // version with the result, the entry gone, its Make live primary; nothing reloads while the
         // result is on the page (Review Focus 4)
         await open(cp, {w: 1280});
         await front();
@@ -2589,26 +2941,28 @@ try {
         await sleep(1500);
         const geo = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
           const box = s => { const r = document.querySelector(s)?.getBoundingClientRect(); return r ? {l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom)} : null; };
-          const plans = [...document.querySelectorAll('.cp-pick input[name=as]')].map(i => ({value: i.value, checked: i.checked, label: i.closest('label')?.innerText.trim() ?? ''}));
-          return {form: box('#store-${pushedCp}'), list: box('.cp-list'), table: box('#panel-body table'), iw: innerWidth, plans,
-            live: document.querySelector('.cp-pick input[name=live]')?.checked ?? null};
+          const plans = [...document.querySelectorAll('.cp-form input[name=as]')].map(i => ({value: i.value, checked: i.checked, label: i.closest('label')?.innerText.trim() ?? ''}));
+          return {form: box('#store-${pushedCp}'), list: box('.cp-list'), table: box('#panel-body table'), card: box('#panel-body .cp-body'), what: box('#panel-body .cp-what:not(:empty)'),
+            iw: innerWidth, plans,
+            box: Boolean(document.querySelector('.cp-form input[name=live]'))};
         })())`));
         const inside = (a, b) => a !== null && b !== null && a.l >= b.l && a.r <= b.r && a.t >= b.t && a.b <= b.b;
-        report(inside(geo.form, geo.list) && geo.table !== null && geo.table.l >= geo.list.r && geo.table.r <= geo.iw,
-            '12h: a plan not stored yet at 1280: the Store form inside .cp-list, the rider table in the right column', JSON.stringify(geo));
+        report(inside(geo.form, geo.card) && geo.form.l >= geo.list.r && geo.table !== null && geo.table.l >= geo.list.r && geo.table.r <= geo.iw
+            && geo.form.t >= geo.table.b && (geo.what === null || geo.what.t >= geo.form.b),
+            '12h: a plan not stored yet at 1280: the Store form in the card in the right column, under the rider table, above its warnings', JSON.stringify(geo));
         const otherPlan = geo.plans.find(p => !p.checked && p.value !== 'new');
         const otherLabel = otherPlan ? Object.values(club().sheets).find(x => x.plan === otherPlan.value)?.label ?? null : null;
         navs = tab.navs.count;
         const panels0 = (await st()).panels;
         if (otherPlan) {
-            await tab.evaluate(`document.querySelector('.cp-pick input[name=as][value="${otherPlan.value}"]').click()`);
+            await tab.evaluate(`document.querySelector('.cp-form input[name=as][value="${otherPlan.value}"]').click()`);
         }
         await sleep(1500);
         const redrawn = await st();
-        const what = await tab.evaluate('document.querySelector("#panel-body .as-what")?.innerText ?? ""');
-        report(otherPlan !== undefined && otherLabel !== null && tab.navs.count === navs && redrawn.panels === panels0 + 1 && redrawn.url === `${cp}?e=${pushedCp}` && what.includes(otherLabel),
-            '12h: choosing another plan sends one panel request, loads no page, and What happens names that plan', JSON.stringify({otherPlan, otherLabel, panels: redrawn.panels - panels0, navs: tab.navs.count - navs, what: what.slice(0, 200)}));
-        const stored = await follow(`document.querySelector('button[form="store-${pushedCp}"]').click()`);
+        const drawnFor = await tab.evaluate(`document.querySelector('#store-${pushedCp} input[name=drawn]')?.value ?? ''`);
+        report(otherPlan !== undefined && otherLabel !== null && tab.navs.count === navs && redrawn.panels === panels0 + 1 && redrawn.url === `${cp}?e=${pushedCp}` && drawnFor === `rollers:${otherPlan.value}`,
+            '12h: choosing another plan sends one panel request, loads no page, and the form is drawn for that plan', JSON.stringify({otherPlan, otherLabel, panels: redrawn.panels - panels0, navs: tab.navs.count - navs, drawnFor}));
+        const stored = await follow(`document.querySelector('button[form="store-${pushedCp}"][data-submit=store]').click()`);
         await front();
         const at12h = await landed(tab);
         const newId = new URL(at12h, base).searchParams.get('v');
@@ -2616,35 +2970,67 @@ try {
             scratchIds.push(newId);
         }
         const res = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-          const f = document.querySelector('#panel-body form[action="/manage/live"]'), b = f?.querySelector('button');
+          const f = document.querySelector('#panel-acts form[action="/manage/live"]'), b = f?.querySelector('button');
           return {result: Boolean(document.querySelector('#panel .result')), hold: Boolean(document.querySelector('[data-hold-reload]')), kind: document.getElementById('panel')?.dataset.kind ?? null,
             make: b ? {cls: b.className, text: b.textContent.trim()} : null, hidden: document.hidden};
         })())`));
         report(stored && typeof newId === 'string' && at12h === `${cp}?v=${newId}#panel` && res.result && res.kind === 'version' && Boolean(club().sheets[newId]) && !club().inbox.some(x => x.id === pushedCp),
             '12h: Store loads ?v=<new id> with the result on the page, the version stored and the received plan gone', JSON.stringify({at12h, res, inStore: Boolean(club().sheets[newId]), entry: club().inbox.some(x => x.id === pushedCp)}));
-        report(res.make !== null && /\bsecondary\b/.test(res.make.cls) && !/\bprimary\b/.test(res.make.cls) && /^Make v\d+ live/.test(res.make.text),
-            '12h: the stored version\'s Make live is a secondary button', JSON.stringify(res.make));
+        const heldNote = JSON.parse(await tab.evaluate(noteGeo));
+        report(res.hold && noteOk(heldNote) && heldNote.note.auto === null,
+            '12h: at 1280 a Store result that holds the reload floats over the card as well (absolute, the card\'s width, a × named Close message) and does not go by itself', JSON.stringify(heldNote));
+        report(res.make !== null && /\bprimary\b/.test(res.make.cls) && !/\bsecondary\b/.test(res.make.cls) && /^Make live v\d+ of '/.test(res.make.text),
+            '12h: the stored version\'s Make live is the primary button', JSON.stringify(res.make));
         navs = tab.navs.count;
         await sleep(35000);
         const held12h = await st();
         report(!held12h.hidden && res.result && res.hold && tab.navs.count === navs && held12h.url === `${cp}?v=${newId}`,
             '12h: while the Store result with a warning is on the page nothing reloads in 35 s', JSON.stringify({navs: tab.navs.count - navs, held12h, hold: res.hold}));
         const note12h = JSON.parse(await tab.evaluate(`JSON.stringify((() => {
-          const n = document.querySelector('#panel-body > p.cp-hold:last-child'), a = n?.querySelector('a.cp-refresh'), c = document.querySelector('.cp-body');
+          const n = document.querySelector('#panel-acts > p.cp-hold:last-child'), a = n?.querySelector('a.cp-refresh'), c = document.querySelector('.cp-body');
           return {text: n?.innerText.trim() ?? null, href: a?.getAttribute('href') ?? null, h: a ? Math.round(a.getBoundingClientRect().height) : 0,
             under: Boolean(n && c && n.getBoundingClientRect().top >= c.getBoundingClientRect().bottom), shown: Boolean(n && n.getClientRects().length)};
         })())`));
         report(note12h.shown && note12h.text === 'Not updating while this result is shown · Refresh' && note12h.href === `${cp}?v=${newId}` && note12h.h >= 44 && note12h.under,
             '12h: the page says it is not updating, under the card, with Refresh (a 44 px link)', JSON.stringify(note12h));
+        const heldLater = JSON.parse(await tab.evaluate(noteGeo));
+        report(heldLater.note !== null && heldLater.note.seen && Math.abs(heldLater.top - heldNote.top) <= 1 && heldLater.rows === heldNote.rows,
+            '12h: after 35 s the result is still there, the card where it was', JSON.stringify({heldNote, heldLater}));
         if (shotsDir) {
             await shootNow('captain-cockpit-result-1280-light.png', 1280);
         }
-        const refreshed = await follow('document.querySelector("#panel-body a.cp-refresh").click()');
+        const refreshed = await follow('document.querySelector("#panel-acts a.cp-refresh").click()');
         await front();
         const after12h = JSON.parse(await tab.evaluate(`JSON.stringify({url: location.pathname + location.search, result: Boolean(document.querySelector('#panel .result')),
           hold: Boolean(document.querySelector('[data-hold-reload]')), note: Boolean(document.querySelector('.cp-hold')), refresh: document.body.dataset.refresh ?? null})`));
         report(refreshed && after12h.url === `${cp}?v=${newId}` && !after12h.result && !after12h.hold && !after12h.note && after12h.refresh === '30',
             '12h: Refresh loads the page again without the result: nothing holds the reload any more', JSON.stringify({refreshed, after12h}));
+
+        // 12h-close: a Store result's ×: the message goes (no reload), the card, the list and the row stay,
+        // the focus is on the card and what the result held is released (the hold and its note)
+        const pushedClose = srv.store.change(CID, cl => receiveEntry(cl, {team: 'rollers', via: 'zwiftgopher', json: planJson('Rollers', ['1001', '1002']), text: null},
+            {now: NOW, newId: () => randomId(6)}));
+        await open(`${cp}?e=${pushedClose}`, {w: 1280});
+        await front();
+        // a plan chosen (the form redraws in place), as 12h does, then Store
+        await tab.evaluate(`document.querySelector('.cp-form input[name=as]:not([value=new])')?.click()`);
+        await sleep(1500);
+        const storedClose = await follow(`document.querySelector('button[form="store-${pushedClose}"][data-submit=store]').click()`);
+        await front();
+        const newClose = new URL(await landed(tab), base).searchParams.get('v');
+        if (newClose) {
+            scratchIds.push(newClose);
+        }
+        const beforeClose = JSON.parse(await tab.evaluate(noteGeo));
+        const navsClose = tab.navs.count;
+        if (beforeClose.note !== null) {
+            await clickAt(await rectOf(`document.querySelector('#panel .cp-note a[data-note-close]')`, false));
+            await sleep(400);
+        }
+        const afterClose = JSON.parse(await tab.evaluate(noteGeo));
+        report(storedClose && Boolean(newClose) && noteOk(beforeClose) && afterClose.note === null && tab.navs.count === navsClose && afterClose.focus === 'panel'
+            && Math.abs(afterClose.top - beforeClose.top) <= 1 && afterClose.rows === beforeClose.rows && !afterClose.hold && !afterClose.holdNote,
+        '12h: the result\'s × removes the message without a reload and moves nothing; the focus is on the card and the reload hold is released', JSON.stringify({beforeClose, afterClose, navs: tab.navs.count - navsClose}));
 
         // 12n: a received plan stored without the script (a second tab, Ruling F9): the form's Store
         // button posts, the page lands on the new version with the result
@@ -2658,8 +3044,8 @@ try {
         // A plan chosen by hand is not redrawn without the script: the first Store is refused for the
         // preview of another plan (the page answers at the POST's URL, the form drawn with the choice),
         // the second one stores. A plan the form preselects is stored by the first press.
-        await tapOn('document.querySelector(".cp-pick input[name=as]:not([value=new])").closest("label")', plainN);
-        const chosenN = await plainN.evaluate('document.querySelector(".cp-pick input[name=as]:checked")?.value ?? null');
+        await tapOn('document.querySelector(".cp-form input[name=as]:not([value=new])").closest("label")', plainN);
+        const chosenN = await plainN.evaluate('document.querySelector(".cp-form input[name=as]:checked")?.value ?? null');
         let pressesN = 0;
         let postN = null;
         let atN = '';
@@ -2667,7 +3053,7 @@ try {
         while (pressesN < 2 && !atN.startsWith(cp)) {
             plainN.posts.length = 0;
             const loadedN = plainN.once('Page.loadEventFired');
-            await tapOn(`document.querySelector('button[form="store-${pushedPlain}"]')`, plainN);
+            await tapOn(`document.querySelector('button[form="store-${pushedPlain}"][data-submit=store]')`, plainN);
             await loadedN;
             await sleep(250);
             pressesN++;

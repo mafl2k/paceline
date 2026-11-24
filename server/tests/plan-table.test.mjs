@@ -24,7 +24,7 @@ const plain = (names, pull = '60 s @ 4.3') => names.map((name, i) => [i + 1, nam
 test('a version against the live one: a new rider, the riders in live and not here', () => {
     const {club: c, ids} = cockpitClub();
     const m = of(c, ids.f2);                                     // v2: Cleo … Gus, Hanna; live v3: Ben, Cleo … Gus
-    assert.deepEqual([m.state, m.caption, m.unit], ['diff', 'Against live v3 · Hanna in, Ben out', 'wkg']);
+    assert.deepEqual([m.state, m.caption, m.unit], ['diff', 'Against live v3', 'wkg']);
     assert.deepEqual(show(m), [
         ...plain(['Cleo', 'Dan', 'Eva', 'Finn', 'Gus']),         // Ben left the front: nobody else has an old line
         [6, 'Hanna', true, '60 s @ 4.3', false, false],
@@ -40,7 +40,7 @@ test('a version against the live one: a new rider, the riders in live and not he
 test('across plans: the caption names the live plan; a changed target gets an old line; a rider who left is no move', () => {
     const {club: c, ids} = cockpitClub();
     const m = of(c, ids.s1);                                     // Ben, Cleo at 280 W, Dan, Finn, Gus
-    assert.deepEqual([m.state, m.caption], ['diff', 'Against live \'Rollers · fast\' v3 · Eva out · 2 targets']);
+    assert.deepEqual([m.state, m.caption], ['diff', 'Against live \'fast\' v3']);
     assert.deepEqual(show(m), [
         [1, 'Ben', false, '60 s @ 4.0', false, true], ['old', 1, 'Ben', '60 s @ 4.3'],
         [2, 'Cleo', false, '60 s @ 4.0', false, true], ['old', 2, 'Cleo', '60 s @ 4.3'],
@@ -59,13 +59,13 @@ test('across plans: the caption names the live plan; a changed target gets an ol
 });
 
 
-test('the live version: the plan as riders get it, no old lines, also within the Undo window (spec §5.3b)', () => {
-    const {club: c, ids} = cockpitClub();                        // v3 went live 18:14Z, NOW is 18:16Z: Undo is offered
+test('the live version: the plan as riders get it, no old lines, also right after its switch (spec §5.3b)', () => {
+    const {club: c, ids} = cockpitClub();                        // v3 went live 18:14Z, NOW is 18:16Z
     assert.deepEqual(tableBase(c, 'rollers', ids.f3), {kind: 'self', id: ids.f3});
     const m = of(c, ids.f3);
     assert.deepEqual([m.state, m.caption], ['live', 'LIVE · riders get this']);
     assert.deepEqual(show(m), plain(['Ben', 'Cleo', 'Dan', 'Eva', 'Finn', 'Gus']));
-    const later = NOW + 10 * 60000 + 1;                          // just after 18:24Z: Undo is over, the same table
+    const later = NOW + 10 * 60000 + 1;                          // just after 18:24Z: the same table
     const live = of(c, ids.f3, later);
     assert.deepEqual([live.state, live.caption], ['live', 'LIVE · riders get this']);
     assert.deepEqual(show(live), plain(['Ben', 'Cleo', 'Dan', 'Eva', 'Finn', 'Gus']));
@@ -131,7 +131,7 @@ test('the spec sketch: a dropped rider at the end, NEW, old lines for a move and
         {sprockets: ['1001']});
     const id = add([['1002', 60, W(4.2)], ['1007', 60, W(3.9)], ['1004', 45, W(4.2)], ['1003', 60, W(4.4)], ['1005', 60, W(4.0)]]);
     const m = of(club, id);
-    assert.deepEqual([m.state, m.caption], ['diff', 'Against live v1 · Hanna in, Ben out · new order · 1 pull time']);
+    assert.deepEqual([m.state, m.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(m), [
         [1, 'Cleo', false, '60 s @ 4.2', false, false],          // 2 → 1 only because Ben left: no old line
         [2, 'Hanna', true, '60 s @ 3.9', false, false],
@@ -154,7 +154,7 @@ test('dropped riders: all at the end of the table, in their old order (user, 22 
         [2, 'Eva', false, '60 s @ 4.0', false, false],
         ['dropped', 2, 'Cleo', '60 s @ 4.0', null], ['dropped', 3, 'Dan', '60 s @ 4.0', null],
     ]);
-    assert.equal(two.caption, 'Against live v1 · Cleo and Dan out');
+    assert.equal(two.caption, 'Against live v1');
     // a new order with the first riders gone: they never land between two riders of the plan
     const reordered = of(r.club, r.add(rows(['1004', '1003', '1005'])));
     assert.deepEqual(show(reordered).map(l => l[0]), [1, 'old', 2, 'old', 3, 'dropped', 'dropped']);   // Eva and Dan swap: both have an old line
@@ -170,7 +170,7 @@ test('moves among the riders in both versions; pulls; W/kg and watts; same plan 
 
     // A = Finn, Ben, Cleo, Dan, Eva: every rider moved, each row followed by its old line
     const a = of(club, add([finn, ben, cleo, dan, eva]));
-    assert.deepEqual([a.state, a.caption], ['diff', 'Against live v1 · new order']);
+    assert.deepEqual([a.state, a.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(a), [
         [1, 'Finn', false, '60 s @ 4.1', false, false], ['old', 5, 'Finn', '60 s @ 4.1'],
         [2, 'Ben', false, '60 s @ 4.0', false, false], ['old', 1, 'Ben', '60 s @ 4.0'],
@@ -181,7 +181,7 @@ test('moves among the riders in both versions; pulls; W/kg and watts; same plan 
 
     // B = Gus, Ben, Cleo, Dan, Eva, Finn: Gus is new, nobody moved
     const b = of(club, add([['1006', 60, W(3.8)], ...L]));
-    assert.deepEqual([b.state, b.caption], ['diff', 'Against live v1 · Gus in']);
+    assert.deepEqual([b.state, b.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(b), [[1, 'Gus', true, '60 s @ 3.8', false, false],
         [2, 'Ben', false, '60 s @ 4.0', false, false], [3, 'Cleo', false, '60 s @ 4.3', false, false],
         ...plain(['Dan', 'Eva', 'Finn'], '60 s @ 4.1').map(([pos, ...rest]) => [pos + 3, ...rest])]);
@@ -189,7 +189,7 @@ test('moves among the riders in both versions; pulls; W/kg and watts; same plan 
     // C = L with Ben 45 s at 4.2 W/kg and Cleo at 4.1 W/kg
     const cId = add([['1001', 45, W(4.2)], ['1002', 60, W(4.1)], dan, eva, finn]);
     const cm = of(club, cId);
-    assert.deepEqual([cm.state, cm.caption], ['diff', 'Against live v1 · 1 pull time · 2 targets']);
+    assert.deepEqual([cm.state, cm.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(cm).slice(0, 5), [
         [1, 'Ben', false, '45 s @ 4.2', true, true], ['old', 1, 'Ben', '60 s @ 4.0'],
         [2, 'Cleo', false, '60 s @ 4.1', false, true], ['old', 2, 'Cleo', '60 s @ 4.3'],
@@ -208,13 +208,14 @@ test('moves among the riders in both versions; pulls; W/kg and watts; same plan 
     const d = add([['1001', 60, W(4.2)], cleo, dan, eva, finn]);
     assert.equal(club.sheets[d].sig, club.sheets[live].sig);
     const dm = of(club, d);
-    assert.deepEqual([dm.state, dm.caption], ['diff', 'Against live v1 · 1 target']);
+    assert.deepEqual([dm.state, dm.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(dm).slice(0, 2), [[1, 'Ben', false, '60 s @ 4.2', false, true], ['old', 1, 'Ben', '60 s @ 4.0']]);
 
-    // an inbox entry for a new plan: marked against the race's live version, of another plan
+    // an inbox entry for a new plan: marked against the race's live version, of another plan, which
+    // has no type: "Plan" (user, 23 Nov 2026)
     const entry = {json: plan('Rollers', [ben, dan]), text: null, team: 'rollers', date: DATE, plan: null};
     const em = tableModel(club, entry, raceBase(club, 'rollers', DATE), {now: NOW});
-    assert.deepEqual([em.state, em.caption], ['diff', 'Against live \'Rollers\' v1 · 3 riders out']);
+    assert.deepEqual([em.state, em.caption], ['diff', 'Against live \'Plan\' v1']);
     assert.deepEqual(show(em), [
         [1, 'Ben', false, '60 s @ 4.0', false, false],
         [2, 'Dan', false, '60 s @ 4.1', false, false],
@@ -224,7 +225,7 @@ test('moves among the riders in both versions; pulls; W/kg and watts; same plan 
     // the same riders as live, in an entry of a new plan: 'same', naming the live plan
     const again = {json: plan('Rollers', L), text: null, team: 'rollers', date: DATE, plan: null};
     assert.equal(tableModel(club, again, raceBase(club, 'rollers', DATE), {now: NOW}).caption,
-        'Same riders, order, pulls and targets as live \'Rollers\' v1');
+        'Same riders, order, pulls and targets as live \'Plan\' v1');
 });
 
 
@@ -287,13 +288,13 @@ test('the caption counts what the table marks: an export switch is no target, a 
     for (const unit of [undefined, 'watts']) {
         r1.club.targetUnit = unit;
         const m = of(r1.club, v1);
-        assert.equal(m.caption, 'Against live v1 · Gus in', String(unit));
+        assert.equal(m.caption, 'Against live v1', String(unit));
         assert.ok(m.lines.every(l => l.kind === 'row' && !l.changed.target), String(unit));
     }
     // case 2: only Ben's weight changed (70 → 75 kg at 300 W): 4.3 → 4.0 W/kg in the table and the caption
     const r2 = oneRace([['1001', 60, {pull_power: 300, weight: 70}], ['1002', 60, W(4.0)]]);
     const m2 = of(r2.club, r2.add([['1001', 60, {pull_power: 300, weight: 75}], ['1002', 60, W(4.0)]]));
-    assert.deepEqual([m2.state, m2.caption], ['diff', 'Against live v1 · 1 target']);
+    assert.deepEqual([m2.state, m2.caption], ['diff', 'Against live v1']);
     assert.deepEqual(show(m2).slice(0, 2), [[1, 'Ben', false, '60 s @ 4.0', false, true], ['old', 1, 'Ben', '60 s @ 4.3']]);
     // in watts nothing changed for Ben: the same 300 W
     r2.club.targetUnit = 'watts';
@@ -308,7 +309,7 @@ test('planTable: words, never colour alone; every value escaped', () => {
     // v3 against v2 (the 'before' base went with spec §5.3b: the same marks against v2 as a live base)
     const model = tableModel(c, c.sheets[ids.f3], {kind: 'live', id: ids.f2}, {now: NOW});
     const html = planTable(model);
-    assert.ok(html.startsWith('<p class="pt-cap">Against live v2 · Ben in, Hanna out</p>\n<table class="ptable ptable-plan">'), html);
+    assert.ok(html.startsWith('<p class="pt-cap">Against live v2</p>\n<table class="ptable ptable-plan">'), html);
     // the cockpit's card says the caption in its head: without it the table alone
     assert.equal(planTable(model, {caption: false}), html.slice(html.indexOf('<table')));
     assert.ok(html.includes('<thead><tr><th class="n pt-pos">#</th><th>Rider</th><th class="n pt-pull">Pull @ W/kg</th></tr></thead>'), html);
@@ -387,7 +388,7 @@ test('planTable with states: a Plan column, a state per real row, none on an old
         ['1006', st('in-event', 'neutral', 'In the event · plan comes at the next check', '19:05')],
     ]);
     const html = planTable(tableModel(c, c.sheets[ids.f3], {kind: 'live', id: ids.f2}, {now: NOW}), {states});   // against v2: Ben NEW, Hanna dropped
-    assert.ok(html.startsWith('<p class="pt-cap">Against live v2 · Ben in, Hanna out</p>\n<table class="ptable ptable-plan rstates">'), html);
+    assert.ok(html.startsWith('<p class="pt-cap">Against live v2</p>\n<table class="ptable ptable-plan rstates">'), html);
     assert.ok(html.includes('<thead><tr><th class="n pt-pos">#</th><th>Rider</th><th class="n pt-pull">Pull @ W/kg</th>'
         + '<th class="rstate">Plan</th></tr></thead>'), html);
     // a row: its state cell last, the sign hidden from screen readers, the text and the check's time

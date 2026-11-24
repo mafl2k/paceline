@@ -1,5 +1,5 @@
-// Club operations (spec §3–§5.2): teams, sheet uploads with their defaults, the live pointer and its
-// Undo, rider removal, the sweep and the caps (Restore went with the team cockpit, team cockpit spec
+// Club operations (spec §3–§5.2): teams, sheet uploads with their defaults, the live pointer (no
+// Undo: Make live of the version live before takes a switch back), rider removal, the sweep and the caps (Restore went with the team cockpit, team cockpit spec
 // §4.1: an old copy keeps the number of the version it copied, no new version gets one). Pure and
 // synchronous: every function changes the club object it is given (the store passes a clone), and
 // the clock is always passed in.
@@ -124,14 +124,21 @@ const isBlank = v => v == null || (typeof v === 'string' && v.trim() === '');
 const validTime = v => typeof v === 'string' && HHMM_RE.test(v);
 
 
-// The start a race of `team` stores for a posted time (setRace): a weekly team's blank is null (the
-// team's time), and so is an 'HH:MM' equal to the team's start; another 'HH:MM' is stored. A special
-// team needs an 'HH:MM'. Anything else is bad-start.
-function storedStart(team, posted) {
-    if (team.kind === 'special' ? !validTime(posted) : !isBlank(posted) && !validTime(posted)) {
-        throw new ClubError('bad-start');
+// The start a race of `team` stores for a posted time (setRace, storeStart). A race's start time is
+// pinned (user, 23 Nov 2026; it replaces the rule that stored null for "the team's time" so the race
+// followed the rhythm): an 'HH:MM' is stored as it is, also one equal to the team's start. A blank
+// keeps `kept` (what the race stores now, or for a new race the team's start time at that moment;
+// null only when there is nothing to pin: a weekly team without any start time, or a race stored
+// before times were pinned, which keeps following the team's time on read). A special team needs an
+// 'HH:MM' (a blank only with a time to keep, Store). Anything else is bad-start.
+function storedStart(posted, kept) {
+    if (!isBlank(posted)) {
+        if (!validTime(posted)) {
+            throw new ClubError('bad-start');
+        }
+        return posted;
     }
-    return isBlank(posted) || (team.kind !== 'special' && posted === team.start) ? null : posted;
+    return kept;
 }
 
 
@@ -322,7 +329,8 @@ export function setStart(club, slug, start, now) {
 // Weekly (on `weekday` 1-7) or special (plan versions spec §3.1, user 17 Nov 2026; a special team's
 // weekday is null). The log label is "weekly, Thursday" (the day it then races on) or "special".
 // The team's start time stays as it is, and so do its races' own start times: a special team's
-// plans have their own (startOf), and a team made weekly again races at it.
+// plans have their own (startOf), and a team made weekly again takes it as the default for its new
+// races (a race's start is pinned when it is made, user 23 Nov 2026; one stored before follows it).
 export function setKind(club, slug, {kind, weekday}, now) {
     const team = teamOf(club, slug);
     const day = checkKind(kind, weekday);
@@ -541,11 +549,13 @@ function versionCap(plan, label) {
 
 
 // The start time a Store of team `slug`'s plan for `date` gives its race (races spec §1; user, 19
-// Nov 2026: the time belongs to the race, and the newest upload sets it). A special team: the posted
-// 'HH:MM'; a blank one keeps the race's start (raceStart: the stored one, else the team's), and is
-// refused without one (bad-start). A weekly team: a blank keeps the race's stored start (a new
-// race: null, the team's time); an 'HH:MM' equal to the team's start stores null, another one is
-// stored. A posted value that is no time is bad-start for both. `own` is the plan the Store makes a
+// Nov 2026: the time belongs to the race, and the newest upload sets it; user, 23 Nov 2026: it is
+// pinned when the race is made, storedStart). A posted 'HH:MM' is stored, for both kinds. A blank:
+// a special team keeps the race's start (raceStart: the stored one, else the team's, for a race
+// stored by 0.3.0 without one), refused without one (bad-start); a weekly team keeps the race's
+// stored start (one stored before times were pinned: none, it follows the team's time), and a new
+// race takes the team's start time at that moment (null without one: nothing to pin). A posted value
+// that is no time is bad-start for both. `own` is the plan the Store makes a
 // version of, or null. {stored, start, moved}: `stored` race.start, `start` the race's time then
 // ('HH:MM', or null without any), `moved` {date, start, was, others} when the date had plans already
 // and their start changes (raceStart before and after; `was` null when they had none), `others` the
@@ -553,16 +563,12 @@ function versionCap(plan, label) {
 function storeStart(club, slug, date, posted, own) {
     const team = club.teams[slug];
     const current = raceStart(club, slug, date);
-    let stored;
-    if (!isBlank(posted)) {
-        stored = storedStart(team, posted);
-    } else if (team.kind !== 'special') {
-        stored = raceOf(club, slug, date)?.start ?? null;
-    } else if (current === null) {
+    const race = raceOf(club, slug, date);
+    if (isBlank(posted) && team.kind === 'special' && current === null) {
         throw new ClubError('bad-start');
-    } else {
-        stored = current;
     }
+    const kept = team.kind === 'special' ? current : race !== null ? race.start ?? null : raceTime(team, null);
+    const stored = storedStart(posted, kept);
     const start = raceTime(team, stored);
     const plans = plansOf(club, slug).filter(p => p.date === date);
     if (!plans.length || start === current) {
@@ -629,10 +635,10 @@ export function uploadSheet(club, input, {now, newId}) {
     // a new plan, and a Store with a time: never a race that is over at it (an AM/PM slip would end
     // the race at once)
     const posted = !isBlank(input.start);
-    // (the team's own time, which the form prefills for a race on the rhythm, is no time the captain
-    // typed: stored null and the race's time now, so it ends a race that is over with "choose a later
-    // date", not "check the start time"; the check itself is the same for every posted time)
-    const untouched = stored === null && start === raceStart(club, slug, date);
+    // (the time the form prefills, the race's now or for a new race the team's, is no time the
+    // captain typed: it ends a race that is over with "choose a later date", not "check the start
+    // time"; the check itself is the same for every posted time)
+    const untouched = start === raceStart(club, slug, date);
     if ((target === null || posted) && overAt(club, date, start, now)) {
         throw posted && !untouched ? new ClubError('race-over-time', {date, time: start}) : new ClubError('race-over', {date});
     }
@@ -686,10 +692,6 @@ export function uploadSheet(club, input, {now, newId}) {
             if (newLink) {
                 changed(club, slug, team, now, 'race-link', `${raceDay(club, date)} · ${pinnedEventId}`);
             }
-            if (race.live !== prevLive) {
-                // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
-                rememberLive(club, team, race, prevLive, true, now);
-            }
             return {
                 id: nid, planId: target.id, n: newest.n, prev: previousVersion(club, nid)?.[0] ?? null,
                 live: race.live === nid, created: false, same: true, dropped: null, changedAt, plan, startMoved, linkMoved,
@@ -733,7 +735,6 @@ export function uploadSheet(club, input, {now, newId}) {
         ...(zgShare === null ? {} : {zgShare}),
     };
     const race = raceOf(club, slug, date);
-    const prevLive = race.live;
     if (live === true) {
         race.live = id;
         club.sheets[id].liveAt = iso(now);
@@ -742,10 +743,6 @@ export function uploadSheet(club, input, {now, newId}) {
     tidyRaces(club, slug);
     rememberType(team, type);
     changed(club, slug, team, now, 'upload', `${label} v${n}`);
-    if (live === true && prevLive !== id) {
-        // Store and make live offers the same Undo as Make live (S17, UI panel wave 2)
-        rememberLive(club, team, race, prevLive, true, now);
-    }
     return {
         id, planId, n, prev: target === null ? null : target.newest[0], live: race.live === id,
         created: target === null, same: false, dropped, changedAt, plan, startMoved, linkMoved,
@@ -757,10 +754,10 @@ export function uploadSheet(club, input, {now, newId}) {
 // the team's other races keep theirs. Upload times stay. `version` is the team's version the page
 // was drawn with: another one is refused (`changed`), so a page drawn before another captain's
 // change cannot replace a newer live plan (UI panel, 19 Nov 2026); null (a page from before the
-// check) skips it. A race that is over is refused (race-done). With `undo` (the default) the team
-// keeps what Undo needs (rememberLive); the Undo itself passes false. Checks: the team, `version`,
-// the version (`not-found`), its race over.
-export function makeLive(club, slug, id, now, {version = null, undo = true} = {}) {
+// check) skips it. A race that is over is refused (race-done). There is no Undo (user, 23 Nov 2026):
+// nothing is kept for one; a club stored with the old record of it (team.liveBefore) keeps it
+// unread. Checks: the team, `version`, the version (`not-found`), its race over.
+export function makeLive(club, slug, id, now, {version = null} = {}) {
     const team = teamOf(club, slug);
     checkVersion(team, version);
     const {sheet} = sheetOf(club, slug, id);
@@ -772,23 +769,6 @@ export function makeLive(club, slug, id, now, {version = null, undo = true} = {}
         sheet.liveAt = iso(now);
     }
     changed(club, slug, team, now, 'live', `${sheet.label} v${sheet.n}`);
-    rememberLive(club, team, race, prev, undo, now);
-}
-
-
-// What Undo of a change of a race's live plan needs (UI panel wave 2, team-view.mjs undoOffer), kept
-// on the team after the change bumped its version: team.liveBefore = {id, version, at}, the version
-// that was live in that race before and the team's version right after the change (one record per
-// team: Undo reads the race of `id`). Any later change of the team bumps its version, so Undo is
-// offered only while nothing changed since. Nothing (and an older record goes) when the race had no
-// live version before, it is gone, or `undo` is false. Additive: a club stored without it loads
-// unchanged.
-function rememberLive(club, team, race, prev, undo, now) {
-    if (undo && race !== null && typeof prev === 'string' && prev !== race.live && Object.hasOwn(club.sheets, prev)) {
-        team.liveBefore = {id: prev, version: team.version, at: iso(now)};
-    } else {
-        delete team.liveBefore;
-    }
 }
 
 
@@ -856,8 +836,9 @@ export function setRaceEvent(club, slug, date, eventId, now, {version = null} = 
 // Changes the date and the start time of team `slug`'s race on `date` (races spec §4 "Race ⋯"):
 // the race moves to `to` with all its plans (every version of the team on `date` gets `date: to`),
 // keeps its live plan and its event link, and the event it learned goes when the date or the time
-// changed (spec §7). `start` as the race stores it (storedStart: a weekly team's blank or the team's
-// own time is null). Checks, in this order: the team, `version` (`changed`; null skips), the race
+// changed (spec §7). `start` as the race stores it (storedStart: an 'HH:MM' is pinned, also the
+// team's own time; a weekly team's blank keeps the race's stored start, a special team's is
+// bad-start). Checks, in this order: the team, `version` (`changed`; null skips), the race
 // (`not-found`), the race over (race-done), `to` (bad-date), another race of the team on `to`
 // (race-taken), `start` (bad-start), the race over at its new date and time (race-over-time;
 // race-over without any time). Without a change of date or time nothing happens: no bump, no log. Else one bump and a
@@ -875,7 +856,10 @@ export function setRace(club, slug, date, {to, start}, now, {version = null} = {
     if (to !== date && raceOf(club, slug, to) !== null) {
         throw new ClubError('race-taken', {team: team.name, day: raceDay(club, to)});
     }
-    const stored = storedStart(team, start);
+    if (team.kind === 'special' && isBlank(start)) {
+        throw new ClubError('bad-start');
+    }
+    const stored = storedStart(start, race.start ?? null);
     const time = raceTime(team, stored);
     if (overAt(club, to, time, now)) {
         throw time === null ? new ClubError('race-over', {date: to}) : new ClubError('race-over-time', {date: to, time});
@@ -884,8 +868,8 @@ export function setRace(club, slug, date, {to, start}, now, {version = null} = {
     const plans = plansOf(club, slug).filter(p => p.date === date).length;
     const oldTime = raceStart(club, slug, date);
     if (to === date && time === oldTime) {
-        // the same date and time: no change for riders, no bump, no log (a race that stored the
-        // team's own time explicitly stores none from now on)
+        // the same date and time: no change for riders, no bump, no log (a race stored before times
+        // were pinned, posted the team's time, stores it as its own from now on)
         race.start = stored;
         return {date, start: stored, was, plans};
     }
@@ -1092,7 +1076,7 @@ export function sweepClub(club, now) {
 // warnings, warningsMore}, `json` and `text` as checkPlan stripped them (`text` null on every entry
 // made since the text upload went, races Task 7; an entry from before keeps its own; one from before
 // the team cockpit may carry `fromPlan`, read by nothing now); `forDate` the
-// race the upload was made for (the race ⋯'s "Upload a file for this race", a hole's link): the
+// race the upload was made for (a hole's link; the race ⋯'s "Upload a file for this race" until 23 Nov 2026): the
 // Store form's default race while it is not over (absent on every other entry). Not part of any team's state: no version
 // bump, no log (but discard), and an entry nobody stores goes after keepOf (24 h, a received one 7 days).
 

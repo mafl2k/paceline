@@ -3,10 +3,11 @@
 // their code (spec §3). Stored as {server, clubs: [row]} under CLUBS_KEY; a table recorded for
 // another server reads as empty. Every function returns a new state and never changes its input.
 //
-// Row: {id, name, joined, via, addedAt, changedAt, joinedAt, hinted, lists, private, code,
-// codeState}. `via` is 'auto' | 'rider' | 'code' | null, `code` a private club's code in its normal
+// Row: {id, name, joined, via, addedAt, changedAt, joinedAt, hinted, lists, teams, private, code,
+// codeState}. `teams` are the names of the club's teams whose live plan has the rider among its
+// riders (server 0.5.1), or null when the server doesn't say (an older server). `via` is 'auto' | 'rider' | 'code' | null, `code` a private club's code in its normal
 // form or null, `codeState` 'ok' | 'bad' | 'needed' | null. `changedAt` moves with the rider's
-// data (joined, hinted, code, codeState), never with what the server says (name, lists).
+// data (joined, hinted, code, codeState), never with what the server says (name, lists, teams).
 import {penPick} from './planserver.mjs';
 
 export const CLUBS_KEY = 'paceline:clubs:v1';
@@ -16,6 +17,7 @@ export const CID_RE = /^[0-9a-hjkmnp-tv-z]{10}$/;
 export const CODE_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 export const MAX_NAME = 60;     // code points, as the server's club names
 export const MAX_CODES = 10;    // codes per request (server/api.mjs)
+export const MAX_TEAMS = 10;    // team names kept per club
 const VIAS = ['auto', 'rider', 'code'];
 const CODE_STATES = ['ok', 'bad', 'needed'];
 
@@ -43,6 +45,16 @@ function isName(s) {
 }
 
 
+// An answer's or a stored row's team names: the names (each once, at most MAX_TEAMS), or null when
+// it has no list.
+function teamsOf(v) {
+    if (!Array.isArray(v)) {
+        return null;
+    }
+    return [...new Set(v.filter(n => typeof n === 'string' && n.trim() !== '' && isName(n)))].slice(0, MAX_TEAMS);
+}
+
+
 function num(v) {
     return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
@@ -63,6 +75,7 @@ function normalizeRow(r) {
         joinedAt: num(r.joinedAt),
         hinted: r.hinted === true,
         lists: r.lists === true,
+        teams: teamsOf(r.teams),
         private: r.private === true,
         code: typeof r.code === 'string' && CODE_RE.test(r.code) ? r.code : null,
         codeState: CODE_STATES.includes(r.codeState) ? r.codeState : null,
@@ -155,8 +168,8 @@ function withCode(r, code, codeState, priv, now) {
 
 
 // An answer's `circles` (spec §7.2) applied to the table. `sentCodes` are the codes the request
-// carried. New listing ids come unticked; known rows get the name and `lists` (changedAt stays);
-// rows the answer doesn't name keep everything but `lists`; only `gone` drops a row. Codes: an
+// carried. New listing ids come unticked; known rows get the name, `lists` and `teams` (changedAt
+// stays); rows the answer doesn't name keep everything but `lists` and `teams`; only `gone` drops a row. Codes: an
 // echo makes its row `ok`; `{id, code: 'needed'}` gives `needed` (`bad` with a code); a named entry
 // without `private` means the club is open (again): code, codeState and private are cleared; a
 // sent code no entry echoes marks its row `bad`. An answer without a `circles` list changes nothing.
@@ -170,13 +183,13 @@ export function applyAnswer(state, answer, now, sentCodes = []) {
     for (const r of state.clubs) {
         const c = byId.get(r.id);
         if (!c) {
-            clubs.push(r.lists ? {...r, lists: false} : r);
+            clubs.push(r.lists || r.teams?.length ? {...r, lists: false, teams: r.teams && []} : r);
             continue;
         }
         if (c.gone === true) {
             continue;
         }
-        let row = {...r, lists: c.lists === true};
+        let row = {...r, lists: c.lists === true, teams: teamsOf(c.teams)};
         if (isName(c.name)) {
             row.name = c.name;
         }
@@ -195,7 +208,8 @@ export function applyAnswer(state, answer, now, sentCodes = []) {
             known.add(c.id);
             clubs.push({
                 id: c.id, name: c.name, joined: false, via: null, addedAt: now, changedAt: now, joinedAt: null,
-                hinted: false, lists: true, private: c.private === true, code: null, codeState: null,
+                hinted: false, lists: true, teams: teamsOf(c.teams), private: c.private === true, code: null,
+                codeState: null,
             });
         }
     }
@@ -270,7 +284,7 @@ function updateRow(state, id, fn) {
 }
 
 
-// Tick or untick. A club already ticked keeps its joinedAt ("your club since").
+// Tick or untick. A club already ticked keeps its joinedAt (the Clubs table's Since).
 export function setJoined(state, id, joined, now, via = 'rider') {
     return updateRow(state, id, r => ({
         ...r, joined, via, changedAt: now, joinedAt: joined ? (r.joined && r.joinedAt !== null ? r.joinedAt : now) : null,
@@ -299,7 +313,7 @@ export function addByCode(state, answer, code, now) {
     const row = {
         ...base, name, joined: true, via: 'code', changedAt: now,
         joinedAt: base.joined && base.joinedAt !== null ? base.joinedAt : now,
-        lists: c.lists === true, private: true, code: clean, codeState: 'ok',
+        lists: c.lists === true, teams: teamsOf(c.teams), private: true, code: clean, codeState: 'ok',
     };
     const clubs = old ? state.clubs.map(r => (r.id === c.id ? row : r)) : [...state.clubs, normalizeRow(row)];
     return {state: {server: state.server, clubs}, added: {id: c.id, name}};

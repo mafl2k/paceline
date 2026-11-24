@@ -109,6 +109,31 @@ test('detPlanOnly: the det ids name only riders of the current plan (starters an
     assert.equal(R.detPlanOnly(null, ids, '5'), null);
 });
 
+test('detPlanOnly: turn and old fields keep only plan riders and me', () => {
+    const ids = R.planIds({riders: [{id: '1'}, {id: '7'}], bench: [{id: '3'}]});
+    const det = {puller: '1', frontId: '9',
+                 turn: {change: {kind: 'skip', from: '9', to: '7'}, disp: {why: 'front', at: 5},
+                        hanging: ['1', '8', '3'], out: ['8', '7', '5']},
+                 old: {puller: '8', frontId: '3', out: ['9', '1'], view: 'rest', kind: 'next'}};
+    const out = R.detPlanOnly(det, ids, '5');
+    assert.deepEqual(out.turn.change, {kind: 'skip', from: null, to: '7'}, 'the change keeps its kind');
+    assert.deepEqual(out.turn.disp, {why: 'front', at: 5});
+    assert.deepEqual(out.turn.hanging, ['1', '3']);
+    assert.deepEqual(out.turn.out, ['7', '5'], 'me stays');
+    assert.deepEqual(out.old, {puller: null, frontId: '3', out: ['1'], view: 'rest', kind: 'next'});
+    // the input is untouched
+    assert.deepEqual(det.turn.hanging, ['1', '8', '3']);
+    assert.equal(det.turn.change.from, '9');
+    assert.equal(det.old.puller, '8');
+    // no change, no disp, a missing turn or old: as they were
+    assert.deepEqual(R.detPlanOnly({turn: {change: null, disp: null, hanging: [], out: []}}, ids, '5'),
+                     {turn: {change: null, disp: null, hanging: [], out: []}});
+    assert.deepEqual(R.detPlanOnly({turn: {change: {kind: 'first', from: null, to: '1'}}}, ids, '5'),
+                     {turn: {change: {kind: 'first', from: null, to: '1'}}});
+    assert.deepEqual(R.detPlanOnly({puller: '1'}, ids, '5'), {puller: '1'});
+    assert.deepEqual(R.detPlanOnly({old: {puller: '1'}}, ids, '5'), {old: {puller: '1'}});
+});
+
 
 test('detPlanOnly: det.order.out keeps only riders of the current plan or me', () => {
     const ids = new Set(['1', '2', '3']);
@@ -528,4 +553,59 @@ test('W7: recListKey changes only with recording, session or live session', () =
     assert.notEqual(R.recListKey({recording: true, sessionId: '6', lastSeenAt: 1}, '5'), k);
     assert.notEqual(R.recListKey({recording: true, sessionId: '5', lastSeenAt: 1}, null), k);
     assert.equal(typeof R.recListKey(null, null), 'string');
+});
+
+test('trafficStep: riders near me outside the tick, numbered, no id', () => {
+    const me = e(7, {self: true, eventSubgroupId: 55});
+    const list = [me, e(1, {gapDistance: -20}), e(201, {gapDistance: -40, eventSubgroupId: 55}),
+                  e(202, {gapDistance: 30, eventSubgroupId: 66, state: {speed: 43.27, power: 210.6, draft: 80.4}}), e(203, {gapDistance: -101}), e(204, {gapDistance: 51})];
+    const {pseudo, traffic} = R.trafficStep(null, list, new Set(['7', '1']), 1000);
+    assert.equal(pseudo.epoch, 1000);
+    assert.deepEqual(traffic.map(t => t.gap), [30, -40]);           // nearest first, 203/204 out of range
+    assert.deepEqual(traffic.map(t => t.sg), [false, true]);
+    assert.deepEqual(Object.keys(traffic[0]).sort(), ['draft', 'gap', 'n', 'power', 'sg', 'speed']);
+    assert.ok(!JSON.stringify(traffic).includes('202') && !JSON.stringify(traffic).includes('201'));
+    assert.deepEqual(traffic.map(t => t.n).sort(), [1, 2]);
+    assert.deepEqual([traffic[0].speed, traffic[0].power, traffic[0].draft], [43.3, 211, 80]);   // 0.1 km/h, whole watts
+});
+
+test('trafficStep: the same rider keeps his number', () => {
+    const me = e(7, {self: true});
+    let s = R.trafficStep(null, [me, e(301, {gapDistance: -10})], new Set(['7']), 1).pseudo;
+    s = R.trafficStep(s, [me, e(302, {gapDistance: -5})], new Set(['7']), 2).pseudo;      // 301 out of sight
+    const {traffic} = R.trafficStep(s, [me, e(302, {gapDistance: -5}), e(301, {gapDistance: 20})], new Set(['7']), 3);
+    assert.deepEqual(traffic.map(t => [t.gap, t.n]), [[-5, 2], [20, 1]]);
+});
+
+test('trafficStep: riders already in the tick are not traffic', () => {
+    const me = e(7, {self: true});
+    const {traffic} = R.trafficStep(null, [me, e(8, {gapDistance: -3, watching: true}), e(9, {gapDistance: 4})], new Set(['7', '8', '9']), 1);
+    assert.deepEqual(traffic, []);
+});
+
+test('trafficStep: a watched or fallback rider not in keptIds is traffic (the upload strips his row)', () => {
+    const me = e(7, {self: true});
+    const {traffic} = R.trafficStep(null, [me, e(8, {gapDistance: -3, watching: true}), e(9, {gapDistance: 4})], new Set(['7']), 1);
+    assert.deepEqual(traffic.map(t => t.gap), [-3, 4]);
+    assert.ok(!JSON.stringify(traffic).includes('"8"') && !JSON.stringify(traffic).includes('"9"'));
+});
+
+test('trafficStep: stale or gapless riders left out, at most TRAFFIC_MAX, input not mutated', () => {
+    const me = e(7, {self: true});
+    const many = Array.from({length: 30}, (_, i) => e(400 + i, {gapDistance: -i}));
+    const list = [me, e(500, {gapDistance: -1, age: R.MAX_AGE_MS + 1}), e(501, {gapDistance: NaN}), ...many];
+    const p0 = {epoch: 5, next: 1, ids: new Map()};
+    const {traffic, pseudo} = R.trafficStep(p0, list, new Set(['7']), 9);
+    assert.equal(traffic.length, R.TRAFFIC_MAX);
+    assert.equal(Math.max(...traffic.map(t => -t.gap)), R.TRAFFIC_MAX - 1);
+    assert.ok(Object.is(traffic[0].gap, 0));                          // -0 is normalised
+    assert.equal(p0.next, 1); assert.equal(p0.ids.size, 0);
+    assert.equal(pseudo.next, R.TRAFFIC_MAX + 1);
+});
+
+test('trafficStep: a new epoch starts its own numbering', () => {
+    const me = e(7, {self: true});
+    const a = R.trafficStep(null, [me, e(600, {gapDistance: -2})], new Set(['7']), 100);
+    const b = R.trafficStep(null, [me, e(601, {gapDistance: -2})], new Set(['7']), 200);
+    assert.deepEqual([a.pseudo.epoch, a.traffic[0].n, b.pseudo.epoch, b.traffic[0].n], [100, 1, 200, 1]);
 });

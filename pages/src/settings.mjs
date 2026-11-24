@@ -306,7 +306,7 @@ function renderPrefs(prefs) {
     openingCheck();
     renderDemo(prefs);
     renderYou();
-    const upload = JSON.stringify([prefs.logUpload, prefs.logUploadSince]);
+    const upload = JSON.stringify([prefs.logUpload, prefs.logUploadSince, prefs.serverOn]);
     if (upload !== shownLogUpload) {
         shownLogUpload = upload;
         renderRecordings();    // status words and Upload buttons come and go with the choice
@@ -377,6 +377,11 @@ function statusText(p) {
 function renderServer(p) {
     $('#pl-server-on').checked = p.serverOn;
     $('#pl-log-upload').checked = p.logUpload;
+    // Uploads go to the plan server: without it the overlay sends nothing, so an unticked box can't
+    // be ticked. A ticked one stays clickable: unticking withdraws the consent at any time (review
+    // I-1, 23 Nov 2026).
+    $('#pl-log-upload').disabled = !p.serverOn && !p.logUpload;
+    setText($('#pl-upload-why'), p.serverOn ? S.logUploadWhy : p.logUpload ? S.logUploadPaused : S.logUploadNeedsServer);
     // Never overwrite what the rider is typing.
     const urlEl = $('#pl-server-url');
     if (document.activeElement !== urlEl) {
@@ -429,23 +434,26 @@ function clubsBase() {
 }
 
 
-// "lists you · your club since 12 Nov · private · code 7Q4MZ-2KX9B"
+// A club's code line under its name (private, or a code that no longer works or is needed).
 function clubNote(r) {
-    const parts = [];
-    if (r.lists) {
-        parts.push(S.clubListsYou);
-    }
-    if (r.joined && Number.isFinite(r.joinedAt)) {
-        parts.push(fmt('clubSince', {date: dayMonth(r.joinedAt)}));
-    }
     if (r.codeState === 'ok' && r.code !== null) {
-        parts.push(fmt('clubPrivate', {code: formatCode(r.code)}));
+        return fmt('clubPrivate', {code: formatCode(r.code)});
     } else if (r.codeState === 'bad') {
-        parts.push(S.clubCodeBad);
+        return S.clubCodeBad;
     } else if (r.codeState === 'needed') {
-        parts.push(S.clubCodeNeeded);
+        return S.clubCodeNeeded;
     }
-    return parts.join(S.joiner);
+    return '';
+}
+
+
+// The "Your teams" cell: the teams whose plan has you among its riders; "lists you" when only the
+// bench has you, or from a server that doesn't name teams; else a dim dash.
+function clubTeams(r) {
+    if (r.teams?.length) {
+        return r.teams.join(', ');
+    }
+    return r.lists ? S.clubListsYou : S.clubNoTeam;
 }
 
 
@@ -462,12 +470,13 @@ function renderClubs() {
     $('#pl-clubs').hidden = !p.serverOn;
     const {clubs} = readClubs(serverBase(p.serverUrl));
     const ul = $('#pl-clubs-list');
-    const key = JSON.stringify(clubs.map(r => [r.id, r.name, r.joined, clubNote(r)]));
+    const key = JSON.stringify(clubs.map(r => [r.id, r.name, r.joined, r.joinedAt, clubNote(r), clubTeams(r)]));
     if (key !== shownClubs) {
         shownClubs = key;
         ul.replaceChildren(...clubs.map(r => {
-            const li = document.createElement('li');
-            li.className = 'pl-club';
+            const tr = document.createElement('tr');
+            tr.className = 'pl-club';
+            const club = document.createElement('td');
             const label = document.createElement('label');
             label.className = 'pl-check';
             const box = document.createElement('input');
@@ -481,10 +490,19 @@ function renderClubs() {
             const note = document.createElement('div');
             note.className = 'pl-note pl-club-note';
             note.textContent = clubNote(r);
-            li.append(label, note);
-            return li;
+            club.append(label, note);
+            const teams = document.createElement('td');
+            teams.className = 'pl-club-teams';
+            teams.textContent = clubTeams(r);
+            teams.classList.toggle('pl-none', !r.teams?.length);
+            const since = document.createElement('td');
+            since.className = 'pl-club-since';
+            since.textContent = r.joined && Number.isFinite(r.joinedAt) ? dayMonth(r.joinedAt) : '';
+            tr.append(club, teams, since);
+            return tr;
         }));
     }
+    $('#pl-clubs-table').hidden = clubs.length === 0;
     const empty = $('#pl-clubs-empty');
     empty.hidden = clubs.length > 0;
     setText(empty, selfId === null ? S.clubsEmptyNoId : fmt('clubsEmpty', {id: selfId}));

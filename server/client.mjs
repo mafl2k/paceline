@@ -55,20 +55,16 @@ const selOf = search => {
     return v !== '' ? {kind: 'v', id: v} : e !== '' ? {kind: 'e', id: e} : r !== '' ? {kind: 'r', id: r} : null;
 };
 
-// The body's classes for the selection of `search`: has-sel with anything picked, sel-e with a
-// received plan picked (`entry`).
+// The body's classes for the selection of `search`: has-sel with anything picked (a version, a race's
+// live pointer or a plan not stored yet: each is the same sheet on a phone, user 23 Nov 2026).
 export function selClasses(search) {
-    const s = selOf(search);
-    return {hasSel: s !== null, entry: s?.kind === 'e'};
+    return {hasSel: selOf(search) !== null};
 }
 
-// The body's classes after a swap: {'has-sel', 'sel-e'}, each true or false, for the URL's query
-// `search` and the swapped-in #panel's `dataset` (the fragment carries the body state its slots
-// imply): sel-e only for a received plan the server drew (data-kind 'entry'; one that is gone draws
-// as 'gone').
-export function bodyClasses(search, dataset) {
-    const sel = selClasses(search);
-    return {'has-sel': sel.hasSel, 'sel-e': sel.entry && dataset.kind === 'entry'};
+// The body's classes after a swap: {'has-sel'}, true or false, for the URL's query `search`, as the
+// server draws them.
+export function bodyClasses(search) {
+    return {'has-sel': selClasses(search).hasSel};
 }
 
 // Where the address bar should be for a cockpit drawn at `pathname`: `here` (main's data-here, the
@@ -124,13 +120,12 @@ export function pickedRow(dataset) {
     return typeof dataset?.sel === 'string' && dataset.sel !== '' ? dataset.sel : null;
 }
 
-// What a swap marks (shapes): {row, sheet, rowUndo}. `row` the data-sel of the row to mark as
-// picked (pickedRow of the swapped-in #panel's `dataset`); `sheet` whether the URL's query `search`
-// picks it (a phone's sheet: its path, sel-rows and sel-race, is marked too; the live row picked with
-// nothing selected is marked alone); `rowUndo` whether a row's Undo (data-row-undo) shows: only while
-// the swapped-in card offers none itself (`cardUndo`), so the page never offers it twice.
-export function swapMarks(dataset, search, cardUndo) {
-    return {row: pickedRow(dataset), sheet: selKey(search) !== null, rowUndo: !cardUndo};
+// What a swap marks (shapes): {row, sheet}. `row` the data-sel of the row to mark as picked
+// (pickedRow of the swapped-in #panel's `dataset`); `sheet` whether the URL's query `search` picks it
+// (a phone's sheet: its path, sel-rows and sel-race, is marked too; the live row picked with nothing
+// selected is marked alone).
+export function swapMarks(dataset, search) {
+    return {row: pickedRow(dataset), sheet: selKey(search) !== null};
 }
 
 // The key of the URL's query `search` ('v:<id>', 'e:<id>', 'r:<date>'), or null.
@@ -142,7 +137,7 @@ export function selKey(search) {
 
 // The submit buttons of `form` that submitOnce disables: every <button> of form.elements that
 // submits, also one outside the form that belongs to it by form="<its id>" (the cockpit's Store
-// button stands under the rider table, its form in the picked row).
+// button stands in the card's action bar, outside its form, beside Discard's own form).
 export function submitButtons(form) {
     return [...form.elements].filter(el => el.localName === 'button' && el.type === 'submit');
 }
@@ -160,8 +155,8 @@ export function armPress(armedAt, now) {
 
 
 // What a submit of a POST form does (review M1, UI panel wave 2): a form that has posted already
-// (`sent`) and waits for its answer posts no second time ('block': a double click on Make live,
-// Undo or a strip's confirm button must not end on "Nothing was changed" after the change was made);
+// (`sent`) and waits for its answer posts no second time ('block': a double click on Make live or a
+// strip's confirm button must not end on "Nothing was changed" after the change was made);
 // one the page stopped (arming a strip, the 450 ms guard: `prevented`) is no post ('ignore'); any
 // other posts once ('send'). A GET (the Store form's redraw goes another way) is never held.
 export function submitDecision({method, sent, prevented}) {
@@ -169,6 +164,15 @@ export function submitDecision({method, sent, prevented}) {
         return 'ignore';
     }
     return sent ? 'block' : 'send';
+}
+
+
+// Does a submit by `submitter` (null: none, as a form.submit() sends) go through a form's strip? Only
+// its trigger's (data-arm-open, also Enter in a field, which presses the form's first button) and
+// none: another submit button of the form posts as it is (the Store form's Store beside its Make
+// live, user 23 Nov 2026). `submitter` is anything with matches(selector), or null.
+export function armsOn(submitter) {
+    return submitter === null || submitter.matches('[data-arm-open]');
 }
 
 
@@ -275,11 +279,12 @@ export function reloadDecision(answer) {
 }
 
 
-// The Store form's fields whose change redraws it (spec §6.10): the team, the plan, the live
-// box, the race (its radio, races Task 7), the race date and the start time. Never the type or the event link: typing is
+// The Store form's fields whose change redraws it (spec §6.10): the team, the plan, the race (its
+// radio, races Task 7), the race date and the start time (no Make live box any more: Make live and
+// Store are the action bar's buttons, user 23 Nov 2026). Never the type or the event link: typing is
 // never cut off. The date and the time wait (dateRedraw, startRedraw): typed digit by digit they
 // change at every digit.
-const REDRAW = new Set(['team', 'as', 'live', 'race', 'date', 'start']);
+const REDRAW = new Set(['team', 'as', 'race', 'date', 'start']);
 
 export function redrawOn(name) {
     return REDRAW.has(name);
@@ -317,8 +322,8 @@ export function startRedraw(value, drawn) {
 
 
 // Does the event link redraw the page? Once the field is left (never while typing: a link is pasted
-// or typed in one go), when it differs from the one the page was drawn with, trimmed: "What happens"
-// then says what the link does to the race before Store (review M4).
+// or typed in one go), when it differs from the one the page was drawn with, trimmed: a warning
+// line then says what the link does to the race before Store (review M4).
 export function eventRedraw(value, drawn) {
     return String(value ?? '').trim() !== String(drawn ?? '').trim();
 }
@@ -340,9 +345,9 @@ export function keepShut(sent, openNow) {
 }
 
 
-// The hidden `touched` field: the fields the captain changed by hand among the type and the live
-// box, sorted and comma-joined. A redraw for another team or plan keeps them (Ruling 6).
-const TOUCHABLE = ['live', 'type'];
+// The hidden `touched` field: 'type' when the captain changed the type by hand, else ''. A redraw
+// for another team or plan keeps it (Ruling 6).
+const TOUCHABLE = ['type'];
 
 export function touchedList(set) {
     return TOUCHABLE.filter(name => set.has(name)).join(',');
@@ -380,10 +385,47 @@ if (typeof document !== 'undefined') {
     // the menu open
     menus();
     arms();
+    notes();
     submitOnce();
     copyButtons();
     panel();
     rhythmChoice();
+}
+
+
+// The card's one-shot message (.cp-note, user 24 Nov 2026): from 1180 px it floats over the card's
+// top (the stylesheet). Its × (a link to the page's own URL without a script) removes the box and
+// puts the focus on the card: no reload. A clean one (data-auto-close, ms) goes by itself on a
+// computer; a red one or one that holds the page's reload stays until closed. Removing a message
+// that held the reload releases it (the page asks [data-hold-reload] at every tick) and takes its
+// note "Not updating while this result is shown" along when nothing else holds. An action opening
+// its question (arms) closes it too.
+const wideCard = () => typeof matchMedia === 'function' && matchMedia('(min-width:1180px)').matches;
+function dropNote(note, {focus = false} = {}) {
+    note.remove();
+    if (document.querySelector('[data-hold-reload]') === null) {
+        document.querySelector('#panel-acts .cp-hold')?.remove();
+    }
+    if (focus) {
+        document.getElementById('panel')?.focus({preventScroll: true});
+    }
+}
+function notes() {
+    document.addEventListener('click', e => {
+        const x = e.target instanceof Element ? e.target.closest('a[data-note-close]') : null;
+        const note = x?.closest('.cp-note') ?? null;
+        if (note !== null) {
+            e.preventDefault();
+            dropNote(note, {focus: true});
+        }
+    });
+    for (const note of document.querySelectorAll('.cp-note[data-auto-close]')) {
+        setTimeout(() => {
+            if (note.isConnected && wideCard()) {
+                dropNote(note);
+            }
+        }, Number(note.dataset.autoClose) || 6000);
+    }
 }
 
 
@@ -406,10 +448,10 @@ function guardedReload() {
     const every = Number(body.dataset.refresh) * 1000;
     // a value the browser put back after Back counts as typed; a field in a ⋯ menu holds only while
     // its menu is open (typedHolds)
-    // a field in the cockpit's swapped slots (#panel, .cp-pick, #panel-body: the Store form) holds
-    // only while it is on the page: a swap to a version or to nothing releases it (Ruling F5)
+    // a field in the cockpit's swapped slots (#panel, #panel-body: the Store form) holds only while
+    // it is on the page: a swap to a version or to nothing releases it (Ruling F5)
     const menuOf = el => el.closest('details[data-menu]');
-    const inSlot = el => el.closest('#panel, .cp-pick, #panel-body') !== null;
+    const inSlot = el => el.closest('#panel, #panel-body, #panel-acts') !== null;
     const typedMenus = new Set();
     const typedSlots = new Set();
     const fields = [...document.querySelectorAll('form input, form textarea')];
@@ -596,10 +638,22 @@ function menus() {
 // data-arm-format="day" writes a date as a day, data-arm-empty is the text for an empty field,
 // data-arm-pre goes before any text). A
 // <details> closed around the open strip (a ⋯ menu closed by a click outside, a fold) closes the
-// strip too, so no hidden strip holds the page's reload.
+// strip too, so no hidden strip holds the page's reload. The Store form's Make live (user, 23 Nov
+// 2026) is the same with its parts outside the form: the trigger and the confirm button belong to it
+// by form="<its id>", the strip names it by data-for and stands in the action bar, which is marked
+// armed while it is open (the bar's buttons give it their place); only the trigger arms, the
+// form's other submit button (Store) posts as it is.
 function arms() {
     let open = null;
-    const strip = f => f.querySelector('[data-arm-strip]');
+    // a part of form `f`: inside it, or outside it and its own (form="<id>", data-for="<id>")
+    const part = (f, sel) => f.querySelector(sel)
+        ?? [...document.querySelectorAll(sel)].find(el => el.form === f || (f.id !== '' && el.dataset.for === f.id)) ?? null;
+    const strip = f => part(f, '[data-arm-strip]');
+    // the strip's place when it stands outside its form: its parent (the action bar)
+    const host = f => {
+        const s = strip(f);
+        return s !== null && !f.contains(s) ? s.parentElement : null;
+    };
     const close = focus => {
         if (open === null) {
             return;
@@ -607,9 +661,10 @@ function arms() {
         const f = open.form;
         open = null;
         f.classList.remove('armed');
+        host(f)?.classList.remove('armed');
         strip(f).hidden = true;
         if (focus) {
-            f.querySelector('[data-arm-open]')?.focus();
+            part(f, '[data-arm-open]')?.focus();
         }
     };
     const fill = f => {
@@ -623,10 +678,17 @@ function arms() {
             close(false);
         }
         fill(f);
+        if (wideCard()) {
+            // its question floats over the card's top, where the message is
+            for (const note of document.querySelectorAll('.cp-note')) {
+                dropNote(note);
+            }
+        }
         f.classList.add('armed');
+        host(f)?.classList.add('armed');
         strip(f).hidden = false;
         open = {form: f, at: performance.now()};
-        const yes = f.querySelector('[data-arm-yes]');
+        const yes = part(f, '[data-arm-yes]');
         yes?.focus({preventScroll: true});
         yes?.scrollIntoView({block: 'nearest'});
     };
@@ -648,6 +710,10 @@ function arms() {
             if (!armPress(open?.form === f ? open.at : null, performance.now())) {
                 e.preventDefault();
             }
+            return;
+        }
+        // another submit button of the form (the Store form's Store) posts without asking
+        if (!armsOn(e.submitter ?? null)) {
             return;
         }
         if (armNeeded(f.dataset.armWhen, f.dataset.armWhen ? fieldOf(f) : null)) {
@@ -767,14 +833,15 @@ function rhythmChoice() {
 
 // ---- the team cockpit's panel in place (team cockpit spec §6) ----
 // Only on a page with main[data-tv] (the cockpit). A plain left click on a row (a.cp-link) or on the
-// close link (a.cp-close) fetches the fragment of the three slots for the link's URL (panelUrl, with
+// close link (a.cp-close) fetches the fragment of the two slots for the link's URL (panelUrl, with
 // the page's data-tv) instead of loading the page; its answer (swapDecision) is swapped in, dropped
 // when a later pick or redraw asked since, or, for anything but a 200 or a thrown fetch, the whole
-// URL is loaded. A swap puts in #panel and #panel-body as the server drew them, the .cp-pick slot
-// (the Store form) into the row its data-for names, moves the pick's marks (picked, aria-current,
-// sel-rows, sel-race) to the row the swapped #panel names (data-sel: the selection's, or with nothing
-// picked the nearest race's live version, team cockpit spec §5.3b) and the body's has-sel and sel-e
-// to the new selection and the swapped #panel (bodyClasses), pushes the link's URL without its hash (so the guarded reload keeps the selection),
+// URL is loaded. A swap puts in #panel, #panel-body and #panel-acts (the card's actions, user 23 Nov
+// 2026) as the server drew them (a received plan's Store form is in #panel-body, its buttons in
+// #panel-acts: the list never changes), moves the pick's marks (picked,
+// aria-current, sel-rows, sel-race) to the row the swapped #panel names (data-sel: the selection's,
+// or with nothing picked the nearest race's live version, team cockpit spec §5.3b) and the body's
+// has-sel to the new selection (bodyClasses), pushes the link's URL without its hash (so the guarded reload keeps the selection),
 // binds the Store form and moves the focus to #panel (after the close link to the row that was
 // picked: focusAfter). Back and Forward (popstate) swap the same way
 // for the URL they land on, without a push. The Store form's redraw is the same fetch, for the page's
@@ -818,7 +885,7 @@ function panel() {
         row.querySelector(':scope > a.cp-link')?.setAttribute('aria-current', 'true');
         if (sheet) {
             row.closest('ul.cp-rows')?.classList.add('sel-rows');
-            row.closest('.cp-race')?.classList.add('sel-race');
+            row.closest('.cp-race, .cp-pending')?.classList.add('sel-race');
         }
         // the races that are over: their fold is open while it holds the pick, as the server draws it
         const over = row.closest('details.over');
@@ -827,17 +894,17 @@ function panel() {
         }
     };
     // the answer `text` for the URL `to` in place; false, with nothing changed, when it lacks a slot
-    // or its .cp-pick names no row of the page (then the page loads)
+    // (then the page loads)
     const swap = (text, to) => {
         const y = scrollY;            // first of all: the slots going in move the page (scroll anchoring), the hidden list clamps it
         const doc = new DOMParser().parseFromString(text, 'text/html');
         const head = doc.getElementById('panel');
         const body = doc.getElementById('panel-body');
-        const pick = doc.querySelector('.cp-pick');
-        const into = pick === null ? null : rows().find(r => r.dataset.sel === pick.dataset.for) ?? null;
+        const acts = doc.getElementById('panel-acts');
         const oldHead = document.getElementById('panel');
         const oldBody = document.getElementById('panel-body');
-        if (!head || !body || !oldHead || !oldBody || (pick !== null && into === null)) {
+        const oldActs = document.getElementById('panel-acts');
+        if (!head || !body || !acts || !oldHead || !oldBody || !oldActs) {
             return false;
         }
         // the form going out takes its listeners along first: its focused field, removed, must not
@@ -846,26 +913,16 @@ function panel() {
         boundAssign = null;
         oldHead.replaceWith(head);
         oldBody.replaceWith(body);
-        for (const el of document.querySelectorAll('.cp-pick')) {
-            el.remove();
-        }
-        if (pick !== null) {
-            into.append(pick);
-        }
-        for (const el of [head, body, pick]) {
-            if (el !== null) {
-                reveal(el);
-            }
+        oldActs.replaceWith(acts);
+        for (const el of [head, body, acts]) {
+            reveal(el);
         }
         const url = new URL(to, location.href);
         const key = selKey(url.search);
         const wasSel = document.body.classList.contains('has-sel');
-        const marks = swapMarks(head.dataset, url.search, [head, body].some(el => el.querySelector('form[action="/manage/live/undo"]') !== null));
+        const marks = swapMarks(head.dataset, url.search);
         mark(marks.row, marks.sheet);
-        for (const el of document.querySelectorAll('[data-row-undo]')) {
-            el.hidden = !marks.rowUndo;
-        }
-        for (const [cls, on] of Object.entries(bodyClasses(url.search, head.dataset))) {
+        for (const [cls, on] of Object.entries(bodyClasses(url.search))) {
             document.body.classList.toggle(cls, on);
         }
         const step = sheetScroll({narrow: matchMedia('(max-width:1179.98px)').matches, wasSel, isSel: document.body.classList.contains('has-sel'), sameKey: key === shown});
@@ -880,7 +937,7 @@ function panel() {
             scrollTo(0, 0);
         }
         shown = key;
-        bindAssign(document.querySelector('.cp-pick form[data-assign]'), redraw);
+        bindAssign(body.querySelector('form[data-assign]'), redraw);
         return true;
     };
     // fetch the fragment for `to` (a URL of this page) and act on the answer; `load` goes to the
@@ -917,9 +974,9 @@ function panel() {
         const sent = new URL(to, location.href).searchParams.get('raceOpen') === '1';
         let shut = false;
         fetchSwap(to, {load: u => location.replace(u), before: () => {
-            shut = keepShut(sent, document.querySelector('.cp-pick details.as-race')?.open ?? null);
+            shut = keepShut(sent, document.querySelector('#panel-body form[data-assign] details.as-race')?.open ?? null);
         }, done: () => {
-            const form = document.querySelector('.cp-pick form[data-assign]');
+            const form = document.querySelector('#panel-body form[data-assign]');
             const fold = form?.querySelector('details.as-race') ?? null;
             if (shut && fold !== null) {
                 fold.open = false;
@@ -1024,9 +1081,8 @@ function bindAssign(form, redraw) {
     };
     write();
     const touch = e => {
-        const name = e.target?.name;
-        if (name === 'type' || name === 'live') {
-            touched.add(name);
+        if (e.target?.name === 'type') {
+            touched.add('type');
             write();
         }
     };
@@ -1072,6 +1128,15 @@ function bindAssign(form, redraw) {
     form.addEventListener('keydown', e => {
         if (e.target?.name === 'date') {
             typed = true;
+        }
+        // Enter in a field stores (Store), never makes live: the form's first button by tree order is
+        // Make live (user, 23 Nov 2026), which a field's Enter would otherwise press
+        if (e.key === 'Enter' && !e.isComposing && e.target instanceof HTMLInputElement && !['submit', 'button', 'reset'].includes(e.target.type)) {
+            const store = [...form.elements].find(b => b.matches('button[data-submit="store"]'));
+            if (store) {
+                e.preventDefault();
+                form.requestSubmit(store);
+            }
         }
     }, {signal});
     // the race fold opened or closed: its hidden raceOpen follows, so a redraw draws it as the

@@ -4,6 +4,7 @@ import {SHEET_RE} from './ids.mjs';
 import {localDate} from './time.mjs';
 import {plannedStart, usedUp} from './select.mjs';
 import {raceOf} from './races.mjs';
+import {t} from './pages.mjs';
 
 export const SHARED_SHARE = 0.6;          // teamHint: this share of the upload's riders
 const TYPES_MAX = 10;                     // team.types keeps this many suggestions
@@ -53,6 +54,23 @@ export function plansOf(club, slug) {
 export function planLabel(teamName, type) {
     return type === null ? teamName : `${teamName} · ${type}`;
 }
+
+
+// How a plan's type reads on its team's page: the type, or "Plan" for a plan without one (user, 23
+// Nov 2026: display only; its label stays planLabel's, the team's name alone).
+export const shownType = type => (type === null || type === undefined ? t('cp-plan-untyped') : type);
+
+
+// How a version reads on its team's page, which names the team already (user, 23 Nov 2026): its
+// plan's type and its number, "'fast' v3", "'Plan' v3" for a plan without a type.
+export function versionName(type, n) {
+    return `'${shownType(type)}' v${n}`;
+}
+
+
+// A plan's label as the team page shows it (user, 23 Nov 2026): planLabel with "Plan" for a plan
+// without a type ("Rollers · Plan"); the stored label is unchanged.
+export const shownLabel = (teamName, type) => planLabel(teamName, shownType(type));
 
 
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);

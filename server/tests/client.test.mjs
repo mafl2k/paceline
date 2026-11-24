@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import {
     shouldReload, holdsReload, restoredInput, reloadDecision, timeoutSignal, redrawOn, dateRedraw, startRedraw, eventRedraw, touchedList,
     armPress, armNeeded, ARM_GUARD_MS, submitDecision, typedHolds, fillText, panelUrl, swapDecision, selClasses, selKey, submitButtons, bodyClasses, cockpitHome, popStep, sheetScroll, focusAfter,
-    dateChangeRedraw, pickedRow, swapMarks, foldField, keepShut,
+    dateChangeRedraw, pickedRow, swapMarks, foldField, keepShut, armsOn,
 } from '../client.mjs';
 
 
@@ -113,14 +113,15 @@ test('timeoutSignal: AbortSignal.timeout where it exists, else an AbortControlle
 });
 
 
-test('redrawOn: team, plan, live, race, date and start time, never the type or the link', () => {
+test('redrawOn: team, plan, race, date and start time, never the type or the link', () => {
     // the race radio (races Task 7) redraws as the plan radio does
     assert.equal(redrawOn('race'), true);
-    for (const name of ['team', 'as', 'live', 'race', 'date', 'start']) {
+    for (const name of ['team', 'as', 'race', 'date', 'start']) {
         assert.equal(redrawOn(name), true, name);
     }
-    // typing is never cut off; the event link and the hidden fields wait for Store
-    for (const name of ['type', 'event', 'drawn', 'base', 'touched', 'startFor', '', undefined]) {
+    // typing is never cut off; the event link and the hidden fields wait for Store; no Make live box
+    // any more (user, 23 Nov 2026: Make live is a button of the action bar)
+    for (const name of ['type', 'event', 'drawn', 'base', 'touched', 'startFor', 'live', '', undefined]) {
         assert.equal(redrawOn(name), false, String(name));
     }
 });
@@ -160,14 +161,18 @@ test('pickedRow: a swap marks the row the fragment\'s #panel names, the live one
 });
 
 
-test('swapMarks: the row the fragment names; the sheet\'s path only for a selection in the URL; a row\'s Undo only while the card offers none', () => {
-    // nothing picked (the bare URL): the live row, alone (no sheet); a later race's Undo on its row
-    assert.deepEqual(swapMarks({sel: 'v:c00005'}, '', false), {row: 'v:c00005', sheet: false, rowUndo: true});
+test('swapMarks: the row the fragment names; the sheet\'s path only for a selection in the URL', () => {
+    // nothing picked (the bare URL): the live row, alone (no sheet)
+    assert.deepEqual(swapMarks({sel: 'v:c00005'}, ''), {row: 'v:c00005', sheet: false});
     // a race's live pointer: the same row, now a sheet's (a phone opens it)
-    assert.deepEqual(swapMarks({sel: 'v:c00005'}, '?r=2026-11-19', false), {row: 'v:c00005', sheet: true, rowUndo: true});
-    // the card of the version the switch made live offers Undo: the row's goes
-    assert.deepEqual(swapMarks({sel: 'v:c00009'}, '?v=c00009', true), {row: 'v:c00009', sheet: true, rowUndo: false});
-    assert.deepEqual(swapMarks({sel: ''}, '?v=zzzzzz', false), {row: null, sheet: true, rowUndo: true});
+    assert.deepEqual(swapMarks({sel: 'v:c00005'}, '?r=2026-11-19'), {row: 'v:c00005', sheet: true});
+    assert.deepEqual(swapMarks({sel: 'v:c00009'}, '?v=c00009'), {row: 'v:c00009', sheet: true});
+    // a plan not stored yet: its row marked as a version's (its Store form is in the card)
+    assert.deepEqual(swapMarks({sel: 'e:c00006'}, '?e=c00006'), {row: 'e:c00006', sheet: true});
+    assert.deepEqual(swapMarks({sel: ''}, '?v=zzzzzz'), {row: null, sheet: true});
+    // no row's Undo to show or hide any more (user, 23 Nov 2026)
+    const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
+    assert.equal(/data-row-undo|live\/undo|rowUndo|cp-pick|sel-e/.test(src), false);
 });
 
 
@@ -180,9 +185,20 @@ test('eventRedraw: a link other than the drawn one, once the field is left (revi
 });
 
 
-test('touchedList: type and live only', () => {
-    assert.equal(touchedList(new Set(['live', 'type', 'x'])), 'live,type');
-    assert.equal(touchedList(new Set(['type', 'live'])), 'live,type', 'sorted');
+test('armsOn: only the trigger arms a strip, and a submit without a button; the Store form\'s Store posts as it is (user, 23 Nov 2026)', () => {
+    const button = sel => ({matches: s => s === sel});
+    assert.equal(armsOn(button('[data-arm-open]')), true);
+    assert.equal(armsOn(null), true, 'form.submit() or Enter in a field');
+    assert.equal(armsOn(button('[data-submit="store"]')), false);
+    assert.equal(armsOn(button('[data-arm-yes]')), false);
+    const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
+    assert.match(src, /if \(!armsOn\(e\.submitter \?\? null\)\) \{\s+return;/);
+});
+
+
+test('touchedList: the type only (no Make live box any more, user 23 Nov 2026)', () => {
+    assert.equal(touchedList(new Set(['live', 'type', 'x'])), 'type');
+    assert.equal(touchedList(new Set(['live'])), '');
     assert.equal(touchedList(new Set(['type'])), 'type');
     assert.equal(touchedList(new Set(['as', 'date', 'team', ''])), '');
     assert.equal(touchedList(new Set()), '');
@@ -329,15 +345,14 @@ test('swapDecision: an answer to an older pick is dropped; anything but a 200 lo
 
 test('selClasses: the body\'s classes follow the URL', () => {
     assert.deepEqual([selClasses('?v=c00004'), selClasses('?e=c00006'), selClasses(''), selClasses('?v=')],
-        [{hasSel: true, entry: false}, {hasSel: true, entry: true}, {hasSel: false, entry: false}, {hasSel: false, entry: false}]);
-    // `v` wins over `e` (shapes), as on the server
-    assert.deepEqual(selClasses('?v=c00004&e=c00006'), {hasSel: true, entry: false});
-    assert.deepEqual(selClasses('?e=&v='), {hasSel: false, entry: false});
+        [{hasSel: true}, {hasSel: true}, {hasSel: false}, {hasSel: false}]);
+    assert.deepEqual(selClasses('?v=c00004&e=c00006'), {hasSel: true});
+    assert.deepEqual(selClasses('?e=&v='), {hasSel: false});
 });
 
 
 test('a race\'s live pointer ?r=<date> is a selection: a sheet on a phone, its own key', () => {
-    assert.deepEqual(selClasses('?r=2026-11-19'), {hasSel: true, entry: false});
+    assert.deepEqual(selClasses('?r=2026-11-19'), {hasSel: true});
     assert.equal(selKey('?r=2026-11-19'), 'r:2026-11-19');
     assert.equal(selKey('?v=c00004&r=2026-11-19'), 'v:c00004');           // ?v= wins
     assert.equal(selKey('?r='), null);
@@ -363,15 +378,14 @@ test('the panel swaps only what the server sent, parsed', () => {
 });
 
 
-test('bodyClasses: every swap sets has-sel and sel-e from the URL and the swapped #panel', () => {
-    assert.deepEqual(bodyClasses('?v=c00004', {kind: 'version'}), {'has-sel': true, 'sel-e': false});
-    assert.deepEqual(bodyClasses('?e=c00006', {kind: 'entry'}), {'has-sel': true, 'sel-e': true});
-    // a received plan that is gone draws as 'gone': no sel-e, as on the server
-    assert.deepEqual(bodyClasses('?e=c00009', {kind: 'gone'}), {'has-sel': true, 'sel-e': false});
+test('bodyClasses: every swap sets has-sel from the URL; a plan not stored yet is the same sheet as a version (user, 23 Nov 2026)', () => {
+    assert.deepEqual(bodyClasses('?v=c00004'), {'has-sel': true});
+    assert.deepEqual(bodyClasses('?e=c00006'), {'has-sel': true});
+    assert.deepEqual(bodyClasses('?e=c00009'), {'has-sel': true});
     // nothing picked: the live card, no sheet
-    assert.deepEqual(bodyClasses('', {kind: 'version'}), {'has-sel': false, 'sel-e': false});
+    assert.deepEqual(bodyClasses(''), {'has-sel': false});
     const src = fs.readFileSync(new URL('../client.mjs', import.meta.url), 'utf8');
-    assert.match(src, /for \(const \[cls, on\] of Object\.entries\(bodyClasses\(url\.search, head\.dataset\)\)\) \{\s+document\.body\.classList\.toggle\(cls, on\);/);
+    assert.match(src, /for \(const \[cls, on\] of Object\.entries\(bodyClasses\(url\.search\)\)\) \{\s+document\.body\.classList\.toggle\(cls, on\);/);
 });
 
 

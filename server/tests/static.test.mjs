@@ -10,7 +10,7 @@ import {appPage} from '../ui.mjs';
 
 const CLIENT = fs.readFileSync(new URL('../client.mjs', import.meta.url));
 const ASSET = name => fs.readFileSync(new URL(`../assets/${name}`, import.meta.url));
-const LOGO = ASSET('logo.png');
+const BANNER = ASSET('banner.png');
 const FAVICON = ASSET('favicon.svg');
 const TOUCH = ASSET('apple-touch-icon.png');
 const hash = body => crypto.createHash('sha256').update(body).digest('hex').slice(0, 12);
@@ -128,8 +128,8 @@ test('public pages link the stylesheet and stay script-free', async () => {
             assert.match(body, /<body class="public">/, p);
             assert.doesNotMatch(body, /<style|\sstyle=|<script/i, p);
             assert.ok(body.includes(`<link rel="icon" href="/static/favicon.svg?v=${hash(FAVICON)}" type="image/svg+xml">`), p);
-            // the large logo only on the start page (user, 22 Nov 2026)
-            assert.equal(body.includes(`<img class="home-logo" src="/static/logo.png?v=${hash(LOGO)}" alt="Paceline" width="512" height="512">`), p === '/', p);
+            // the banner only on the start page, as wide as its box (user, 22 and 23 Nov 2026)
+            assert.equal(body.includes(`<img class="home-logo" src="/static/banner.png?v=${hash(BANNER)}" alt="Paceline" width="832" height="260">`), p === '/', p);
         }
     } finally {
         await s.stop();
@@ -179,10 +179,10 @@ test('appPage: a note without the script', () => {
 });
 
 
-test('static: the logo, the favicon and the touch icon, cached by content', async () => {
+test('static: the banner, the favicon and the touch icon, cached by content', async () => {
     const s = await startServer();
     try {
-        for (const [path, body, type] of [['/static/logo.png', LOGO, 'image/png'],
+        for (const [path, body, type] of [['/static/banner.png', BANNER, 'image/png'],
                                           ['/static/favicon.svg', FAVICON, 'image/svg+xml'],
                                           ['/static/apple-touch-icon.png', TOUCH, 'image/png']]) {
             const res = await fetch(s.base + path);

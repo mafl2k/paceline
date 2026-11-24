@@ -63,7 +63,7 @@ function riderName(club, aid) {
 // Each change is noted in the club log. A refusal keeps the name as typed. Another zone while a plan
 // of the club races within 7 days asks first without confirm=1 (S11): the question, with the form's
 // fields again, and nothing changes. The unit is a display setting: no team's version changes (an
-// Undo on offer stays; an open team page draws the new unit when it next loads).
+// open team page draws the new unit when it next loads).
 function clubAction(req, res, ctx, cid, form) {
     const {store, cfg, now} = ctx;
     const club = store.get(cid);

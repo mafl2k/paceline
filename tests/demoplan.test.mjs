@@ -5,7 +5,7 @@ import {samplePlan} from '../pages/src/engine/demoplan.mjs';
 
 test('samplePlan: six riders with pull watts in plan order, one on the bench', () => {
     const plan = samplePlan();
-    assert.equal(plan.team, 'Demo team');
+    assert.equal(plan.team, 'Rollers · fast demo');
     assert.equal(plan.riders.length, 6);
     assert.deepEqual(plan.riders.map(r => r.order), [0, 1, 2, 3, 4, 5]);
     assert.ok(plan.riders.every(r => Number.isFinite(r.watts) && Number.isFinite(r.pullS)));

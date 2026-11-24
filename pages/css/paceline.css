@@ -78,7 +78,7 @@ html.pl-for-action .pl-action-only { display: block; }
 #pl-appearance-form label { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 #pl-appearance-form select { flex: 1; min-width: 0; }
 /* The three recovery field slots of the Action window, side by side under their option. */
-.pl-rec-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-left: 1.6em; }
+.pl-rec-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-left: 1.6em; align-items: end; }    /* the selects in one row when "Right (…)" wraps */
 #pl-appearance-form .pl-rec-slot { flex-direction: column; align-items: stretch; gap: 2px; font-size: 0.9em; }
 #pl-appearance-form .pl-rec-slot select { flex: none; width: 100%; }
 
@@ -168,18 +168,37 @@ html.pl-for-action .pl-action-only { display: block; }
 #pl-file-box.pl-files-only > summary { display: none; }
 
 /* Clubs */
-#pl-clubs-list { list-style: none; margin: 4px 0; padding: 0; }
-.pl-club { padding: 4px 0; border-bottom: 1px solid var(--pl-line); }
-.pl-club .pl-check { margin: 0; }
-.pl-club-name { font-weight: 600; overflow-wrap: anywhere; }
-.pl-club-note { margin: 0 0 0 1.6em; }
+/* One compact row per club, headed like the plan's riders table. */
+#pl-clubs-table { width: 100%; border-collapse: collapse; margin: 4px 0; font-size: 0.95em; }
+#pl-clubs-table th {
+    text-align: left;
+    padding: 3px 6px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pl-dim);
+    border-bottom: 1px solid var(--pl-line);
+}
+#pl-clubs-table td { padding: 4px 6px; border-bottom: 1px solid var(--pl-line); vertical-align: top; }
+#pl-clubs-table th:first-child, #pl-clubs-table td:first-child { padding-left: 0; }
+#pl-clubs-table th:last-child, #pl-clubs-table td:last-child { padding-right: 0; text-align: right; white-space: nowrap; }
+/* Break words only when one alone is too wide: `anywhere` lets the table squeeze a column below its
+   words (a long team list split the club name mid-word). */
+#pl-clubs-table td:first-child { width: 45%; }
+.pl-club-teams { overflow-wrap: break-word; }
+.pl-club-teams.pl-none { color: var(--pl-dim); }
+.pl-club-since { color: var(--pl-dim); font-variant-numeric: tabular-nums; }
+.pl-club .pl-check { margin: 0; align-items: baseline; }
+.pl-club-name { font-weight: 600; overflow-wrap: break-word; min-width: 0; }
+.pl-note.pl-club-note { margin: 0 0 0 1.6em; }    /* .pl-note comes later */
 .pl-club-note:empty { display: none; }
 .pl-clubs-several { margin: 6px 0; font-weight: 600; }
 .pl-club-code input { font-family: ui-monospace, Menlo, Consolas, monospace; text-transform: uppercase; }
 .pl-club-code button { flex: none; }
 #pl-club-code-msg { font-weight: 600; }
 
-/* Advanced: server address, upload, recording without a plan, the recordings. */
+/* Advanced: server address, recording without a plan. */
 #pl-advanced { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--pl-line); }
 #pl-advanced > summary {
     cursor: pointer;
@@ -246,6 +265,12 @@ html.pl-for-action .pl-action-only { display: block; }
 
 /* ---------- recordings ---------- */
 
+/* The upload first, in bold; the full text of what is sent folded away under it. */
+.pl-check.pl-upload { font-weight: 600; }
+#pl-upload-why { min-height: 1lh; margin-bottom: 2px; }
+#pl-upload-what { margin: 0 0 8px; font-size: 0.9em; }
+#pl-upload-what > summary { cursor: pointer; color: var(--pl-dim); }
+#pl-upload-what .pl-note { font-size: 1em; }
 #pl-rec-list { list-style: none; margin: 0; padding: 0; }
 .pl-recrow {
     display: flex;
@@ -350,6 +375,9 @@ html.pl-info.pl-vanish #pl-box > * { visibility: hidden; }
 .pl-trow.pl-pulling .pl-rot-num { color: inherit; }
 .pl-trow.pl-me, .pl-trow.pl-me .pl-rot-num { color: var(--pl-ok); }
 .pl-trow.pl-absent, .pl-trow.pl-absent .pl-rot-num { color: var(--pl-dim); }
+/* Turn clocks (23 Nov 2026): a rider hanging behind a gap or sitting out after a skip, dim in his
+   plan slot (no dashed line: he is still with the group). */
+.pl-trow.pl-hang, .pl-trow.pl-hang .pl-rot-num { color: var(--pl-dim); }
 /* Chaos (20 Nov 2026): the riders below "Order ≠ plan" are the plan's order, not the real one. */
 .pl-trow.pl-offplan, .pl-trow.pl-offplan .pl-rot-num { color: var(--pl-dim); }
 /* Captain table: the slot for the "Order ≠ plan" row, empty at the bottom outside chaos, so the
@@ -379,6 +407,9 @@ html.pl-info.pl-vanish #pl-box > * { visibility: hidden; }
 html.pl-info #pl-box { font-size: min(4.6vw, 9.5vh); font-variation-settings: "wdth" 70; }
 html.pl-info.pl-show-next #pl-box { font-size: min(4.6vw, 8vh); }    /* six lines */
 html.pl-info #pl-box > * { flex: none; }
+/* Top-aligned (user, 23 Nov 2026): the lines start under the top edge and the window grows
+   downwards, instead of from the middle when the text doesn't fill its height. */
+html.pl-info #pl-box { justify-content: flex-start; }
 
 /* One column grid for every rider line and table row (user, 13 Nov 2026): label, plan number,
    swatch, name, then the value lined up on the "@": seconds (or the front's clock) right-aligned,
@@ -630,6 +661,26 @@ html.pl-mid-same .pl-tri-now .pl-tri-num { font-weight: 800; }
 #pl-act-now[data-zone="green"] { color: var(--pl-ok); }
 #pl-act-now[data-zone="amber"] { color: var(--pl-amber); }
 #pl-act-now[data-zone="red"] { color: var(--pl-bad); }
+/* The countdown as the right field (fields on, no Rest window; user, 23 Nov 2026): the number like
+   the pull's time, under it my place (no "s"), bright and bold so it reads at a glance.
+   The standing clock dims the number as in the big countdown. */
+/* The place: 1.5 times the unit (18 px at the default size; a fixed 18 px ran into the digits in
+   small windows), and without line height of its own, so the unit line keeps its height and nothing
+   moves when it goes in READY. */
+.pl-tri-place { color: var(--pl-fg); font-weight: 800; font-size: 1.5em; line-height: 0; }
+#pl-act-time.pl-standing { opacity: 0.62; }
+/* The status line takes the bar's place, exactly as high, so the fields stay put when READY brings
+   the bar back. */
+#pl-act.pl-fields-clock .pl-act-top { display: flex; flex-direction: column; gap: var(--pl-gap); }
+#pl-act.pl-fields-clock .pl-act-over {
+    order: 2;
+    height: var(--pl-bar-h);
+    min-height: 0;
+    align-items: center;
+    font-size: max(18px, var(--pl-bar-h));    /* 18 px: nothing but units smaller */
+    line-height: 1;
+}
+#pl-act.pl-fields-clock .pl-bar { display: none; }
 /* The dash: amber "?" when alone or without data (the dim dash and triangle keep --pl-dim). */
 .pl-act-row .pl-act-dash.pl-warn { color: var(--pl-amber); }
 

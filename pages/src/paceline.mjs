@@ -9,11 +9,14 @@
 // session. Ticks go to IndexedDB without blocking the loop. Rider names come from files and from
 // Zwift, so they only ever go in through textContent.
 //
-// Every window (lease owner or not) follows the rotation itself on each step: who is at the front
-// of my team chain, held for HOLD_MS before counting as the puller. My own pull also starts on a
-// power jump while I am next (confirmed by my draft) or on my draft alone, and ends on a sharp
-// power drop (see trackFront). Climbs pause the rotation, the final sprint ends it, and a rider
-// without a teammate near him sees no rotation. That state lives in memory.
+// Every window (lease owner or not) follows the rotation itself on each step, on the turn clocks
+// (turns.mjs): who is at the front of my team chain becomes the owner of the turn after 3 s when he
+// is the plan's next, after 20 s otherwise, and his clock runs from his start at the front until the
+// next owner takes over. My own pull also starts on a power jump while I am next (confirmed by my
+// draft) or on my draft alone. A broken order on a real climb shows the climb display, the final
+// sprint ends the rotation, and a rider without a teammate near him sees no rotation. The old core
+// (rotation.mjs) runs beside it as a silent shadow, recorded in det.old only. That state lives in
+// memory.
 //
 // One overlay window (its own lease, POLL_LEASE_KEY) checks the plan server, only in an event (with
 // the TTT-only option only in a TTT event): at once when the event begins, then every POLL_FAST_MS
@@ -36,15 +39,15 @@
 import {findMe} from './engine/plan.mjs';
 import {MAX_AGE_MS, LEASE_STALE_MS, planIds, selfEntry, planRidersPresent, initialRecState,
         recStep, makeTick, detPlanOnly, leaseStep, selfSubgroupId, eventSummary, eventLogStep, initialGate, gateStep,
-        gateEv, isTtt, leaseHeld}
+        gateEv, isTtt, leaseHeld, trafficStep}
     from './engine/recording.mjs';
 import {BAR_RANGE_PCT, GREEN_PCT, AMBER_PCT, DRAFT_N, selfLive, draftMean, dashKind, wheelOf, placeOf,
-        pushPower as pushHist, initialRotation, rotationStep, rotationStatus as statusOf, carryRotation,
+        pushPower as pushHist, initialRotation, rotationStep, carryRotation, shadowDet,
         alignedPositions,
-        wheelToFollow, plannedWheel, captainNext, rotationTable, tableShown, powerBar, lineIds, teamDet}
+        wheelToFollow, plannedWheel, captainNext, tableShown, powerBar}
     from './engine/rotation.mjs';
-import {orderOutIds} from './engine/order.mjs';
-import {routeProfile, routeHills, hillAt, initialAlign, alignStep} from './engine/terrain.mjs';
+import {initialTurns, turnsStep, turnsStatus, carryTurns, turnTable, turnDet} from './engine/turns.mjs';
+import {hillAt, buildClimbIndex} from './engine/terrain.mjs';
 import {GAP_FINISHERS, initialGaps, gapStep, gapView, cutBehind} from './engine/gaps.mjs';
 import {initialCue, cueStep, cueView, dropWheel, linePlace, freshIds} from './engine/wheelcue.mjs';
 import {initialClock, clockStep, deltaText} from './engine/clock.mjs';
@@ -52,7 +55,7 @@ import {ALIVE_PREFIX, aliveKey, parseAlive, aliveModes, restClockShown, restShow
     from './engine/presence.mjs';
 import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, initialMarker, markerStep, markerPower, actionModel,
         pullOnlyModel, penModel, riderTarget, barTarget, pickWeight,
-        shownModel, fieldsGapBand, fieldsShown, restClockOf, restTakes, restShowsOf, actionPhase, phaseStep,
+        shownModel, fieldsGapBand, fieldsShown, clockInFields, clockField, restClockOf, restTakes, restShowsOf, actionPhase, phaseStep,
         restHandBack, demoBadge, vanishes,
         fieldSlots, recoveryFields, smooth5, labelParts, planParts, PART_MARK}
     from './engine/display.mjs';
@@ -105,11 +108,14 @@ let planServerOn = null;   // plan server on/off the plan was loaded for (an end
 let planSig = null;        // sig of the loaded plan; a new plan keeps the front tracking when the
                            // puller is still a rider
 let detFailed = false;     // detOf threw once (logged once; those ticks record det: null)
+let trafficFailed = false; // trafficStep threw once (logged once; those ticks record traffic: null)
+let trafficState = null;   // {sessionId, pseudo}: the anonymous numbers of the recording going on
 let shownFailed = false;   // shownOf threw once (logged once; those ticks record shown: null)
 let gate = initialGate();     // the TTT event gate (gateStep): open from the start pen to the finish
 let gateSg;                   // the TTT subgroup the gate saw in this step (undefined: none, or no data)
 const eventInfo = new Map();   // my event subgroup id -> {summary, at, busy} (eventSummary)
 let eventLogged = null;        // {sessionId, key} of the event last written to a tick
+let climbsLogged = null;       // {sessionId, key} of the climb index last written to a tick
 let selfId = null;         // own athlete id (string), cached once known
 let selfName = null;       // own name from Zwift, if Sauce gives one
 let selfWeight = null;     // my weight (kg) from my nearby entry, if Sauce gives one
@@ -137,8 +143,13 @@ let demoKind = null;       // null | 'url' (?demo, plain browser) | 'pref' (Demo
 // Meta of a session this window started, until it is stored; ticks wait for the first attempt.
 let pendingMeta = null;    // {sessionId, meta, inFlight}
 let metaGate = {sessionId: null, ready: Promise.resolve()};
-// Rotation (per window, in memory): the engine's state (rotationStep) and my own samples.
-let rot = initialRotation();
+// Rotation (per window, in memory): the turn clocks' state (turns.mjs, what the windows show), the
+// old core beside it as a silent shadow (rotation.mjs, recorded in det.old only; spec 2026-11-23
+// section 4, removed in the version after) and my own samples.
+let rot = initialTurns();
+let shadow = initialRotation();
+let shadowOk = true;       // the shadow's last step ran (det.old is null after a failed one)
+let shadowFailed = false;  // the shadow failed once (logged once; the windows go on)
 let marker = initialMarker();    // my smoothed power and the marker's colour (power bar)
 let gaps = initialGaps();  // gaps in the team line (gaps.mjs): a rider or the group losing the wheel
 let cue = initialCue();    // the wheel to drop in behind, in the rest line (wheelcue.mjs)
@@ -149,13 +160,17 @@ let hist = [];             // my power history {t, w} for my own pull start and 
 let drafts = [];           // my last DRAFT_N draft samples (W)
 let sampleT = null;        // when the newest self sample arrived, until a step has used it
 let grade = null;          // my grade in percent from the last self sample, null if unknown
-// The event route's terrain (terrain.mjs): its profile and hills from Sauce, loaded once per route,
-// and where I am on it (my event distance plus the offset found from my altitude).
-let terrain = {routeId: null, busy: false, at: 0, profile: null, hills: [], align: initialAlign()};
+// The climb index of my event (terrain.mjs, buildClimbIndex): built once in the pen from Sauce's
+// route and segments, per route, laps and end (key); my place on it is my event distance. climbs is
+// the index as recorded (route data only). Cleared when the event is over, so the last event's
+// index is never used nor recorded.
+const noTerrain = () => ({key: null, busy: false, at: 0, index: null, climbs: null});
+let terrain = noTerrain();
+let climbWarned = null;     // the event (sgId) whose missing climb index was logged
 let eventDist = null;      // my event distance (m) from the last self sample
 let sauceRouteDist = null; // Sauce's own route distance for me (recorded, to compare)
-// The last step's own pull event and shadow rules, for the recorder.
-let stepOut = {self: null, shadowEarly: null, shadowEnd06: null};
+// The last step's own pull event, for the recorder.
+let stepOut = {self: null};
 
 
 // ---------- storage ----------
@@ -218,7 +233,8 @@ function loadPlan() {
     if (sig !== planSig) {
         // A plan swap mid-race (server upload) keeps the puller's clock when he is still a rider.
         planSig = sig;
-        rot = carryRotation(rot, plan);
+        rot = carryTurns(rot, plan);
+        shadow = carryRotation(shadow, plan);
     }
     if (stopDemo) {
         stopDemo();
@@ -252,7 +268,9 @@ function syncDemo(now) {
     selfId = null;
     selfName = null;
     selfWeight = null;
-    rot = initialRotation();
+    rot = initialTurns();
+    shadow = initialRotation();
+    shadowOk = true;
     marker = initialMarker();
     gaps = initialGaps();
     cue = initialCue();
@@ -261,7 +279,7 @@ function syncDemo(now) {
     drafts = [];
     sampleT = null;
     grade = null;
-    terrain = {...terrain, align: initialAlign()};
+    terrain = noTerrain();    // loaded again for Zwift
     eventDist = null;
     sauceRouteDist = null;
     planSig = null;
@@ -335,16 +353,27 @@ function sessionName() {
 
 // ---------- rotation ----------
 
-// Called right before each recorder step, so the tick's `det` matches this step.
+// Called right before each recorder step, so the tick's `det` matches this step. The old core runs
+// first on the same inputs, as a shadow that never stops the windows; the turn clocks get the gap
+// state of the step before (gapStep runs after them).
 function rotate(now) {
-    const {state, ...out} = rotationStep(rot, {
-        now, plan, riderIds, selfId, nearby: currentNearby(now), hist, drafts, grade, sampleT,
-        terrain: terrainHere(),
-    });
-    rot = state;
-    stepOut = out;
-    sampleT = null;
     const list = currentNearby(now);
+    const here = terrainHere();
+    const inputs = {now, plan, riderIds, selfId, nearby: list, hist, drafts, grade, sampleT, terrain: here};
+    try {
+        shadow = rotationStep(shadow, inputs).state;
+        shadowOk = true;
+    } catch (e) {
+        shadowOk = false;
+        if (!shadowFailed) {
+            shadowFailed = true;
+            console.error('Paceline: the old rotation core (shadow) failed:', e);
+        }
+    }
+    const {state, self} = turnsStep(rot, {...inputs, gaps});
+    rot = state;
+    stepOut = {self};
+    sampleT = null;
     const live = selfId !== null && selfLive(list, selfId);
     gaps = gapStep(gaps, {
         now, selfId,
@@ -382,10 +411,12 @@ function cueWheel(now) {
 
 
 // The riders with my group for the cue: seen in my chain within CUE_FRESH_MS and in the line (not
-// sitting out, order.mjs), the puller, not cut off behind an open gap behind me.
+// sitting out nor hanging, turns.mjs), the puller, not cut off behind an open gap behind me.
 function cueGroupIds(now) {
     const cut = cutBehind(gaps, selfId);
-    return [...lineIds(freshIds(rot.seen, now), rot.order), rot.front.puller].filter(id => id != null && !cut.has(id));
+    const line = new Set(rot.line);
+    return [...freshIds(rot.seen, now).filter(id => line.has(id)), rot.front.puller]
+        .filter(id => id != null && !cut.has(id));
 }
 
 
@@ -401,12 +432,12 @@ function myWheel(view) {
 }
 
 
-// The riders with my group: in my chain (with the presence grace) and in the line, the puller, not cut
-// off behind an open gap behind me. A rider sitting out (skipped at the front, order.mjs; 20 Nov
-// 2026) is in the group but out of the rotation, so he is not the wheel I drop in behind.
+// The riders with my group: the line (in my chain with the presence grace, turns.mjs), the puller,
+// not cut off behind an open gap behind me. A rider sitting out (skipped at the front) or hanging
+// behind a gap is out of the rotation, so he is not the wheel I drop in behind.
 function groupIds() {
     const cut = cutBehind(gaps, selfId);
-    return [...lineIds(rot.present, rot.order), rot.front.puller].filter(id => id != null && !cut.has(id));
+    return [...rot.line, rot.front.puller].filter(id => id != null && !cut.has(id));
 }
 
 
@@ -435,8 +466,8 @@ function rotationStatus(now) {
     if (muted()) {
         return {view: null, reason: 'noevent'};
     }
-    return statusOf(rot, {now, plan, selfId, live: selfId !== null && selfLive(currentNearby(now), selfId),
-                          quietStart: true});
+    return turnsStatus(rot, {now, plan, selfId, live: selfId !== null && selfLive(currentNearby(now), selfId),
+                             quietStart: true});
 }
 
 
@@ -456,7 +487,7 @@ function muted() {
 // While I pull (by the engine's last step): {since, target} for the power marker, else null. The
 // target is the bar's (barTarget: pull_wkg × my weight in W/kg mode, else the plan's watts).
 function myPull(now) {
-    const {view} = statusOf(rot, {now, plan, selfId, live: true});
+    const {view} = turnsStatus(rot, {now, plan, selfId, live: true});
     return view && view.mine ? {since: rot.front.since, target: barTarget(view.me, liveWeight(), prefs.targetUnit)} : null;
 }
 
@@ -488,49 +519,77 @@ function samplePower(list, now) {
     grade = Number.isFinite(me.state.grade) ? me.state.grade * 100 : null;
     eventDist = Number.isFinite(me.state.eventDistance) ? me.state.eventDistance : null;
     sauceRouteDist = Number.isFinite(me.state.routeDistance) ? me.state.routeDistance : null;
-    if (terrain.profile) {
-        terrain.align = alignStep(terrain.align, {d: eventDist, alt: me.state.altitude, profile: terrain.profile});
-    }
 }
 
 
 // ---------- terrain ----------
 
-// My place on the route, null until the offset is found.
+// My place in the climb index: my event distance, null without the index or the distance.
 function routePos() {
-    return terrain.profile && terrain.align.offset !== null && eventDist !== null ?
-        eventDist + terrain.align.offset : null;
+    return terrain.index && eventDist !== null ? eventDist : null;
 }
 
 
-// For the engine: the profile's hill here ({hill}, hill null on the flat), or undefined while the
-// profile or my place on it is unknown (the engine then goes by the live grade).
+// For the engine: the index's hill here ({hill}, hill null on the flat), or undefined without the
+// index or my event distance (the engine then goes by the live grade).
 function terrainHere() {
     const pos = routePos();
-    return pos === null ? undefined : {hill: hillAt(terrain.hills, pos)};
+    return pos === null ? undefined : {hill: hillAt(terrain.index.items, pos)};
 }
 
 
-// Loads the profile of my event's route once (one-lap events only: the profile is one lap with
-// its lead-in). A failure is tried again after EVENT_RETRY_MS.
-function terrainStep(ev, now) {
-    const routeId = ev && ev.found && ev.routeId != null && (ev.laps ?? 1) <= 1 ? ev.routeId : null;
-    if (routeId === null || terrain.busy || typeof Common?.getRoute !== 'function') {
+// The getRoute options for the index: the profile must start with the prelude buildClimbIndex
+// takes (routePrelude: meta.leadinDistance, Sauce's lead-in in the profile, often 0). Sauce's
+// common.mjs: getRoute(id, options={prelude: 'leadin'}). buildClimbIndex places the profile by
+// Zwift's own lead-in and lap length (the route's leadinDistanceInMeters and distanceInMeters): the
+// profile's lead-in part once, then its lap scaled to Zwift's lap, one Zwift lap per further lap
+// (read live 23 Nov 2026, Sauce 2.4.0-alpha.7; no weld).
+function routeOptions() {
+    return {prelude: 'leadin'};
+}
+
+
+// Builds the climb index of my event once it is known (in the pen): Sauce's route profile and its
+// segments (route.segments, a segment over a climb joins it; Sauce's segment infos are not
+// needed), every climb by event distance up to the event's end, lead-in once, then lap after lap
+// (any number of laps). A failure, or a route without the data, is tried again after
+// EVENT_RETRY_MS; a missing index is logged once per event (a timed event has no end distance).
+// `seen` (gateEv): null once the event is over (out of it with live data, or my data gone for
+// EVENT_LOST_MS in a TTT): the index is dropped then (a load under way too).
+function terrainStep(ev, seen, now) {
+    if (seen === null && (terrain.key !== null || terrain.busy)) {
+        terrain = noTerrain();
+    }
+    if (!ev || !ev.found || ev.routeId == null || terrain.busy || typeof Common?.getRoute !== 'function') {
         return;
     }
-    if (routeId === terrain.routeId && (terrain.profile || now - terrain.at < EVENT_RETRY_MS)) {
+    const key = `${ev.routeId}:${ev.laps}:${ev.endDistance}`;
+    if (key === terrain.key && (terrain.index || now - terrain.at < EVENT_RETRY_MS)) {
         return;
     }
-    terrain = {routeId, busy: true, at: now, profile: null, hills: [], align: initialAlign()};
-    Promise.resolve(Common.getRoute(routeId)).then(route => {
-        const profile = routeProfile(route);
-        terrain = {...terrain, busy: false, at: Date.now(), profile, hills: routeHills(profile)};
-        if (!profile) {
-            console.warn('Paceline: no elevation profile for route', routeId);
+    const {routeId, laps, sgId} = ev;
+    const endM = ev.endDistance;
+    const load = {key, busy: true, at: now, index: null, climbs: null};
+    terrain = load;
+    (async () => {
+        const route = await Common.getRoute(routeId, routeOptions());
+        return buildClimbIndex(route, null, {laps, endM});
+    })().then(index => {
+        if (terrain !== load) {
+            return;    // dropped meanwhile (demo)
+        }
+        terrain = {...load, busy: false, at: Date.now(), index,
+                   climbs: index && {routeId, laps, endM, preludeM: index.preludeM, lapM: index.lapM,
+                                     items: index.items}};
+        if (!index && climbWarned !== sgId) {
+            climbWarned = sgId;
+            console.warn('Paceline: no climb index for route (the live grade decides)', key);
         }
     }, e => {
-        console.warn('Paceline: could not load route', routeId, e);
-        terrain = {...terrain, busy: false, at: Date.now()};
+        console.warn('Paceline: could not load route', key, e);
+        if (terrain === load) {
+            terrain = {...load, busy: false, at: Date.now()};
+        }
     });
 }
 
@@ -632,6 +691,7 @@ function step() {
         pendingMeta = null;
         prune().catch(logDb('pruning old recordings'));
         lastSweepAt = 0;    // the finished ride goes up on the next step
+        trafficState = null;
     }
     if (state.recording) {
         if (pendingMeta && pendingMeta.sessionId === state.sessionId) {
@@ -648,12 +708,37 @@ function step() {
             }
             row.det = null;
         }
+        try {
+            // Anonymous traffic near me: numbers that hold for this recording only. Only me and the
+            // plan riders are kept out of it: the upload strips the rows of the fallback and watched
+            // riders (stripForUpload), so they would be in neither; as traffic they go up anonymised.
+            const from = trafficState?.sessionId === state.sessionId ? trafficState.pseudo : null;
+            const kept = new Set(row.riders.filter(r => r.self === true || r.inPlan === true).map(r => r.id));
+            const {pseudo, traffic} = trafficStep(from, list, kept, now);
+            trafficState = {sessionId: state.sessionId, pseudo};
+            row.traffic = traffic;
+            row.trafficEpoch = pseudo.epoch;
+        } catch (e) {
+            if (!trafficFailed) {
+                trafficFailed = true;
+                console.error('Paceline: could not record the traffic:', e);
+            }
+            row.traffic = null;
+        }
         const ev = gateEv(list, eventOf(list, now));    // a gap in my data is no change of event
         if (ev !== undefined) {
             const {log, next} = eventLogStep(eventLogged, {sessionId: state.sessionId, summary: ev});
             eventLogged = next;
             if (log) {
                 row.event = ev;    // only when it changed: carry it forward in the analysis
+            }
+        }
+        if (terrain.climbs) {
+            // The climb index once per session, and again when it changes (route data, no rider).
+            const {log, next} = eventLogStep(climbsLogged, {sessionId: state.sessionId, summary: terrain.climbs});
+            climbsLogged = next;
+            if (log) {
+                row.climbs = terrain.climbs;
             }
         }
         try {
@@ -715,12 +800,13 @@ function windowModel(view, reason, now) {
     }
     // The countdown as shown (clock.mjs): the rotation's clock with its corrections absorbed, or
     // snapped and explained on the line under it (expert panel, 18 Nov 2026). Its riders are the
-    // line (present, not sitting out), so a rider who goes out explains a snap like one who left.
+    // line (present, not sitting out, not hanging), so a rider who goes out explains a snap like one
+    // who left.
     // In chaos (20 Nov 2026) there is no countdown: the clock starts over when the order holds again.
     const chaos = reason === 'chaos';
     const resting = !chaos && view && !view.mine && Number.isFinite(view.toMyPullS);
     restClk = clockStep(restClk, {now, trueS: resting ? view.toMyPullS : null, standing: !!view?.standing,
-                                  present: resting ? lineIds(rot.present, rot.order).filter(id => id !== selfId) : null});
+                                  present: resting ? rot.line.filter(id => id !== selfId) : null});
     const shown = resting ? {...view, toMyPullS: Math.floor(restClk.shownS)} : view;
     const m = actionModel(shown, meanW, marker.zone,
                           {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit), chaos});
@@ -764,21 +850,39 @@ function detOf(now) {
         alone: !rot.chain.some(c => c.id !== selfId),
         gate: gate.open,    // in the TTT event (start pen to finish)
         climb: rot.climb.climbing,
-        descent: !!rot.climb.descent,
+        // the hill's descent (route profile or live grade), else the live grade's
+        descent: rot.hill?.mode ? !!rot.hill.descent : !!rot.climb.descent,
         hill: rot.hill ? rot.hill.mode : null,    // 'flag' (roller) | 'pause' (real climb/descent) | null
-        routePos: routePos(),    // my place on the route by the profile (null: unknown)
+        routePos: routePos(),    // my event distance as looked up in the climb index (null: no index)
         routeDist: sauceRouteDist,    // Sauce's own route distance, to compare
         pending: rot.front.pending ? rot.front.pending.at : null,
         selfDraft3: draftMean(drafts),
         gap: gapNow(),    // the gap warning: {kind, id, m, s, n, mine, behind, level, closing} or null
-        shadowEarly: stepOut.shadowEarly,
-        shadowEnd06: stepOut.shadowEnd06,
-        // Does the team ride the plan's order (order.mjs, 20 Nov 2026): chaos, riders sitting out.
-        order: {chaos: !!rot.order?.chaos, out: orderOutIds(rot.order)},
-        // The learned turn and hand-over time (te) and the countdown of the old fixed rule (cdOld),
-        // 21 Nov 2026 (design 2026-11-21-paceline-beta5 §3): to compare both after the next TTT.
-        ...teamDet(rot, {now, plan, selfId, view}),
+        // The turn clocks (23 Nov 2026): this step's owner change, the climb display and its trigger,
+        // who hangs and who sits out.
+        turn: turnDet(rot),
+        // The old core beside them (rotation.mjs, silent): its puller, chaos and countdown, for the
+        // ride report; null after a failed shadow step.
+        old: oldDet(now),
     };
+}
+
+
+// The old core's det (rotation.mjs shadowDet), null after a failed shadow step or when it throws
+// (logged once with the step's failure), so the shadow never costs the tick its det.
+function oldDet(now) {
+    if (!shadowOk) {
+        return null;
+    }
+    try {
+        return shadowDet(shadow, {now, plan, selfId, live: selfId !== null && selfLive(currentNearby(now), selfId)});
+    } catch (e) {
+        if (!shadowFailed) {
+            shadowFailed = true;
+            console.error('Paceline: the old rotation core (shadow) failed:', e);
+        }
+        return null;
+    }
 }
 
 
@@ -1425,6 +1529,11 @@ function renderRotation(now) {
                  false);
         return;
     }
+    if (reason === 'regroup') {
+        // After the hill, until the order is back (23 Nov 2026): no ▲, a quiet dim line.
+        textLine(frontEl, S.regroupPaused, true);
+        return;
+    }
     if (!view) {
         textLine(frontEl, S.noRotation, true);
         return;
@@ -1572,14 +1681,13 @@ function tableRows() {
 
 
 // The whole rotation, from the rider pulling (before the start from plan #1): me highlighted, the
-// rider pulling in bold, riders not with the group dim. Before the start always, during the ride in
-// captain mode with its table option (tableShown; user, 13 Nov 2026). Then its first row is the
-// front (bold, his time left, or ▲ / ▼ / – while the rotation pauses) and the next rider with the
-// group is set apart from the rest below him; no labels, the place says it. Riders dropped from
-// the group are last, dim, below a thin line (user, 14 Nov 2026); riders sitting out (skipped at
-// the front, order.mjs) with them, in normal running too, so the table and the Next line agree.
-// In chaos (20 Nov 2026, spec 2026-11-20-paceline-chaos-counter section 7): the real puller on
-// top, a dim "Order ≠ plan" in the Next row, the other riders dim in plan order below it.
+// rider pulling in bold. Before the start always, during the ride in captain mode with its table
+// option (tableShown; user, 13 Nov 2026). Then its first row is the front (bold, his time left, or
+// ▲ / ▼ / – while the rotation pauses) and the next rider in the line is set apart from the rest
+// below him; no labels, the place says it. The table keeps the plan order (turnTable, spec
+// 2026-11-23 section 2): a rider hanging behind a gap or sitting out after a skip stays dim in his
+// slot (the first hanging one with the gap's metres); only riders gone from the group are last,
+// dim, below a thin line (user, 14 Nov 2026). The old core's chaos never reaches the windows.
 function renderTable(now) {
     const table = $('#pl-table');
     const {view, reason} = rotationStatus(now);
@@ -1589,14 +1697,13 @@ function renderTable(now) {
         return;
     }
     const started = pullerId != null && reason !== 'still';
-    const rows = rotationTable(plan, {pullerId, presentIds: started ? rot.present : null,
-                                      outIds: orderOutIds(rot.order)});
+    const rows = turnTable(plan, {st: rot, started, selfId});
     const els = tableRows();
     const front = tableFront();
     const offPlan = front && reason === 'chaos' && rows.length > 0;
     const text = {text: S.orderOffPlan};
     const slots = offPlan ? [rows[0], text, ...rows.slice(1)] : front ? [...rows, {...text, slot: true}] : rows;
-    const nextAt = offPlan ? 1 : front ? slots.findIndex((row, i) => i > 0 && row.rider && row.present) : -1;
+    const nextAt = offPlan ? 1 : front ? slots.findIndex((row, i) => i > 0 && row.rider && row.state === 'line') : -1;
     const droppedAt = slots.findIndex(row => row.rider && !row.present);    // they come last, set apart below
     slots.forEach((row, i) => {
         const el = els[i];
@@ -1606,7 +1713,7 @@ function renderTable(now) {
         el.classList.toggle('pl-top', front && (i === 0 || i === nextAt));    // the two to call out, larger
         el.classList.toggle('pl-trow-slot', !!row.slot);    // the empty slot keeps its height (CSS)
         if (!row.rider) {
-            el.classList.remove('pl-me', 'pl-pulling', 'pl-absent', 'pl-offplan');
+            el.classList.remove('pl-me', 'pl-pulling', 'pl-absent', 'pl-hang', 'pl-offplan');
             textLine(el, row.text, true);
             return;
         }
@@ -1614,16 +1721,17 @@ function renderTable(now) {
         c.name.classList.remove('pl-dim');
         el.classList.toggle('pl-me', row.rider.id === selfId);
         el.classList.toggle('pl-pulling', row.pulling);
-        el.classList.toggle('pl-absent', !row.present);
+        el.classList.toggle('pl-absent', row.state === 'gone');
+        el.classList.toggle('pl-hang', row.state === 'hanging' || row.state === 'out');    // dim, in his slot
         el.classList.toggle('pl-offplan', offPlan && i > 1 && row.present);
         setText(c.label, '');    // the place says it (user, 13 Nov 2026)
         setText(c.num, fmt('place', {n: row.number}));
         paint(c.sw, row.rider.color);
         setText(c.name, row.rider.name);
-        let value = pullOf(row.rider);
+        let value = row.gapM === null ? pullOf(row.rider) : {clock: fmt('gapM', {m: row.gapM})};
         if (front && i === 0) {
             value = reason === 'climb' ? {clock: S.dashClimb} : reason === 'descent' ? {clock: S.dashDescent} :
-                reason === 'finish' ? {clock: S.noRotation} : view && row.pulling ? frontClock(view) : value;
+                reason === 'finish' || reason === 'regroup' ? {clock: S.noRotation} : view && row.pulling ? frontClock(view) : value;
         }
         setValue(c, value);
     });
@@ -1783,7 +1891,8 @@ function show(el, on) {
 // The action window: one element that keeps its size; only its content changes. Resting: the
 // countdown and my place (or the dash). READY (the last WARN_S before my pull, also the start
 // rider in the pen) and the pull: target, my power now and the time, the power bar below. While I
-// rest with a Rest window open (it has the countdown) and the option on, the recovery fields; in
+// rest with the option on, the recovery fields: with a Rest window open (it has the countdown) the
+// three picked, without one the countdown as the right field (user, 23 Nov 2026); in
 // chaos (20 Nov 2026) always, with or without a Rest window (which shows "≠"), the default fields
 // (my power now in the middle) when the option is off (display.mjs fieldsShown). While I would show
 // a countdown, a Rest window has it only once it shows it (audit fixes, 20 Nov 2026, W2:
@@ -1819,8 +1928,9 @@ function renderAction(now) {
     const handBack = restHandBack({shows: restShows(alive, {now, selfId: ME}), phase: actPhase, now});
     const restOpen = restTakes({restOpen: windowOpen('rest', now, alive), restShown: restClockOpen(now, alive),
                                 handBack, model: m});
-    if (fieldsShown({recFields: winSettings.recFields, restOpen, model: m, reason})) {
-        renderFields(fieldSlots(winSettings), me, now, reason);
+    const fs = {recFields: winSettings.recFields, restOpen, model: m, reason};
+    if (fieldsShown(fs)) {
+        renderFields(fieldSlots(winSettings), me, now, reason, clockInFields(fs) ? m : null);
         return;
     }
     if (reason === 'chaos') {
@@ -1907,6 +2017,7 @@ function myRider(view) {
 // The rest row: the countdown and my place, READY in its last seconds; the dash says why there is
 // nothing (dim ▲ / ▼, amber ?), quiet means empty; 'blank' shows nothing at all.
 function renderRestRow(m, reason) {
+    $('#pl-act').classList.remove('pl-fields-clock');
     show($('#pl-act-row'), true);
     show($('#pl-act-over'), true);
     show($('#pl-act-tri'), false);
@@ -1916,13 +2027,66 @@ function renderRestRow(m, reason) {
     const dash = $('#pl-act-dash');
     const clockEl = $('#pl-act-clock');
     const placeEl = $('#pl-act-place');
-    const dk = m.kind === 'none' ? dashKind(reason, {started: rot.front.puller != null}) : null;
+    const dk = restDash(m, reason);
     show(dash, m.kind === 'none' && dk !== 'none');
     if (m.kind === 'none') {
-        setText(dash, dk === 'climb' ? S.dashClimb : dk === 'descent' ? S.dashDescent :
-            dk === 'chaos' ? S.dashChaos : dk === 'unknown' ? S.dashUnknown : S.noRotation);
+        setText(dash, dashText(dk));
         dash.classList.toggle('pl-warn', dk === 'unknown');
     }
+    const resting = m.kind === 'rest';
+    const standing = resting && !!m.standing;
+    clockEl.classList.toggle('pl-standing', standing);
+    const corr = renderOverLine(m, reason, dk);
+    show(clockEl, resting);
+    show(placeEl, resting && m.place !== null);
+    if (!resting) {
+        return;
+    }
+    const ready = m.next || m.timeS === 0;
+    // "26s": the "s" half size, set low like the units (user, 13 Nov 2026); "5:47" and READY plain.
+    const text = ready ? S.ready : restClock(m.timeS);
+    const secs = !ready && text.endsWith(S.secUnit);
+    setText($('#pl-act-cnum'), (standing ? '\u2265' : '') + (secs ? text.slice(0, -S.secUnit.length) : text));
+    setText($('#pl-act-cunit'), secs ? S.secUnit : '');
+    clockEl.classList.toggle('pl-warn', !!m.warn);
+    snapFade(m, $('#pl-act-cnum'), corr, ready);
+    if (m.place !== null) {
+        setText(placeEl, fmt('place', {n: m.place}));
+    }
+}
+
+
+// The dash's kind while there is no countdown (model 'none'), else null.
+function restDash(m, reason) {
+    return m.kind === 'none' ? dashKind(reason, {started: rot.front.puller != null}) : null;
+}
+
+
+function dashText(dk) {
+    return dk === 'climb' ? S.dashClimb : dk === 'descent' ? S.dashDescent :
+        dk === 'chaos' ? S.dashChaos : dk === 'unknown' ? S.dashUnknown : S.noRotation;
+}
+
+
+// After a snap (clock.mjs) the new number fades in once and its explanation with it: no
+// movement, no colour, no values in between (expert panel, 18 Nov 2026).
+function snapFade(m, numEl, corr, ready) {
+    if (m.fadeAt != null && m.fadeAt !== fadedAt) {
+        fadedAt = m.fadeAt;
+        if (!ready) {
+            fadeIn(numEl, 0.25, 400);
+        }
+        if (corr) {
+            fadeIn($('#pl-act-over'), 0, 200);
+        }
+    }
+}
+
+
+// The status line under the countdown (with the fields, in the bar's place): a gap, the clock's
+// correction, the wheel to drop in behind, the standing clock's overrun. Returns the correction
+// shown (or null).
+function renderOverLine(m, reason, dk) {
     const resting = m.kind === 'rest';
     // In chaos (20 Nov 2026) I still rest behind the dash: the gap line shows under it as under
     // the countdown.
@@ -1930,7 +2094,6 @@ function renderRestRow(m, reason) {
     // The standing clock (expert panel, 13 Nov 2026): the number stays, dimmed with "≥" (my pull is at
     // least that far away), and under it how long the puller is over his plan, "+12". No blinking.
     const standing = resting && !!m.standing;
-    clockEl.classList.toggle('pl-standing', standing);
     // The same line carries a gap in the line (user, 13 Nov 2026): mine first (amber, I must close
     // it), then the standing clock, then someone else's gap (dim, the puller deals with it). A gap
     // that is closing comes after the standing clock too (green when mine or critical).
@@ -1978,32 +2141,7 @@ function renderRestRow(m, reason) {
     if (cueRider && lbl.scrollWidth > lbl.clientWidth) {
         show(lbl, false);
     }
-    show(clockEl, resting);
-    show(placeEl, resting && m.place !== null);
-    if (!resting) {
-        return;
-    }
-    const ready = m.next || m.timeS === 0;
-    // "26s": the "s" half size, set low like the units (user, 13 Nov 2026); "5:47" and READY plain.
-    const text = ready ? S.ready : restClock(m.timeS);
-    const secs = !ready && text.endsWith(S.secUnit);
-    setText($('#pl-act-cnum'), (standing ? '\u2265' : '') + (secs ? text.slice(0, -S.secUnit.length) : text));
-    setText($('#pl-act-cunit'), secs ? S.secUnit : '');
-    clockEl.classList.toggle('pl-warn', !!m.warn);
-    // After a snap (clock.mjs) the new number fades in once and its explanation with it: no
-    // movement, no colour, no values in between (expert panel, 18 Nov 2026).
-    if (m.fadeAt != null && m.fadeAt !== fadedAt) {
-        fadedAt = m.fadeAt;
-        if (!ready) {
-            fadeIn($('#pl-act-cnum'), 0.25, 400);
-        }
-        if (corr) {
-            fadeIn(over, 0, 200);
-        }
-    }
-    if (m.place !== null) {
-        setText(placeEl, fmt('place', {n: m.place}));
-    }
+    return corr;
 }
 
 
@@ -2110,9 +2248,11 @@ const KEEP = '\u00a0';
 // left, my power now in the middle (the marker's value, in its zone colour once the pull has
 // settled; neutral in READY), the time right (READY, the pull's seconds, over time "−4" amber).
 function renderTriple(m, me, now) {
+    $('#pl-act').classList.remove('pl-fields-clock');
     show($('#pl-act-row'), false);
     show($('#pl-act-over'), false);
     show($('#pl-act-tri'), true);
+    show($('#pl-act-tplace'), false);
     const weight = pickWeight(liveWeight(), me?.weight);
     const hasTarget = m.watts !== null && m.watts !== undefined;
     // No weight at all: the target and the "now" number are both watts. With the plan's pull_wkg
@@ -2131,7 +2271,7 @@ function renderTriple(m, me, now) {
     nowEl.dataset.zone = zone ?? '';
     nowEl.classList.toggle('pl-dim', nowText === null);
     const timeEl = $('#pl-act-time');
-    timeEl.classList.remove('pl-dim');    // a missing recovery field there before
+    timeEl.classList.remove('pl-dim', 'pl-standing');    // a missing recovery field or the countdown there before
     if (m.kind === 'armed') {
         setText(timeEl, S.ready);
         setText($('#pl-act-tunit'), '');
@@ -2170,10 +2310,14 @@ function nowUnit(weight) {
 // my pull starts), a missing value is the dim "–". The middle one is the pull's "now" cell, so it
 // follows "Smaller middle field". No bar; in chaos a gap the rest line would show goes into the
 // bar's place (fieldsGapBand), so an Action-only rider does not lose it; outside chaos the open
-// Rest window shows it.
-function renderFields(slots, me, now, reason) {
+// Rest window shows it, or this window's status line in the bar's place (clockModel).
+// clockModel (user, 23 Nov 2026): the model while the countdown is mine to show (no Rest window has
+// it, display.mjs clockInFields): the right field is then the countdown with my place under it (or
+// the dash), and the status line takes the bar's place. null: the three fields picked.
+function renderFields(slots, me, now, reason, clockModel = null) {
+    $('#pl-act').classList.toggle('pl-fields-clock', !!clockModel);
     show($('#pl-act-row'), false);
-    show($('#pl-act-over'), false);
+    show($('#pl-act-over'), !!clockModel);
     show($('#pl-act-tri'), true);
     const entry = selfEntry(currentNearby(now));
     const weight = pickWeight(liveWeight(), me?.weight);
@@ -2190,15 +2334,43 @@ function renderFields(slots, me, now, reason) {
         const num = $(cells[i][0]);
         setText(num, f ? f.num ?? S.noRotation : KEEP);
         num.classList.toggle('pl-dim', !!f && f.num === null);
-        num.classList.remove('pl-warn');
+        num.classList.remove('pl-warn', 'pl-standing');
         num.dataset.zone = '';    // no target in recovery: no colour
         setText($(cells[i][1]), f ? f.unit : KEEP);
     });
+    show($('#pl-act-tplace'), false);
     const bar = $('#pl-act-bar');
     bar.classList.add('pl-off', 'pl-neutral');
     show($('#pl-bar-marker'), false);
+    if (clockModel) {
+        renderClockField(clockModel, reason);
+        return;
+    }
     const b = fieldsGapBand(g, reason);
     renderGapBand(!!b, g, b?.text);
+}
+
+
+// The countdown as the right field (user, 23 Nov 2026): the number where READY and my pull's time
+// come next, my place "#2" under it (no "s"); the dash (dim ▲ / ▼, amber ?) in its place when there is none. The
+// status line as under the big countdown, in the bar's place.
+function renderClockField(m, reason) {
+    const num = $('#pl-act-time');
+    const dk = restDash(m, reason);
+    const c = clockField(m);
+    setText(num, c ? c.num : dk === 'none' ? KEEP : dashText(dk));
+    num.classList.toggle('pl-dim', !c && dk !== 'unknown');
+    num.classList.toggle('pl-warn', c ? !!m.warn : dk === 'unknown');
+    num.classList.toggle('pl-standing', !!c && !!m.standing);
+    setText($('#pl-act-tunit'), c ? c.unit : KEEP);
+    const place = $('#pl-act-tplace');
+    show(place, !!c?.place);
+    setText(place, c?.place ?? '');
+    renderGapBand(false);
+    const corr = renderOverLine(m, reason, dk);
+    if (c) {
+        snapFade(m, num, corr, false);
+    }
 }
 
 
@@ -2227,7 +2399,7 @@ function tick() {
         const seen = gateEv(list, ev, {gate, now: lastStepAt});
         gate = gateStep(gate, {now: lastStepAt, ev: seen});
         gateSg = isTtt(seen) ? seen.sgId : undefined;
-        terrainStep(ev, lastStepAt);
+        terrainStep(ev, seen, lastStepAt);
     } catch(e) {
         console.error('Paceline: event check failed', e);
     }

@@ -26,6 +26,11 @@
 //   CHAOS_FROM_S to CHAOS_TO_S.
 // - With cdOld (seconds): the recording holds the fixed rule's countdown as a shadow (det.cdOld,
 //   since 0.3.4-beta.5), that many seconds above my shown clock while it counts, else null.
+// - With shadow: a recording of the turn-clock version (23 Nov 2026): the old core runs beside the
+//   windows' core and is recorded as det.old = {puller, since, frontId, reason, chaos, out, cd}.
+//   It copies the live fields (the chaos of the 'live' option, the countdown of cdOld, else
+//   cd = my shown clock) and drops det.order and det.cdOld; the windows' reason never says 'chaos'
+//   (the new core has no chaos), so the live chaos state is only in det.old.
 // - With easeOffS (seconds): the front rider eases off to 100 W for the last that many seconds of
 //   each 30 s pull while still in front (the plain rotation; not combined with swap or chaos), so
 //   the rider before me eases off (T0) before his stint ends. The pulls stay the same.
@@ -83,7 +88,7 @@ function row(id, {self = false, dist, gap, draft, speed, ts, power = draft ? 250
 
 
 export function makeRecording({stripE = false, afterLine = false, draftIntoDrop = false, swap = false, emilLeavesS = null,
-                               chaos = false, cdOld = null, easeOffS = 0} = {}) {
+                               chaos = false, cdOld = null, easeOffS = 0, shadow = false} = {}) {
     const front = s => frontAt(s, {swap, chaos});
     const switchS = chaos ? Infinity : SWITCH_S;
     const head = {kind: 'paceline-recording', v: 1, sessionId: String(T0), startedAt: T0, planSig: PLAN1.sig,
@@ -168,6 +173,17 @@ export function makeRecording({stripE = false, afterLine = false, draftIntoDrop 
             tick.det.order = {chaos: liveChaos, out: []};
             if (liveChaos && !finish) {
                 tick.det.reason = 'chaos';
+            }
+        }
+        if (shadow) {
+            // The old core's det beside the windows' own: cd is the countdown it would show.
+            tick.det.old = {puller: tick.det.puller, since: tick.det.since, frontId: tick.det.frontId, reason: tick.det.reason,
+                            chaos: liveChaos, out: [],
+                            cd: act.k === 'rest' || act.k === 'next' ? {t: act.t + (cdOld ?? 0), standing: false} : null};
+            delete tick.det.order;
+            delete tick.det.cdOld;
+            if (tick.det.reason === 'chaos') {
+                tick.det.reason = null;
             }
         }
         if (k === 0) {

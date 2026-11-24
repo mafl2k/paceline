@@ -135,7 +135,7 @@ export function postedClub(req, res, ctx, cid, posted) {
 
 
 // What was done, as a one-shot flash on the page of `place`: 303 there (POST -> 303 -> GET). `extra`
-// goes into the flash ({undo}: a change of the live plan offers Undo in the panel's head).
+// goes into the flash.
 // `extra.anchor` (a string, an element id: a race's 'race-<date>', a plan's block) is the 303's
 // fragment and stays out of the flash. A team place with a selection goes to it (its query) and
 // lands on the panel (#panel), whose head shows the flash.

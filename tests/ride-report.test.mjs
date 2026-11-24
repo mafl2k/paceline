@@ -11,8 +11,9 @@ import {parseRecording, readPlan, parsePlanArg} from '../tools/ride-report/load.
 import {renderMarkdown} from '../tools/ride-report/render.mjs';
 import {frontPerTick, markSwaps, turnsOf, groundTruth} from '../tools/ride-report/checks/pulls.mjs';
 import {recoveryPlanS, stintEaseOff} from '../tools/ride-report/checks/countdown.mjs';
-import {chaosPhases, liveChaosAt, replayChaosAt} from '../tools/ride-report/checks/puller.mjs';
+import {chaosPhases, liveChaosAt, replayChaosAt, pausedAt} from '../tools/ride-report/checks/puller.mjs';
 import {simulateView, judgeView, viewsCheck, MODELS} from '../tools/ride-report/checks/views.mjs';
+import {trafficCheck} from '../tools/ride-report/checks/traffic.mjs';
 import {makeRide} from '../tools/ride-report/ride.mjs';
 import {replay} from '../tools/ride-report/replay.mjs';
 import {run, parseArgs, readRecording} from '../tools/ride-report/report.mjs';
@@ -302,6 +303,30 @@ test('4 countdown: the shadow against T0', () => {
     assert.equal(none, null);
     assert.deepEqual(live, base);
     assert.match(r.verdict, /gegen T0 \|Fehler\| Median 0 s \(fest 5 s\)/);
+});
+
+
+test('4 countdown: the shadow series reads det.old.cd', () => {
+    const old = report({cdOld: 5}).countdown;
+    const r = report({cdOld: 5, shadow: true}).countdown;
+    const {source, ...shadow} = r.t0.shadow;
+    assert.equal(source, 'det.old.cd');
+    assert.deepEqual(shadow, old.t0.shadow);
+    // The live part is as without the shadow.
+    assert.deepEqual({...r.t0, shadow: null}, {...old.t0, shadow: null});
+    // Older recordings (det.cdOld) say nothing of a source.
+    assert.equal('source' in old.t0.shadow, false);
+    // A recording of this version without a countdown in det.old has no shadow.
+    assert.equal(report({shadow: true}).countdown.t0.shadow?.source, 'det.old.cd');
+    const none = M.makeRecording({shadow: true}).split('\n').map(l => {
+        if (!l.startsWith('{"ts"')) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        t.det.old.cd = null;
+        return JSON.stringify(t);
+    }).join('\n');
+    assert.equal(publicResult(analyse(none, {plans: P2}).result).countdown.t0.shadow, null);
 });
 
 
@@ -602,6 +627,175 @@ test('3 chaos phases: the live state (det.order) gives its own phase', () => {
 });
 
 
+test('3 chaos phases: with det.old the live phase comes from det.old.chaos', () => {
+    // The turn-clock version records the old core's chaos in det.old only; the windows' own reason
+    // never says 'chaos' and det.order is gone.
+    const text = M.makeRecording({chaos: 'live', shadow: true});
+    const ticks = text.trim().split('\n').slice(1).map(l => JSON.parse(l));
+    assert.ok(ticks.every(t => !('order' in t.det) && t.det.reason !== 'chaos'));
+    assert.ok(ticks.some(t => t.det.old.chaos === true));
+    const L = report({chaos: 'live', shadow: true}, []).puller.chaos;
+    assert.deepEqual([L.live, L.liveRecorded], [[{from: S(M.CHAOS_FROM_S), to: S(M.CHAOS_TO_S - 1), s: 70, endedBy: 'order'}], true]);
+    assert.deepEqual(L.replay, C.puller.chaos.replay);
+    assert.ok(L.judged.live.s > 60, JSON.stringify(L.judged));
+    // The same recording without det.old has no live phase: the windows' det alone does not say.
+    const bare = text.split('\n').map(l => {
+        if (!l.startsWith('{"ts"')) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        delete t.det.old;
+        return JSON.stringify(t);
+    }).join('\n');
+    const B = publicResult(analyse(bare, {plans: []}).result).puller.chaos;
+    assert.deepEqual([B.live, B.liveRecorded], [[], false]);
+});
+
+
+test('3 chaos phases: liveChaosAt: det.old wins over det.order and reason', () => {
+    assert.equal(liveChaosAt({old: {chaos: true}, order: {chaos: false, out: []}, reason: 'climb'}), true);
+    assert.equal(liveChaosAt({old: {chaos: false}, order: {chaos: true, out: []}, reason: 'chaos'}), false);
+    assert.equal(liveChaosAt({old: {chaos: false}, reason: 'chaos'}), false);
+    // A failed shadow step (det.old null, the key stays): no chaos known, nothing is read from the rest.
+    assert.equal(liveChaosAt({old: null, order: {chaos: true, out: []}}), false);
+    assert.equal(liveChaosAt({old: null, reason: 'climb'}), false);
+});
+
+
+test('3 pausedAt: old recordings keep det.hill / det.climb; the turn clocks pause only while the climb display is on', () => {
+    // Old shape (no `old`, no `turn`): today's rule, unchanged.
+    assert.equal(pausedAt({hill: 'pause'}), true);
+    assert.equal(pausedAt({hill: 'flag'}), false);
+    assert.equal(pausedAt({hill: null, climb: true}), false);
+    assert.equal(pausedAt({climb: true}), true);
+    assert.equal(pausedAt({climb: false}), false);
+    assert.equal(pausedAt(null), false);
+    // New shape: a real hill alone is no pause, the display (det.turn.disp) is.
+    const disp = {why: 'front', at: 1};
+    assert.equal(pausedAt({hill: 'pause', climb: true, old: null, turn: {disp: null}}), false);
+    assert.equal(pausedAt({hill: 'pause', old: {puller: 1}, turn: {disp: null}}), false);
+    assert.equal(pausedAt({hill: 'pause', old: {puller: 1}, turn: {disp}}), true);
+    assert.equal(pausedAt({hill: null, old: null, turn: {disp}}), true);
+    // The key marks the shape: det.turn alone, or `old` without det.turn (no display known).
+    assert.equal(pausedAt({hill: 'pause', turn: {disp: null}}), false);
+    assert.equal(pausedAt({hill: 'pause', old: null}), false);
+});
+
+
+// A real hill from race second 200 to 230 (det.hill 'pause'); with `dispFrom..dispTo` the turn clocks'
+// climb display is on (new shape), in the old shape the hill alone is the pause.
+function hillRecording({shadow, dispFrom = 210, dispTo = 220}) {
+    return edited((t, s) => {
+        if (s >= 200 && s <= 230) {
+            t.det.hill = 'pause';
+            t.det.climb = true;
+            t.det.reason = s >= dispFrom && s <= dispTo && shadow ? 'climb' : t.det.reason;
+        }
+        if (shadow) {
+            t.det.turn = {change: null, disp: s >= dispFrom && s <= dispTo ? {why: 'front', at: S(dispFrom)} : null,
+                          hanging: [], out: []};
+        }
+    }, {shadow});
+}
+
+
+test('3 pauses: a recording of the turn clocks lists only the climb display, not every real hill', () => {
+    const P = publicResult(analyse(hillRecording({shadow: true}), {plans: P2}).result).puller;
+    assert.deepEqual(P.pauses.map(p => [p.from, p.s, p.kind]), [[S(210), 11, 'Anstieg']]);
+    assert.equal(P.excluded.pause, 11);
+    // No display at all on the hill: no pause, the hill's seconds are judged.
+    const none = publicResult(analyse(hillRecording({shadow: true, dispFrom: 999, dispTo: 999}), {plans: P2}).result).puller;
+    assert.deepEqual(none.pauses, []);
+    assert.equal(none.excluded.pause, 0);
+    // A display on a descent is listed as Abfahrt.
+    const down = publicResult(analyse(edited((t, s) => {
+        if (s >= 200 && s <= 230) {
+            t.det.hill = 'pause';
+        }
+        if (s >= 210 && s <= 220) {
+            t.det.descent = true;
+        }
+        t.det.turn = {change: null, disp: s >= 210 && s <= 220 ? {why: 'gap', at: S(210)} : null, hanging: [], out: []};
+    }, {shadow: true}), {plans: P2}).result).puller;
+    assert.deepEqual(down.pauses.map(p => [p.from, p.s, p.kind]), [[S(210), 11, 'Abfahrt']]);
+});
+
+
+test('3 pauses: an old recording (no det.old, no det.turn) still pauses on every real hill', () => {
+    const P = publicResult(analyse(hillRecording({shadow: false}), {plans: P2}).result).puller;
+    assert.deepEqual(P.pauses.map(p => [p.from, p.s, p.kind]), [[S(200), 31, 'Anstieg']]);
+    assert.equal(P.excluded.pause, 31);
+});
+
+
+test('3 replay fidelity compares the shadow (det.old) with the replay', () => {
+    // The windows' puller (the new core) is Cleo all along; the shadow keeps the live puller the old
+    // core had. The replay runs the old core: fidelity follows det.old, the live column det.puller.
+    const base = report({shadow: true}, []).puller;
+    const text = M.makeRecording({shadow: true}).split('\n').map(l => {
+        if (!l.startsWith('{"ts"')) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        t.det.puller = M.IDS.cleo;
+        t.det.frontId = M.IDS.cleo;
+        return JSON.stringify(t);
+    }).join('\n');
+    const x = publicResult(analyse(text, {plans: []}).result).puller;
+    assert.equal(base.replay.fidelity[0].frontPct, 100);
+    assert.ok(base.replay.fidelity[0].pullerPct > 50, JSON.stringify(base.replay.fidelity));
+    assert.deepEqual(x.replay.fidelity, base.replay.fidelity);
+    // The live column is the new core: Cleo all along agrees a quarter of the time.
+    assert.ok(x.live.agreePct < 40 && base.live.agreePct > 90, `${x.live.agreePct} ${base.live.agreePct}`);
+    // Without det.old the top-level fields are the old core's, as in older recordings.
+    const old = report({}, []).puller;
+    assert.deepEqual(old.replay.fidelity, base.replay.fidelity);
+});
+
+
+test('3 shadow failed: det.old null keeps the new-core shape (every tick, or a single one)', () => {
+    const withOld = (text, f) => text.split('\n').map(l => {
+        if (!l.startsWith('{"ts"')) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        f(t);
+        return JSON.stringify(t);
+    }).join('\n');
+    const text = M.makeRecording({chaos: 'live', cdOld: 5, shadow: true});
+    const run = x => publicResult(analyse(x, {plans: []}).result);
+    const base = run(text);
+    // Every tick: the key `old` is there and null. Still the new core's recording.
+    const all = run(withOld(text, t => {
+        t.det.old = null;
+    }));
+    assert.equal(all.puller.live.core, 'new');
+    assert.equal(all.puller.chaos.liveRecorded, true);
+    assert.deepEqual(all.puller.chaos.live, []);
+    assert.deepEqual(all.puller.replay.fidelity, []);
+    assert.equal(all.countdown.t0.shadow, null);
+    const md = renderMarkdown(publicResult(analyse(withOld(text, t => {
+        t.det.old = null;
+    }), {plans: []}).result));
+    assert.match(md, /live, neuer Kern \(det\.puller\)/);
+    assert.doesNotMatch(md, /kein det\.order/);
+    // A single failed tick: left out of the fidelity, the rest as before.
+    let k = 0;
+    const one = run(withOld(text, t => {
+        if (t.det.puller !== null && ++k === 50) {
+            t.det.old = null;
+        }
+    }));
+    assert.equal(k > 50, true);
+    assert.equal(one.puller.live.core, 'new');
+    assert.equal(one.puller.chaos.liveRecorded, true);
+    const [b, o] = [base.puller.replay.fidelity[0], one.puller.replay.fidelity[0]];
+    assert.equal(o.ticks, b.ticks - 1);
+    assert.equal(o.frontPct, 100);
+    assert.deepEqual(one.puller.chaos.live, base.puller.chaos.live);
+});
+
+
 test('3 chaos phases: how a phase ends (order, plan, finish mode, end)', () => {
     const rows = (flags, {finishFrom = Infinity, planFrom = Infinity} = {}) =>
         [...flags].map((f, i) => ({ts: i * 1000, chaos: f === 'x', finish: i >= finishFrom, sig: i >= planFrom ? 'B' : 'A'}));
@@ -701,15 +895,26 @@ test('report.md: the countdown against T0', () => {
 });
 
 
+test('report.md: with det.old the live column and the shadow line name the cores', () => {
+    const md = renderMarkdown(report({cdOld: 5, shadow: true}));
+    assert.match(md, /\| live, neuer Kern \(det\.puller\) \|/);
+    assert.match(md, /Schatten: alter Kern \(det\.old\.cd\): /);
+    assert.doesNotMatch(md, /det\.cdOld/);
+    const older = renderMarkdown(report({cdOld: 5}));
+    assert.match(older, /\| live \(det\.puller\) \|/);
+    assert.doesNotMatch(older, /neuer Kern|alter Kern/);
+});
+
+
 test('a recording with only its head line: no ticks, no crash', () => {
     const head = M.makeRecording().split('\n')[0] + '\n';
     const r = publicResult(analyse(head).result);
     assert.equal(r.overview.verdict, 'keine Ticks: die Aufzeichnung hat nur die Kopfzeile');
-    for (const k of ['pulls', 'puller', 'countdown', 'gaps', 'finish', 'upload', 'views']) {
+    for (const k of ['pulls', 'puller', 'countdown', 'gaps', 'finish', 'upload', 'views', 'traffic']) {
         assert.equal(r[k].verdict, 'entfällt (keine Ticks)');
     }
     const md = renderMarkdown(r);
-    assert.equal((md.match(/^## \d\. /gm) || []).length, 8);
+    assert.equal((md.match(/^## \d\. /gm) || []).length, 9);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ride-report-'));
     try {
         fs.writeFileSync(path.join(dir, 'head.jsonl'), head);
@@ -726,6 +931,133 @@ test('6 finish: quiet after the line, or the engine still running', () => {
     assert.deepEqual([f.afterLine.pullerChanges, f.afterLine.gapWarningTicks, f.afterLine.gapMaxM], [1, 2, 31]);
     assert.ok(f.afterLine.finishOffTicks > 0);
     assert.match(f.verdict, /Zielmodus aus \d+ m nach der Linie; danach \d+ s Engine aktiv, 1 Zieherwechsel, 2 s Lückenwarnung \(bis 31 m\)/);
+});
+
+
+// A recording whose ticks carry traffic: fn(raceSecond, tick) gives a tick's traffic (undefined: none).
+function withTraffic(fn, opts = {}) {
+    return M.makeRecording(opts).trim().split('\n').map((l, i) => {
+        if (i === 0) {
+            return l;
+        }
+        const t = JSON.parse(l);
+        for (const r of t.riders) {       // as the recorder writes them: the plan riders carry inPlan
+            if (Object.values(M.IDS).slice(0, 5).includes(r.id)) {
+                r.inPlan = true;
+            }
+        }
+        const traffic = fn(Math.round((t.ts - M.T0) / 1000) - M.PEN_S, t);
+        if (traffic !== undefined) {
+            t.traffic = traffic;
+            t.trafficEpoch = 1;
+        }
+        return JSON.stringify(t);
+    }).join('\n') + '\n';
+}
+const trafficRow = (gap, n = 1) => ({n, gap, speed: 44, power: 250, draft: 90, sg: false});
+const planGaps = t => t.riders.filter(r => Object.values(M.IDS).slice(0, 4).includes(r.id)).map(r => r.gapDistance);
+const trafficOf = text => {
+    const ride = makeRide(parseRecording(text));
+    return trafficCheck(ride, {from: S(0), to: S(60)});
+};
+
+
+test('9 traffic: in front of the team, inside the line, none recorded', () => {
+    const text = withTraffic((s, t) => {
+        if (s >= 1 && s <= 10) {
+            return [trafficRow(-30)];
+        }
+        if (s >= 11 && s <= 15) {
+            const g = planGaps(t);
+            return [trafficRow(Math.round((Math.min(...g) + Math.max(...g)) / 2))];
+        }
+        return s >= 16 && s <= 20 ? [] : undefined;
+    });
+    const r = trafficOf(text);
+    assert.equal(r.recorded, true);
+    assert.equal(r.ahead.s, 10);
+    assert.equal(r.inLine.s, 5);
+    assert.equal(r.maxNear, 1);
+    assert.equal(r.raceS, 20);                  // only the ticks with a traffic array are the base
+    assert.deepEqual([r.ahead.pct, r.inLine.pct], [50, 25]);
+    assert.equal(r.verdict, 'Verkehr vor dem Team in 50 % der Rennzeit, in der Linie in 25 %');
+    const old = trafficOf(M.makeRecording());
+    assert.equal(old.recorded, false);
+    assert.match(old.verdict, /kein Verkehr aufgezeichnet/);
+    // the section: heading, verdict and the two table rows (through the whole analysis)
+    const md = renderMarkdown(publicResult(analyse(text, {plans: P2}).result));
+    assert.match(md, /## 9\. Verkehr\n\n\*\*Ergebnis:\*\* Verkehr vor dem Team in \d+ % der Rennzeit, in der Linie in \d+ %/);
+    assert.match(md, /\| vor dem Team \| \d+ \| \d+ \|\n\| in der Linie \| \d+ \| \d+ \|/);
+    assert.match(renderMarkdown(R), /## 9\. Verkehr\n\n\*\*Ergebnis:\*\* kein Verkehr aufgezeichnet \(vor 0\.3\.5\)/);
+    assert.deepEqual([old.raceS, old.ahead.s, old.inLine.s, old.maxNear], [0, 0, 0, 0]);
+    // traffic: null (a failed tick) is no traffic array
+    assert.equal(trafficOf(withTraffic(() => null)).recorded, false);
+});
+
+
+test('9 traffic: a rider behind the team is neither ahead nor in the line; the group is chained from me', () => {
+    const behind = trafficOf(withTraffic(s => (s >= 1 && s <= 10 ? [trafficRow(50)] : undefined)));
+    assert.deepEqual([behind.recorded, behind.ahead.s, behind.inLine.s, behind.maxNear], [true, 0, 0, 1]);
+    // Emil (P2 from +240 s) rides 400 m back: not chained to me (steps over 30 m), so a traffic rider
+    // at +200 m is behind the group, not inside a line stretching to Emil.
+    const ride = makeRide(parseRecording(withTraffic(s => (s >= 250 && s <= 255 ? [trafficRow(200)] : undefined))),
+                          {extraPlans: [{sig: 'P2TEST', plan: M.PLAN2}]});
+    const e = trafficCheck(ride, {from: S(240), to: S(300)});
+    assert.deepEqual([e.recorded, e.ahead.s, e.inLine.s, e.maxNear], [true, 0, 0, 1]);
+});
+
+
+test('9 traffic: a row that is a recorded non-plan rider (local export) is not counted twice', () => {
+    // The bench rider is no plan rider and sits at gap +30 - 2k m; the traffic holds him too.
+    const dup = withTraffic((s, t) => {
+        if (s < 1 || s > 10) {
+            return undefined;
+        }
+        const bench = t.riders.find(r => r.id === M.IDS.bench);
+        return [trafficRow(Math.round(bench.gapDistance)), trafficRow(-30, 2)];
+    });
+    const r = trafficOf(dup);
+    assert.equal(r.maxNear, 1);                 // the duplicate is skipped, the anonymous rider stays
+    assert.equal(r.ahead.s, 10);
+    const only = trafficOf(withTraffic((s, t) => (s >= 1 && s <= 10 ?
+        [trafficRow(Math.round(t.riders.find(x => x.id === M.IDS.bench).gapDistance))] : undefined)));
+    assert.deepEqual([only.recorded, only.maxNear, only.ahead.s, only.inLine.s], [true, 0, 0, 0]);
+});
+
+
+test('9 traffic: the duplicate rule is the recorder\'s (not me, not inPlan), not the analysis plan\'s', () => {
+    const benchGap = t => Math.round(t.riders.find(x => x.id === M.IDS.bench).gapDistance);
+    const dup = withTraffic((s, t) => (s >= 1 && s <= 10 ? [trafficRow(benchGap(t))] : undefined));
+    // --plan-all names the fallback teammate (no inPlan) in the plan: his copy in traffic is still his.
+    const planBench = {...M.PLAN1, sig: 'PB', riders: [...M.PLAN1.riders, {id: M.IDS.bench, name: 'Benno B', pos: 4, pullS: 30, ftp: 300}]};
+    const ride = makeRide(parseRecording(dup), {planAll: {sig: 'PB', plan: planBench}});
+    const r = trafficCheck(ride, {from: S(0), to: S(60)});
+    assert.deepEqual([r.recorded, r.maxNear, r.ahead.s, r.inLine.s], [true, 0, 0, 0]);
+    // An inPlan row at the same gap is no copy of a traffic row: the real traffic rider stays.
+    const same = withTraffic((s, t) => {
+        if (s < 1 || s > 10) {
+            return undefined;
+        }
+        const alma = t.riders.find(x => x.id === M.IDS.alma);
+        assert.equal(alma.inPlan, true);
+        return [trafficRow(Math.round(alma.gapDistance))];
+    });
+    const t = trafficOf(same);
+    assert.equal(t.maxNear, 1);
+});
+
+
+test('9 traffic: ticks with an unknown plan code are not in the base', () => {
+    const text = withTraffic((s, t) => {
+        if (s >= 1 && s <= 10) {
+            t.det.planSig = 'NOPLAN';          // no plan for this code: skipped like pulls and puller do
+        }
+        return s >= 1 && s <= 20 ? [trafficRow(-30)] : undefined;
+    });
+    const r = trafficOf(text);
+    assert.equal(r.raceS, 10);                 // the 10 ticks with a known plan
+    assert.equal(r.ahead.s, 10);
+    assert.equal(r.maxNear, 1);
 });
 
 
@@ -784,15 +1116,15 @@ test('an old recording without det and shown: the checks say what is missing', (
     assert.equal(r.gaps.shown, null);
     assert.equal(r.pulls.pulls.length > 10, true);    // the ground truth needs only the rows
     const md = renderMarkdown(r);
-    assert.equal((md.match(/^## \d\. /gm) || []).length, 8);
+    assert.equal((md.match(/^## \d\. /gm) || []).length, 9);
 });
 
 
-test('report.md: eight sections with a verdict each', () => {
+test('report.md: nine sections with a verdict each', () => {
     const md = renderMarkdown(R);
     const heads = md.match(/^## \d\. .*/gm);
-    assert.deepEqual(heads.map(h => h.slice(3, 5)), ['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.']);
-    assert.equal((md.match(/^\*\*Ergebnis:\*\* /gm) || []).length, 8);
+    assert.deepEqual(heads.map(h => h.slice(3, 5)), ['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.']);
+    assert.equal((md.match(/^\*\*Ergebnis:\*\* /gm) || []).length, 9);
 });
 
 
@@ -809,7 +1141,7 @@ test('CLI: arguments, report.md and report.json', () => {
         const code = run([path.join(dir, 'rec.jsonl'), '--plan', `P2TEST=${path.join(dir, 'p2.json')}`, '--out', path.join(dir, 'out')],
                          {log: x => log.push(x)});
         assert.equal(code, 0);
-        assert.equal(log.length, 9);
+        assert.equal(log.length, 10);
         const json = JSON.parse(fs.readFileSync(path.join(dir, 'out', 'report.json'), 'utf8'));
         assert.equal(json.kind, 'paceline-ride-report');
         assert.equal(json.file, null);

@@ -108,7 +108,7 @@ test('v3: parameters', async t => {
     const joined = ['bad!', ...unknown, '__proto__', KF];
     assert.equal(joined.length, 12);
     let out = await s.get('1009', {mod: MOD, joined: joined.join(',')});
-    assert.deepEqual(out.circles, [{id: KF, name: 'Kettenfett RC', lists: false}]);
+    assert.deepEqual(out.circles, [{id: KF, name: 'Kettenfett RC', lists: false, teams: []}]);
     // an 11th valid id is not read
     out = await s.get('1009', {mod: MOD, joined: [...unknown, 'a000000009', KF].join(',')});
     assert.deepEqual(out.circles, []);
@@ -173,16 +173,45 @@ test('v3: circles', async t => {
 
     const out = await s.get('1001', {mod: MOD, joined: [KF, 'j5n7r2t8w3', 'x9v2c7m4q1', 'z0000000z0', 'n4p6q8r2s5'].join(',')});
     assert.deepEqual(out.circles, [
-        {id: SP, name: 'Spokesmen CC', lists: true},
-        {id: KF, name: 'Kettenfett RC', lists: true},
-        {id: 'j5n7r2t8w3', name: 'Kettenfett Juniors', lists: false},
-        {id: 'h6r3w8n5d2', name: 'Kettenfett Masters', lists: true},
+        {id: SP, name: 'Spokesmen CC', lists: true, teams: ['Spokes']},
+        {id: KF, name: 'Kettenfett RC', lists: true, teams: ['Rollers']},
+        {id: 'j5n7r2t8w3', name: 'Kettenfett Juniors', lists: false, teams: []},
+        {id: 'h6r3w8n5d2', name: 'Kettenfett Masters', lists: true, teams: ['Masters']},
         {id: 'x9v2c7m4q1', gone: true},
     ]);
     // nothing joined: only the listing clubs
     const none = await s.get('1001', {mod: MOD});
     assert.deepEqual(none.circles.map(c => c.id), [SP, KF, 'h6r3w8n5d2']);
     assert.ok(none.circles.every(c => c.lists === true));
+});
+
+
+test('v3: circles name the teams whose live sheet has the rider among its riders, not the bench', async t => {
+    const c = club({
+        teams: {
+            rollers: team('Rollers', '19:30', 'ra0001'), cogs: team('Cogs', '19:40', 'ca0001'),
+            bench: team('Bench Boys', '19:30', 'ba0001'),
+        },
+        sheets: {
+            ra0001: sheet({team: 'rollers', label: 'Rollers', date: DATE, riders: BEN, uploadedAt: '2026-11-19T16:00:00.000Z'}),
+            ca0001: sheet({team: 'cogs', label: 'Cogs', date: DATE, riders: ['1001', '1006'], uploadedAt: '2026-11-19T16:00:00.000Z'}),
+            ba0001: sheet({team: 'bench', label: 'Bench Boys', date: DATE, riders: ['1006'], bench: ['1001'], uploadedAt: '2026-11-19T16:00:00.000Z'}),
+        },
+    });
+    const s = await setup(t, {clubs: [c]});
+    let out = await s.get('1001', {mod: MOD, joined: KF});
+    assert.deepEqual(out.circles, [{id: KF, name: 'Kettenfett RC', lists: true, teams: ['Cogs', 'Rollers']}]);
+    // a rider of one team only
+    out = await s.get('1002', {mod: MOD, joined: KF});
+    assert.deepEqual(out.circles, [{id: KF, name: 'Kettenfett RC', lists: true, teams: ['Rollers']}]);
+    // on the bench only: listed, in no team
+    const benchOnly = club({
+        teams: {bench: team('Bench Boys', '19:30', 'ba0001')},
+        sheets: {ba0001: sheet({team: 'bench', label: 'Bench Boys', date: DATE, riders: ['1006'], bench: ['1001'], uploadedAt: '2026-11-19T16:00:00.000Z'})},
+    });
+    const s2 = await setup(t, {clubs: [benchOnly]});
+    out = await s2.get('1001', {mod: MOD, joined: KF});
+    assert.deepEqual(out.circles, [{id: KF, name: 'Kettenfett RC', lists: true, teams: []}]);
 });
 
 
@@ -587,7 +616,7 @@ test('v3: a private club needs its code', async t => {
 
     // the code, not joined: listed with the code as read, and hinted
     out = await s.get('1001', inEvent({joined: KF}), codes('7q4mz-2kx9b'));
-    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, private: true, code: CODE}]);
+    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, teams: ['Spokes'], private: true, code: CODE}]);
     assert.deepEqual(out.hint, [{id: SP, name: 'Spokesmen CC', riders: ['1001', '1004', '1005'], uploadedAt: '2026-11-19T15:00:00.000Z', body: true}]);
     assert.deepEqual(s.store.seenOf(SP), {});
 
@@ -609,7 +638,7 @@ test('v3: a private club needs its code', async t => {
     assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, code: 'needed'}]);
     assert.equal(out.plans.filter(p => p.circle.id === SP).length, 0);
     out = await s.get('1001', inEvent({joined: KF}), codes('9v6pw-3tq2h'));
-    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, private: true, code: '9V6PW3TQ2H'}]);
+    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, teams: ['Spokes'], private: true, code: '9V6PW3TQ2H'}]);
 
     // only the first 10 codes are read
     const wrong = Array.from({length: 10}, (_, i) => '7Q4MZ2KX' + 'ABCDEFGHJK'[i] + 'A');
@@ -621,7 +650,7 @@ test('v3: a private club needs its code', async t => {
     // made open again: listed by Zwift ID alone
     s.store.change(SP, c => clearRiderCode(c, s.clock.now));
     out = await s.get('1001', {mod: MOD});
-    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true}]);
+    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, teams: ['Spokes']}]);
 
     assert.ok(!lines.some(l => /7Q4MZ2KX9B|9V6PW3TQ2H/i.test(l)), lines.join('\n'));
 });
@@ -680,7 +709,7 @@ test('v3: wrong codes are throttled per public address', async t => {
     assert.equal(r.status, 200);
 
     let out = await s.get('1001', {mod: MOD}, from('198.51.100.4', CODE));
-    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, private: true, code: CODE}]);
+    assert.deepEqual(out.circles.filter(c => c.id === SP), [{id: SP, name: 'Spokesmen CC', lists: true, teams: ['Spokes'], private: true, code: CODE}]);
 
     for (let i = 0; i < 25; i++) {
         r = await s.q('1001', {mod: MOD}, from('10.0.0.7', wrong(i)));

@@ -634,6 +634,34 @@ test('recoveryFields: three slots, Off keeps its place as null', () => {
 });
 
 
+test('clockInFields: the countdown is a field only with the option on, no Rest window that has it, and not in chaos (user, 23 Nov 2026)', () => {
+    const rest = {kind: 'rest', timeS: 42, warn: false, next: false, place: 3};
+    const alone = {recFields: true, restOpen: false, reason: 'ok', model: rest};
+    assert.equal(D.clockInFields(alone), true);
+    assert.equal(D.clockInFields({...alone, restOpen: true}), false);    // the Rest window has it
+    assert.equal(D.clockInFields({...alone, recFields: false}), false);    // the big countdown as before
+    assert.equal(D.clockInFields({...alone, model: {kind: 'none'}, reason: 'chaos'}), false);    // no countdown in chaos
+    assert.equal(D.clockInFields({...alone, model: {kind: 'none'}, reason: 'climb'}), true);    // the dash in its place
+    assert.equal(D.clockInFields({...alone, model: {...rest, timeS: 8, warn: true, next: true}}), false);    // READY: the pull layout
+    assert.equal(D.clockInFields({...alone, model: {kind: 'pull', watts: 273, timeS: 40}}), false);
+    assert.equal(D.clockInFields({...alone, model: {kind: 'none'}, reason: 'noevent'}), false);
+});
+
+
+test('clockField: the number on top, my place under it, no "s" (user, 23 Nov 2026)', () => {
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 13.4, place: 2}), {num: '13', unit: '', place: '#2'});
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 239, place: 6}), {num: '3:59', unit: '', place: '#6'});
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 44, place: 4, standing: true, overS: 50}), {num: '\u226544', unit: '', place: '#4'});
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 30, place: null}), {num: '30', unit: '', place: ''});
+    // From 10:00 a standing clock goes without "≥" (too wide for the field); it is still dimmed.
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 599, place: 5, standing: true}), {num: '\u22659:59', unit: '', place: '#5'});
+    assert.deepEqual(D.clockField({kind: 'rest', timeS: 647, place: 5, standing: true}), {num: '10:47', unit: '', place: '#5'});
+    assert.equal(D.clockField({kind: 'none'}), null);
+    assert.equal(D.clockField({kind: 'pull', timeS: 40}), null);
+    assert.equal(D.clockField(null), null);
+});
+
+
 test('fieldSlots: the slots set while the option is on, the defaults (off, now, off) otherwise', () => {
     assert.deepEqual(D.fieldSlots({}), {left: 'off', mid: 'now', right: 'off'});
     assert.deepEqual(D.fieldSlots({recFields: false, recLeft: 'powerWkg', recMid: 'speed', recRight: 'draft'}),
@@ -647,13 +675,14 @@ test('fieldSlots: the slots set while the option is on, the defaults (off, now, 
 });
 
 
-test('fieldsShown: only while I rest with a Rest window open and the option on; in chaos always (Review Focus 3)', () => {
+test('fieldsShown: only while I rest with the option on; in chaos always (Review Focus 3)', () => {
     const rest = {kind: 'rest', timeS: 42, warn: false, next: false, place: 3};
     const on = {recFields: true, restOpen: true, reason: 'ok'};
     assert.equal(D.fieldsShown({...on, model: rest}), true);
-    // The Rest window closed while resting: the countdown again at once.
-    assert.equal(D.fieldsShown({...on, restOpen: false, model: rest}), false);
+    // Without a Rest window too (user, 23 Nov 2026): the countdown is then one of them (clockInFields).
+    assert.equal(D.fieldsShown({...on, restOpen: false, model: rest}), true);
     assert.equal(D.fieldsShown({...on, recFields: false, model: rest}), false);
+    assert.equal(D.fieldsShown({...on, recFields: false, restOpen: false, model: rest}), false);
     // The standing clock is resting too.
     assert.equal(D.fieldsShown({...on, model: {...rest, timeS: 30, standing: true, overS: 4}}), true);
     // READY (also the start rider in the pen) and my pull: the pull layout, whatever is set.
@@ -663,7 +692,7 @@ test('fieldsShown: only while I rest with a Rest window open and the option on; 
     // A dash (climb, descent, …): the fields keep showing live values.
     assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'climb'}), true);
     assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'descent'}), true);
-    assert.equal(D.fieldsShown({...on, restOpen: false, model: {kind: 'none'}, reason: 'climb'}), false);
+    assert.equal(D.fieldsShown({...on, restOpen: false, model: {kind: 'none'}, reason: 'climb'}), true);
     // Outside a TTT event (the windows are quiet): nothing.
     assert.equal(D.fieldsShown({...on, model: {kind: 'none'}, reason: 'noevent'}), false);
 });
@@ -806,6 +835,15 @@ test('planParts: the label may be cut, " · plan CODE" never; the club after it 
     assert.deepEqual(D.planParts('planLineClub', two), {cut: 'Thursday Night Roadtrains B · 7abcd', keep: ' · plan HM4ZNJ', tail: ' · Rollers fast'});
     const q = D.planParts('planLineClub', two);
     assert.equal(q.cut + q.keep + q.tail, fmt('planLineClub', two));
+});
+
+
+test('dashKind: \'regroup\' (after a climb, the display still on) is the quiet dash, never ▲ nor ≠', () => {
+    // User, 23 Nov 2026: "▲ goes at the end of the climb … ≠ is not good".
+    assert.equal(R.dashKind('regroup'), 'none');
+    assert.equal(R.dashKind('regroup', {started: false}), 'none');
+    assert.equal(R.dashKind('regroup', {started: true}), 'none');
+    assert.equal(D.fieldsGapBand({kind: 'one', id: 'b', m: 16, s: 1.3, n: 1, mine: false, behind: false, level: 'full'}, 'regroup'), null);
 });
 
 

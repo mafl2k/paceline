@@ -2,12 +2,12 @@
 // page itself) and the team's other pages, drawn from teamView (team-view.mjs). The frame pieces: on
 // phones a sticky bar with the team switcher (a <details>, no script needed; from 1024 px the same
 // rows in the sidebar of every captain page, ui.mjs captainPage), the team's rhythm, the line of a
-// race with its ⋯ (races spec §4, §7: its date and time asking first, its event link, the upload of
-// a file for it), the plan ⋯ (Rename, New version, "Edit on ZwiftGopher", Delete asking first; for a
+// race with its ⋯ (races spec §4, §7: its date and time asking first, its event link), the plan ⋯
+// (Rename, "Edit on ZwiftGopher", Delete asking first; for a
 // race that is over Delete only), the "N to fix" notes and the no-start callout with their buttons
 // (the club hub offers the same), the ways to a plan ("Plan on ZwiftGopher", "Upload a plan"), the
 // empty card, Discard of an inbox entry, Make live asking first in its place as the Make live rule
-// says (UI panel wave 2: the gate open or a warning) and its Undo, the live tag, the plan code and
+// says (UI panel wave 2: the gate open or a warning), the live tag, the plan code and
 // "How races work" (the riders card is cockpit-page.mjs's). The team's settings /manage/team/<slug>/settings (rename, start time, race
 // rhythm, delete; what destroys asks first in its place), the new-team page /manage/new-team, the
 // pages of a team that is gone and of an unknown path, and the question before Make live: the answer
@@ -15,15 +15,15 @@
 // pages reloads itself. Pure: it reads the club and the checks it is given, and the clock is passed
 // in. Every value goes through esc().
 import {esc, t} from './pages.mjs';
-import {captainPage, rowsHtml, th, flashBlock, hidden, postForm, armForm, placeNav, menu} from './ui.mjs';
+import {captainPage, rowsHtml, th, flashBlock, hidden, postForm, armForm, placeNav, menu, moreFold} from './ui.mjs';
 import {ic} from './icons.mjs';
-import {teamView, teamRow, nextRace, worst, quote, liveQuestion, undoOffer, raceWithin, plannerHref} from './team-view.mjs';
+import {teamView, teamRow, nextRace, worst, quote, liveQuestion, raceWithin, plannerHref} from './team-view.mjs';
 import {uploadHref} from './upload-page.mjs';
 import {plansOf, planOfId} from './plans.mjs';
-import {teamWeekday, raceOver} from './select.mjs';
+import {teamWeekday, raceOver, raceTime} from './select.mjs';
 import {raceOf} from './races.mjs';
 import {isShare, TYPE_MAX} from './club.mjs';
-import {isWeekday} from './time.mjs';
+import {isWeekday, localDate, localHHMM} from './time.mjs';
 
 const teamPath = slug => `/manage/team/${slug}`;
 // The team page, the team cockpit (team cockpit spec §8; cockpit-page.mjs).
@@ -58,21 +58,22 @@ ${rows}
 }
 
 
-// The team's race rhythm in the head (races spec §4): "Weekly · Thursday 19:30", or that a special
-// team's races each have their own date and time.
-export function rhythmLine(club, view) {
-    if (view.special) {
-        return `<p class="rhythm">${esc(t('tp-rhythm-special'))}</p>`;
+// The phase of a race still to race (a raceView) as its live version's row says it (user, 23 Nov
+// 2026): 'sending' from the gate until the start, 'started' from the start (until the race is over:
+// then it is under Over), null before the gate, without a live version that is sent, or without a
+// time.
+export function racePhase(view, now) {
+    if (!view.live?.sent || view.S == null || view.gateAt == null || now < view.gateAt) {
+        return null;
     }
-    const weekday = t(`weekday-${teamWeekday(club, view.slug)}`);
-    return `<p class="rhythm">${esc(view.start === null ? t('tp-rhythm-weekly-no-time', {weekday}) : t('tp-rhythm-weekly', {weekday, time: view.start}))}</p>`;
+    return now < view.S ? 'sending' : 'started';
 }
 
 
 // The line of a race (a raceView): its day, time and gate, and its event (the link, else the event
 // learned from a rider's check). A weekly team's regular race day without a plan is no race (spec
 // §8): its neutral status alone, "Next regular race Thu 26 Nov 19:30" (or "No start time set").
-function raceLine(view, now) {
+function raceLine(club, view, now) {
     const {when} = view;
     if (when.day === null) {
         return `<p class="race"><span>${esc(t('tp-race-none'))}</span></p>`;
@@ -89,20 +90,32 @@ function raceLine(view, now) {
         // never a missing time: the day alone
         return `<p class="race"><span>${esc(when.day)}${event}</span></p>`;
     }
-    // one line with the opening time (spec §9): no status card repeats it; "open since" after the gate
+    // one line with the opening time (spec §9): no status card repeats it; "open since" after the gate.
+    // The line names the race's day already: a gate on that day reads as its time alone ("opens
+    // 19:07", user 23 Nov 2026), one on the day before (a race just after midnight) with its day.
+    // While its live version's row says the phase (racePhase: "Sending", "Started"; user, 23 Nov 2026)
+    // the line leaves it out: no "open since", and once started no "started"
+    const phase = racePhase(view, now);
+    if (phase !== null) {
+        return `<p class="race"><span>${th(phase === 'sending' ? 'tp-race-sending' : 'tp-race-started', {day: esc(when.day), time: `<time>${esc(when.time)}</time>`, until: esc(when.until)})}${event}</span></p>`;
+    }
     const open = view.gateAt !== null && now >= view.gateAt;
-    return `<p class="race"><span>${th(open ? 'tp-race-open' : 'tp-race-opens', {day: esc(when.day), time: `<time>${esc(when.time)}</time>`, until: esc(when.until), opens: `<time>${esc(view.opens)}</time>`})}${event}</span></p>`;
+    const opens = view.gateAt !== null && localDate(view.gateAt, club.tz) === view.date ? localHHMM(view.gateAt, club.tz) : view.opens;
+    return `<p class="race"><span>${th(open ? 'tp-race-open' : 'tp-race-opens', {day: esc(when.day), time: `<time>${esc(when.time)}</time>`, until: esc(when.until), opens: `<time>${esc(opens)}</time>`})}${event}</span></p>`;
 }
 
 
 // The race ⋯ (races spec §4 "Race ⋯", §7) of a race ahead with plans (a raceView), in the corner of
 // its line; '' for a date without plans (a weekly team's rhythm date) or without a race. Its date and
 // time ask first in their place (armForm: a date or time change moves what riders get; without the
-// script the server's question): the date, and the time (a special team's is required; a weekly
-// team's empty field is the team's start time). Then its event: the link (with Remove), else the
-// event learned from a rider's check, else none, and a field to set or change the link. Last, the
-// upload of a file for this race (its date goes on to the Store form). Every form carries the
-// team's version, so a page drawn before another change is refused.
+// script the server's question): the date, and the race's time, prefilled and required whenever there
+// is one (user, 23 Nov 2026: a race's start time is pinned, the team's is only the default for new
+// races, so no "Empty: the team's start time" hint; a race stored before times were pinned shows the
+// team's, which a save then pins; a weekly team without any time: an empty field, not required). Then its event: the link (with Remove), else the
+// event learned from a rider's check, else none, and a field to set or change the link. No upload
+// link (user, 23 Nov 2026: a new plan's race is chosen in the Store form's race fold; the upload
+// page still takes `date=` for links already handed out). Every form carries the team's version, so
+// a page drawn before another change is refused.
 function raceMenu(club, view) {
     if (view.date === null || !view.plans.length) {
         return '';
@@ -114,17 +127,15 @@ function raceMenu(club, view) {
     }
     const fields = action => ({action, team: view.slug, date: view.date, version: team.version});
     const special = team.kind === 'special';
-    // the race's own time; a special team's race stored by 0.3.0 without one starts at the team's
-    const own = race.start ?? (special ? team.start ?? '' : '');
-    const hint = !special && team.start != null ? ` <span class="hint">${esc(t('rm-start-hint', {time: team.start}))}</span>` : '';
+    // the race's time: its own, else the team's (a race stored before times were pinned, or by 0.3.0)
+    const own = raceTime(team, race.start) ?? '';
     const body = `<div class="as-when"><label class="field">${esc(t('upload-date'))}<input type="date" name="to" value="${esc(view.date)}" required></label>`
-        + `<label class="field">${esc(t('team-start-label'))}${hint}<input type="time" name="start" value="${esc(own)}"${special ? ' required' : ''}></label></div>`;
+        + `<label class="field">${esc(t('team-start-label'))}<input type="time" name="start" value="${esc(own)}"${special || own !== '' ? ' required' : ''}></label></div>`;
     const when = armForm('/manage/race', fields('when'), {key: `when-${view.date}`, body, button: t('rm-when-save'), formCls: 'stack',
-        // the strip shows the day and time typed, formatted (client.mjs fillText); a weekly race's
-        // empty time is the team's; the time brings its own space, so a weekly team without any
-        // start time reads "… Sun 22 Nov." (no stray space)
+        // the strip shows the day and time typed, formatted (client.mjs fillText); the time brings its
+        // own space, so a weekly team without any start time reads "… Sun 22 Nov." (no stray space)
         wordsHtml: th('rm-when-words', {to: '<span data-arm-fill="to" data-arm-format="day"></span>',
-            start: `<span data-arm-fill="start" data-arm-pre=" "${!special && team.start != null ? ` data-arm-empty="${esc(team.start)}"` : ''}></span>`}),
+            start: '<span data-arm-fill="start" data-arm-pre=" "></span>'}),
         yes: t('rm-when-yes'), yesCls: 'btn primary small'});
     const line = race.pinnedEventId != null ? t('rm-event-link', {id: race.pinnedEventId})
         : race.eventId != null ? t('rm-event-learned', {id: race.eventId}) : t('rm-event-none');
@@ -135,7 +146,6 @@ function raceMenu(club, view) {
     return menu(t('rm-label', {day: view.when.day}), [
         `<div class="menu-sec"><p class="menu-head">${esc(t('rm-when'))}</p>${when}</div>`,
         `<div class="menu-sec"><p class="menu-head">${esc(t('upload-event'))}</p><p class="hint">${esc(line)}</p>${event}${unlink}</div>`,
-        `<a class="menu-link" href="${esc(`${uploadPath(view.slug)}&date=${view.date}`)}">${ic('upload')}<span>${esc(t('rm-upload'))}</span></a>`,
     ], {key: `race-${view.date}`});
 }
 
@@ -144,7 +154,7 @@ function raceMenu(club, view) {
 // kept for one (.nomenu).
 export function raceHead(club, view, now) {
     const menuHtml = raceMenu(club, view);
-    return `<div class="racehead${menuHtml ? '' : ' nomenu'}">${raceLine(view, now)}${menuHtml}</div>`;
+    return `<div class="racehead${menuHtml ? '' : ' nomenu'}">${raceLine(club, view, now)}${menuHtml}</div>`;
 }
 
 
@@ -159,10 +169,11 @@ export function deletePlanWords(club, slug, id, now) {
 
 // The plan ⋯ (races spec §4 "Plan ⋯", §7) of plan `planId` (any of its ids) of team `slug`, in the
 // corner of its block on the team page. For a race still to race: Rename (the type, on every
-// version; the label stays the team's name plus the type), New version (the upload page for this
-// plan), "Edit on ZwiftGopher" (`planner`, for a version with a share value), Delete asking first in
-// its place. No Make live: every version row has it in the panel. For a race that is over (from S +
-// 2 h): Delete only (spec §7). Each button names its plan for screen readers (a team page has a menu
+// version; the label stays the team's name plus the type), "Edit on ZwiftGopher" (`planner`, for a
+// version with a share value), Delete asking first in its place. No Make live: every version row has
+// it in the panel. No New version (user, 23 Nov 2026: a new version comes as a plan from ZwiftGopher
+// or a file and is stored from its Store form; the upload page still takes `plan=`, for a hole's link
+// and links already handed out). For a race that is over (from S + 2 h): Delete only (spec §7). Each button names its plan for screen readers (a team page has a menu
 // per plan).
 export function planMenu(club, slug, planId, {now, planner = null}) {
     const team = club.teams[slug];
@@ -176,7 +187,6 @@ export function planMenu(club, slug, planId, {now, planner = null}) {
         items.push(`<form class="stack" method="post" action="/manage/plan/rename">${hidden({team: slug, plan: p.id, version: team.version})}`
             + `<label class="field">${esc(t('as-type'))} <span class="hint">${esc(t('pm-rename-hint'))}</span><input name="type" value="${esc(type)}" maxlength="${TYPE_MAX}" autocomplete="off"></label>`
             + `<button class="btn secondary small" type="submit">${esc(t('pm-rename'))}${sr}</button></form>`);
-        items.push(`<a class="menu-link" href="${esc(`/manage/upload?team=${slug}&plan=${p.id}`)}">${ic('upload')}<span>${esc(t('pp-new-version'))}</span></a>`);
         // "Edit on ZwiftGopher": the plan's own version (the live one, else the newest) opened in the
         // planner by its share value; only when that version has one (else the planner would open empty)
         const share = (p.live !== null ? club.sheets[p.live] : p.newest[1])?.zgShare;
@@ -241,12 +251,12 @@ export function notesHtml(club, view, now, sfx = '') {
 
 
 // The button of the no-start callout: a weekly team sets the time in its settings; a special team's
-// race without one (plans stored by 0.3.0) gets it with any upload for that date, so its button is
-// the upload page (for the race's plan when it has one plan: a new version needs no type). The club
-// hub offers the same, naming the team (`hub`).
+// race without one (plans stored by 0.3.0) gets it in the race's ⋯ (a new version takes its plan's
+// race as it is, user 23 Nov 2026), so its button is the team page at that race. The club hub offers
+// the same, naming the team (`hub`).
 export function noStartAction(club, view, now, {hub = false} = {}) {
     return view.special
-        ? `<a class="btn secondary small" href="${esc(uploadHref(club, view.slug, view.raceDate, now))}">${ic('upload')}${esc(t('tp-upload-version'))}${teamSr(view, hub)}</a>`
+        ? `<a class="btn secondary small" href="${esc(`${teamPath(view.slug)}${view.raceDate ? `#race-${view.raceDate}` : ''}`)}">${ic('clock')}${esc(t('tp-set-start'))}${teamSr(view, hub)}</a>`
         : `<a class="btn secondary small" href="${esc(settingsPath(view.slug))}">${ic('clock')}${esc(t('tp-set-start'))}${teamSr(view, hub)}</a>`;
 }
 
@@ -280,14 +290,15 @@ function plannerLink(planner, cls) {
 
 
 // The ways to a plan (races spec §4): with a planner link (`planner`; none without PUBLIC_URL) "Plan on
-// ZwiftGopher" (`cls`) and after it the file upload as a quiet link, "Upload a file instead"; without
-// one "Upload a plan" (`uploadCls`) alone, as before.
+// ZwiftGopher" (`cls`) and after it the file upload, "Upload a file", a secondary (bordered) button
+// in both themes, the same in the head and an empty team's card (user, 23 Nov 2026); without one
+// "Upload a plan" (`uploadCls`) alone, as before.
 function planWays(view, planner, {cls, uploadCls}) {
     const href = esc(uploadPath(view.slug));
     if (planner === null) {
         return `<a class="${uploadCls}" href="${href}">${ic('upload')}${esc(t('tp-upload-plan'))}</a>`;
     }
-    return `${plannerLink(planner, cls)}<a class="btn quiet small" href="${href}">${ic('upload')}${esc(t('tp-upload-instead'))}</a>`;
+    return `${plannerLink(planner, cls)}<a class="btn secondary small" href="${href}">${ic('upload')}${esc(t('tp-upload-instead'))}</a>`;
 }
 
 
@@ -296,8 +307,8 @@ function planWays(view, planner, {cls, uploadCls}) {
 const emptyButtons = view => !view.live && !view.forRace;
 
 
-// The ways to a plan under the race line (UI panel wave 3; races spec §4): "Plan on ZwiftGopher" with
-// the quiet "Upload a file instead" under it (.planner), else "Upload a plan" (secondary, full width
+// The ways to a plan in the head (UI panel wave 3; races spec §4): "Plan on ZwiftGopher" with
+// "Upload a file" (secondary) under it on a phone, beside it at the title row's end from 1024 px (.planner), else "Upload a plan" (secondary, full width
 // on phones); '' where the empty card has them. The planner pair is a block of its own (a section
 // without a name, so no landmark): the page's primary action comes first in its block, never after
 // the head's "Team settings" (the button system).
@@ -354,16 +365,16 @@ export function discardForm(id, back, riders, {small = false, team = null} = {})
 
 
 // Make live of version `id` of team `slug` (UI panel wave 2, the Make live rule: liveQuestion). When
-// it must ask, the trigger `button` ("Make live…") asks first in its place, with what it does in words
+// it must ask, the trigger `button` ("Make live") asks first in its place, with what it does in words
 // (armForm; without the script the server's confirm page, liveConfirmPage); else the plain button
-// `now` ("Make live") acts at once, and the page comes back with Undo. `sr` adds the plan's label
-// for screen readers; `cls` the trigger's class; `key` tells its ids from another Make live of the
-// same version on the page (the team cockpit's row and panel).
+// `now` ("Make live") acts at once (no Undo: a wrong switch is undone by Make live of the version live
+// before). `sr` adds the plan's label for screen readers (true) or the text given (a string); `cls` the trigger's class; `key` tells its
+// ids from another Make live of the same version on the page.
 export function makeLiveHtml(club, slug, id, {now, button, plain, sr = true, cls = 'btn secondary small', key = null}) {
     const team = club.teams[slug];
     const {words, ask} = liveQuestion(club, slug, id, now);
     const fields = {team: slug, sheet: id, version: team.version};
-    const label = sr ? quote(club.sheets[id].label) : null;
+    const label = sr === true ? quote(club.sheets[id].label) : typeof sr === 'string' && sr !== '' ? sr : null;
     if (!ask) {
         return `<form method="post" action="/manage/live">${hidden(fields)}<button class="${esc(cls)}" type="submit">${esc(plain)}${label ? `<span class="sr"> ${esc(label)}</span>` : ''}</button></form>`;
     }
@@ -372,22 +383,17 @@ export function makeLiveHtml(club, slug, id, {now, button, plain, sr = true, cls
 }
 
 
-// The Undo of the last change of the live plan (undoOffer): {form} (flashBlock, the live card's action bar, the live row of a later race) or null.
-export function undoBlock(club, slug, now) {
-    const u = undoOffer(club, slug, now);
-    if (u === null) {
-        return null;
-    }
-    const fields = {team: slug, version: u.version};
-    return {
-        form: `<form method="post" action="/manage/live/undo">${hidden(fields)}<button class="btn secondary small" type="submit">${ic('undo')}`
-            + `${esc(t('undo-button'))}<span class="sr"> ${esc(t('undo-sr', {n: u.prev.n, label: u.prev.label}))}</span></button></form>`,
-    };
-}
+// The live tag of a plan block: Live, or Not sent without a start time; for a race that is over
+// (`over`) a grey Live, "Was live for this race" for screen readers (user, 23 Nov 2026).
+const srTag = (cls, text, sr) => `<span class="tag ${cls}" title="${esc(sr)}"><span aria-hidden="true">${esc(text)}</span><span class="sr">${esc(sr)}</span></span>`;
+export const liveTag = lv => (lv.over ? `${srTag('was', t('tp-live'), t('tp-was-live-sr'))} `
+    : `<span class="tag${lv.sent ? '' : ' off'}">${esc(t(lv.sent ? 'tp-live' : 'tp-not-sent'))}</span> `);
 
 
-// The live tag of a plan block: Live, or Not sent without a start time.
-export const liveTag = lv => `<span class="tag${lv.sent ? '' : ' off'}">${esc(t(lv.sent ? 'tp-live' : 'tp-not-sent'))}</span> `;
+// The race's phase as a second tag beside the live row's Live (racePhase; user, 23 Nov 2026):
+// "Sending" (the accent's colours) or "Started" (amber), its words for screen readers; '' for none.
+export const phaseTag = phase => (phase === 'sending' ? srTag('sending', t('tp-sending'), t('tp-sending-sr'))
+    : phase === 'started' ? srTag('started', t('tp-started'), t('tp-started-sr')) : '');
 
 
 // "Plan code RE5CFQ" of a version (its `sig`): the code every rider's mod shows, to compare (final
@@ -460,30 +466,39 @@ export function teamSettingsPage(club, slug, {now, seen, others, flash = null, t
     const delBody = teamDeleteWords(club, slug);
     const del = t('team-delete-button', {team: view.name});
     const nav = placeNav(club, [{href: teamPath(slug), label: view.name}, {label: t('tp-settings')}]);
-    const main = `<main class="page" id="main">
-  ${nav.crumbs}
-  <header class="pagehead"><p class="kicker">${esc(view.name)}</p><h1>${esc(t('tp-settings'))}</h1></header>
-  ${flashBlock(flash)}
-  <section class="card" aria-labelledby="name-h">
+    // from 1180 px the cards flow into as many columns as fit (user, 23 Nov 2026: .setcols); the
+    // ZwiftGopher link, rare and drastic, at the end beside the danger zone (.setend)
+    const nameCard = `<section class="card" aria-labelledby="name-h">
     <h2 id="name-h">${esc(t('ts-name'))}</h2>
     <form class="inline-form" method="post" action="/manage/team">${hidden({action: 'rename', team: slug})}
       <label class="field"><span class="sr">${esc(t('team-name-label'))}</span><input name="name" value="${esc(name)}" maxlength="40" required autocomplete="off"></label>
       <button class="btn primary" type="submit">${esc(t('team-rename'))}</button>
     </form>
     <p class="hint">${esc(t('ts-name-hint'))}</p>
-  </section>
-  ${rhythmCard(club, view, {kind: posted?.kind ?? kind, weekday: posted?.weekday ?? weekday, start}, now)}${push ? `
-  <section class="card" aria-labelledby="push-h">
+  </section>`;
+    const rhythm = rhythmCard(club, view, {kind: posted?.kind ?? kind, weekday: posted?.weekday ?? weekday, start}, now);
+    const pushCard = push ? `<section class="card" aria-labelledby="push-h">
     <h2 id="push-h">${esc(t('ts-push'))}</h2>
     ${armForm('/manage/team', {action: 'push-link', team: slug}, {key: 'push', button: t('ts-push-new'), cls: 'btn secondary danger-text small', icon: 'link',
         words: t('ts-push-confirm', {team: view.name}), yes: t('ts-push-yes'), yesCls: 'btn danger small'})}
-    <p class="hint">${esc(t('ts-push-hint'))}</p>
-  </section>` : ''}
+    <p class="hint">${esc(t('ts-push-hint'))}</p>${moreFold(t('ts-push-more'), t('ts-push-about'))}
+  </section>` : '';
+    const main = `<main class="page settings" id="main">
+  ${nav.crumbs}
+  <header class="pagehead"><p class="kicker keep">${esc(t('tp-settings'))}</p><h1>${esc(view.name)}</h1></header>
+  ${flashBlock(flash)}
+  <div class="setcols">
+  ${nameCard}
+  ${rhythm}
+  </div>
+  <div class="setend">${pushCard ? `
+  ${pushCard}` : ''}
   <section class="danger-zone" aria-labelledby="del-h">
     <h2 id="del-h">${ic('trash')}${esc(del)}</h2>
     ${armForm('/manage/team', {action: 'delete', team: slug}, {key: 'team-delete', button: t('ts-delete-open'), cls: 'btn secondary danger-text', icon: 'trash',
         words: delBody, yes: del, yesCls: 'btn danger'})}
   </section>
+  </div>
 </main>`;
     return captainPage(club, {now, seen, others, here: teamPath(slug), bar: nav.bar, main, cls: 'formpage'});
 }
@@ -496,8 +511,9 @@ export function teamSettingsPage(club, slug, {now, seen, others, flash = null, t
 // weekly choice has the team's start time too (Add a team, the team settings). The weekly fields
 // sit under their choice (data-weekly); the script hides them while special is checked, without it
 // they simply show. `legend` false hides the legend (a card's heading says it), `title` replaces its
-// words ("Race rhythm"). `hint` (the team settings) puts that hint under the start field instead of
-// Add a team's above it.
+// words ("When does the team race?"). The start field's hint stands under its box (user, 23 Nov 2026:
+// never between a date or time field's label and its box): `hint` (the team settings) replaces Add a
+// team's.
 export function rhythmFields(club, {kind, weekday, start = null, legend = true, title = null, hint = null}) {
     const special = kind === 'special';
     const own = isWeekday(weekday) ? weekday : 4;
@@ -506,18 +522,17 @@ export function rhythmFields(club, {kind, weekday, start = null, legend = true, 
     for (let n = 1; n <= 7; n++) {
         options.push(`<option value="${n}"${own === n ? ' selected' : ''}>${esc(day(n))}</option>`);
     }
-    const choice = (value, checked, text) => `<label class="choice"><input type="radio" name="kind" value="${value}"${checked ? ' checked' : ''}>`
-        + `<span><strong>${esc(text)}</strong></span></label>`;
+    const choice = (value, checked, text, sub = null) => `<label class="choice"><input type="radio" name="kind" value="${value}"${checked ? ' checked' : ''}>`
+        + `<span><strong>${esc(text)}</strong>${sub === null ? '' : `<span>${esc(sub)}</span>`}</span></label>`;
     const input = `<input type="time" name="start" value="${esc(start)}">`;
-    const time = start === null ? '' : hint !== null ? `
-          <label class="field">${esc(t('team-start-label'))}${input}<span class="hint">${esc(hint)}</span></label>` : `
-          <label class="field">${esc(t('team-start-label'))} <span class="hint">${esc(t('nt-start-hint', {tz: club.tz}))}</span>${input}</label>`;
+    const time = start === null ? '' : `
+          <label class="field">${esc(t('team-start-label'))}${input}<span class="hint">${esc(hint ?? t('nt-start-hint', {tz: club.tz}))}</span></label>`;
     return `<fieldset class="choices" data-rhythm><legend${legend ? '' : ' class="sr"'}>${esc(title ?? t('ts-rhythm'))}</legend>
-        ${choice('weekly', !special, t('ts-weekly', {weekday: day(own)}))}
+        ${choice('weekly', !special, t('ts-weekly-choice'))}
         <div class="stack" data-weekly>
           <label class="field">${esc(t('ts-weekday'))}<select name="weekday">${options.join('')}</select></label>${time}
         </div>
-        ${choice('special', special, t('ts-special'))}
+        ${choice('special', special, t('ts-special-choice'), t('ts-special-choice-hint'))}
       </fieldset>`;
 }
 
@@ -577,20 +592,16 @@ export function newTeamPage(club, {now, seen, others, flash = null, typed = null
 
 // POST /manage/live without confirm (the no-script path of every Make live's in-page confirm, spec
 // §9): what it does (`words`, liveWords), the outdated marks if any, and a form that posts again with
-// confirm=1. `undo` ({version}: an Undo that has to ask, UI panel wave 2) asks it as an Undo: its
-// form posts the Undo again, so it is confirmed as one (its own flash, no Undo of it). The way back
-// is the team page with the version picked (for an Undo the live one it was offered on).
-export function liveConfirmPage(club, slug, id, {now, seen, others, words, marks = [], undo = null}) {
+// confirm=1. The way back is the team page with the version picked.
+export function liveConfirmPage(club, slug, id, {now, seen, others, words, marks = []}) {
     const team = club.teams[slug].name;
     const name = s => (Object.hasOwn(club.teams, s) ? club.teams[s].name : s);
     const items = marks.map(m => `<p class="outdated">${ic('alert')}${esc(t('tp-outdated-mark', {name: m.name, team: name(m.rides)}))}</p>`);
-    const liveNow = undo !== null ? raceOf(club, slug, club.sheets[id].date)?.live ?? null : id;
-    const home = `${teamPath(slug)}${liveNow === null ? '' : `?v=${liveNow}`}`;
+    const home = `${teamPath(slug)}?v=${id}`;
     const intro = marks.length ? `\n  <p class="banner warn" role="note">${ic('alert')}<span>${esc(t('live-confirm-intro'))}</span></p>` : '';
     // the words are drawn now, so the form carries the team's version now
-    const fields = undo !== null ? {team: slug, version: undo.version, confirm: '1'}
-        : {team: slug, sheet: id, version: club.teams[slug].version, confirm: '1'};
-    const heading = t(undo !== null ? 'undo-confirm-heading' : 'live-confirm-heading', {label: club.sheets[id].label, n: club.sheets[id].n});
+    const fields = {team: slug, sheet: id, version: club.teams[slug].version, confirm: '1'};
+    const heading = t('live-confirm-heading', {label: club.sheets[id].label, n: club.sheets[id].n});
     // the crumbs end where the way back goes: the team page
     const trail = [{href: home, label: team}, {label: t('crumb-confirm')}];
     const main = `<main class="page" id="main">
@@ -599,7 +610,7 @@ export function liveConfirmPage(club, slug, id, {now, seen, others, words, marks
   <section class="card stack">
     <p>${esc(words)}</p>
     ${items.join('\n    ')}
-    <div class="confirm-acts">${postForm(undo !== null ? '/manage/live/undo' : '/manage/live', fields, t(anyway(words) ? 'live-confirm-button' : 'tp-confirm-live'), {cls: 'btn primary'})}
+    <div class="confirm-acts">${postForm('/manage/live', fields, t(anyway(words) ? 'live-confirm-button' : 'tp-confirm-live'), {cls: 'btn primary'})}
     <a class="btn secondary" href="${esc(home)}">${ic('left')}${esc(t('live-confirm-back', {team}))}</a></div>
   </section>
 </main>`;

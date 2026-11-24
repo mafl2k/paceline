@@ -9,7 +9,7 @@ import {cockpitClub, plan, NOW, DATE} from './cockpit-fixture.mjs';
 import {T} from './helpers.mjs';
 
 
-const row = r => [r.n, r.at, r.live, r.liveLine, r.summary, r.notice, r.picked];
+const row = r => [r.n, r.at, r.live, r.summary, r.notice, r.picked];
 // a version panel with its race view as that race's date
 const panelOf = p => (p.kind === 'version' ? {...p, rv: p.rv?.date ?? null} : p);
 const sel = (c, q, slug = 'rollers', now = NOW) => selectionOf(c, slug, new URLSearchParams(q), now);
@@ -40,18 +40,18 @@ test('the nearest race\'s list: plans not stored yet on top, plans in their fixe
     assert.equal(race.pending[0].line, '4 riders (Ben, Cleo …)');
     assert.deepEqual(race.plans.map(p => [p.planId, p.label, p.live]), [[ids.fast, 'Rollers · fast', true], [ids.slow, 'Rollers · slow', false]]);
     assert.deepEqual(race.plans[0].shown.map(row), [
-        [3, '19:12', true, 'live since 19:14', null, false, true],     // nothing picked: the live version is (spec §5.3b)
-        [2, '18:55', false, 'was live 18:57', 'Hanna in, Ben out', false, false],
+        [3, '19:12', true, null, false, true],     // nothing picked: the live version is (spec §5.3b)
+        [2, '18:55', false, 'Hanna in, Ben out', false, false],
     ]);
     // after the gate the live row counts the riders who have it, the riders card's count (spec §5.3b)
     assert.deepEqual(race.plans[0].shown.map(r => r.has), ['0/6 have it', null]);
     assert.deepEqual(race.plans[0].shown.map(r => r.id), [ids.f3, ids.f2]);
     assert.deepEqual(race.plans[0].older.map(row),
-        [[1, 'Wed 18 Nov 21:00', false, 'was live Wed 18 Nov 21:00', 'Same as \'Rollers · fast\' v3', false, false]]);
-    assert.deepEqual(race.plans[1].shown.map(row), [[1, 'Wed 18 Nov 21:02', false, null, 'Eva out · 2 targets', false, false]]);
+        [[1, 'Wed 18 Nov 21:00', false, 'Same as v3', false, false]]);
+    assert.deepEqual(race.plans[1].shown.map(row), [[1, 'Wed 18 Nov 21:02', false, 'Eva out · 2 targets', false, false]]);
     assert.deepEqual(race.plans[1].older, []);
     assert.deepEqual([v.sel, panelOf(v.panel), v.overLists], [{kind: 'none'},
-        {kind: 'version', id: ids.f3, planId: ids.fast, date: DATE, isLive: true, over: false, base: {kind: 'self', id: ids.f3}, undo: true, dflt: true, rv: DATE}, []]);
+        {kind: 'version', id: ids.f3, planId: ids.fast, date: DATE, isLive: true, over: false, base: {kind: 'self', id: ids.f3}, dflt: true, rv: DATE}, []]);
     // before the gate the live row has no count
     assert.equal(cockpitView(c, 'rollers', {now: T('2026-11-19T12:00:00Z')}).lists[0].plans[0].shown[0].has, null);
     assert.equal(v.received.length, 2);                         // the count, the hub and the 60 s reload: pushed plans only
@@ -70,7 +70,7 @@ test('the live version without liveAt reads "live"; the row summary compares the
     const id = store(c, newId, null, '2026-11-19T18:15:00Z', {as: ids.fast, json: wkg});
     const [race] = cockpitView(c, 'rollers', {now: NOW}).lists;
     const shown = race.plans[0].shown;
-    assert.deepEqual(shown.map(r => [r.id, r.liveLine]), [[id, null], [ids.f3, 'live']]);
+    assert.deepEqual(shown.map(r => [r.id, r.live]), [[id, false], [ids.f3, true]]);
     assert.equal(shown[0].summary, 'Other details only');     // not "6 targets": 300 W and 4.3 W/kg show the same
 });
 
@@ -99,21 +99,20 @@ test('the selection: one at a time; gone, another team\'s, an entry past its tim
 });
 
 
-test('the panel: a version against live, the live version in and after the Undo window, a race that is over', () => {
+test('the panel: a version against live, the live version right after its switch and later, a race that is over', () => {
     const {club: c, ids} = cockpitClub();
     const panel = (q, now = NOW) => panelOf(cockpitView(c, 'rollers', {now, sel: sel(c, q, 'rollers', now)}).panel);
     assert.deepEqual(panel(`v=${ids.f2}`),
-        {kind: 'version', id: ids.f2, planId: ids.fast, date: DATE, isLive: false, over: false, base: {kind: 'live', id: ids.f3}, undo: false, dflt: false, rv: null});
-    // the live version: against itself (no old lines) also within the Undo window, which it offers
+        {kind: 'version', id: ids.f2, planId: ids.fast, date: DATE, isLive: false, over: false, base: {kind: 'live', id: ids.f3}, dflt: false, rv: null});
+    // the live version: against itself (no old lines) also two minutes after its switch (no Undo, user 23 Nov 2026)
     assert.deepEqual(panel(`v=${ids.f3}`),
-        {kind: 'version', id: ids.f3, planId: ids.fast, date: DATE, isLive: true, over: false, base: {kind: 'self', id: ids.f3}, undo: true, dflt: false, rv: DATE});
+        {kind: 'version', id: ids.f3, planId: ids.fast, date: DATE, isLive: true, over: false, base: {kind: 'self', id: ids.f3}, dflt: false, rv: DATE});
     assert.deepEqual(panel(''), {...panel(`v=${ids.f3}`), dflt: true});          // nothing picked: the same, opened
     assert.deepEqual(panel(`v=${ids.f3}`, NOW + 10 * 60000).base, {kind: 'self', id: ids.f3});
-    assert.equal(panel(`v=${ids.f3}`, NOW + 10 * 60000).undo, false);
     assert.deepEqual(panel(`v=${ids.s1}`).base, {kind: 'live', id: ids.f3});     // another plan: against the race's live version
     const over = T('2026-11-19T20:30:00Z') + 1;                 // S 18:30Z + 2 h
     assert.equal(panel(`v=${ids.f2}`, over - 1).over, false);
-    assert.deepEqual([panel(`v=${ids.f2}`, over).over, panel(`v=${ids.f2}`, over).undo], [true, false]);
+    assert.equal(panel(`v=${ids.f2}`, over).over, true);
     const v = cockpitView(c, 'rollers', {now: over, sel: sel(c, `v=${ids.f2}`, 'rollers', over)});
     assert.deepEqual([v.overLists.map(r => [r.date, r.over, r.plans.length]), v.lists.map(r => [r.date, r.plans.length, r.pending.length])],
         [[[DATE, true, 2]], [['2026-11-26', 0, 3]]]);           // nothing ahead: the three plans not stored yet wait with the next regular race day
@@ -151,9 +150,8 @@ test('the fold: two newest shown, the live and the picked row always, the notice
 
     const v = cockpitView(c, 'rollers', {now});
     assert.deepEqual([ns(fast(v).shown), ns(fast(v).older)], [[5, 4, 2], [3, 1]]);
-    assert.deepEqual(fast(v).shown.map(r => [r.id, r.live, r.liveLine]),
-        [[f5, false, null], [f4, false, null], [ids.f2, true, 'live since 19:18']]);
-    assert.deepEqual(fast(v).older.map(r => r.liveLine), ['was live 19:14', 'was live Wed 18 Nov 21:00']);
+    assert.deepEqual(fast(v).shown.map(r => [r.id, r.live]), [[f5, false], [f4, false], [ids.f2, true]]);
+    assert.deepEqual(fast(v).older.map(r => r.live), [false, false]);
     // v5: stored after v2 went live, never live: the notice; v4 is not the newest, the other plan none
     const all = v.lists[0].plans.flatMap(p => [...p.shown, ...p.older]);
     assert.deepEqual(all.filter(r => r.notice).map(r => r.id), [f5]);
@@ -172,7 +170,7 @@ test('the fold: two newest shown, the live and the picked row always, the notice
 });
 
 
-test('a race that is over offers neither Undo nor the newer-version notice', () => {
+test('a race that is over offers no newer-version notice', () => {
     const {club: c, ids, newId} = cockpitClub();
     // v4 of 'fast', stored after v3 went live and never live: the notice while the race is to race
     const f4 = store(c, newId, ['1001', '1002', '1003', '1004', '1005'], '2026-11-19T18:15:00Z', {as: ids.fast});
@@ -183,12 +181,15 @@ test('a race that is over offers neither Undo nor the newer-version notice', () 
     // the same version in the same place, only the race is over now: its row is in overLists, quiet
     assert.deepEqual(cockpitView(c, 'rollers', {now: over}).overLists[0].plans[0].shown.map(r => [r.id, r.notice]), [[f4, false], [ids.f3, false]]);
 
-    // v2 made live a minute before the race is over: within the Undo window both before and after
+    // v2 made live a minute before the race is over: the table shows it as riders get it, before and after
     makeLive(c, 'rollers', ids.f2, over - 60000);
     const panel = now => cockpitView(c, 'rollers', {now, sel: sel(c, `v=${ids.f2}`, 'rollers', now)}).panel;
-    assert.deepEqual([panel(over - 1).base, panel(over - 1).undo, panel(over - 1).over], [{kind: 'self', id: ids.f2}, true, false]);
-    // Undo is gone with the race; the table shows it as riders get it, as before
-    assert.deepEqual([panel(over).base, panel(over).undo, panel(over).over], [{kind: 'self', id: ids.f2}, false, true]);
+    assert.deepEqual([panel(over - 1).base, panel(over - 1).over], [{kind: 'self', id: ids.f2}, false]);
+    assert.deepEqual([panel(over).base, panel(over).over], [{kind: 'self', id: ids.f2}, true]);
+    // no row and no card carries anything of an Undo (user, 23 Nov 2026)
+    const v = cockpitView(c, 'rollers', {now: over - 1, sel: sel(c, `v=${ids.f2}`, 'rollers', over - 1)});
+    assert.equal(Object.hasOwn(v.panel, 'undo'), false);
+    assert.ok([...v.lists, ...v.overLists].flatMap(r => r.plans.flatMap(p => [...p.shown, ...p.older])).every(r => !Object.hasOwn(r, 'undo')));
 });
 
 
