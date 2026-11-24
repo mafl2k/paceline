@@ -17,6 +17,12 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 ## Unreleased
 
 ### Mod
+
+### Server
+
+## 0.3.5 (2026-11-24)
+
+### Mod
 - The Info window's lines start at its top edge instead of in the middle, so a taller window grows downwards.
 - With "Fields while resting" on and no Rest window, the Action window shows two of your fields and the countdown as the third, your place under it, instead of only the big countdown; the Right setting says so.
 - Recordings also note other riders near the team (anonymous: no name or Zwift ID), so the analysis can tell when other teams disturbed the line.

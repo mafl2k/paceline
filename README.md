@@ -1,6 +1,6 @@
 <img src="docs/images/banner.png" width="100%" alt="Paceline, hand-drawn on a notebook page: four riders in a line seen from above, an orange arrow showing the rotation, and a team plan in time@W/kg with crossed-out and corrected pulls">
 
-# Paceline 0.3.5-beta.0
+# Paceline 0.3.6-beta.0
 
 Paceline is a mod for Sauce for Zwift that carries your team's TTT plan into the ride. It shows who
 is pulling, the countdown to your pull and, during your pull, your target and a power bar. It also
