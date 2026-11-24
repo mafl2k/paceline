@@ -107,6 +107,11 @@ test('CLI: notes <version> prints the notes text, or nothing', () => {
     assert.deepEqual(cli(doc, 'notes', '0.3.9'), {status: 0, out: '', err: ''});
     assert.deepEqual(cli(doc, 'notes', 'Unreleased'), {status: 0, out: '', err: ''});
     assert.deepEqual(cli(null, 'notes', '0.3.4'), {status: 0, out: '', err: ''});
+    // A beta's notes: the Unreleased lines (export-public.sh with GITHUB_PRERELEASE=1).
+    assert.deepEqual(cli(DOC, 'unreleased'), {status: 0, out: 'Mod:\n- Windows invisible outside a TTT\n\nServer:\n- Team page\n', err: ''});
+    assert.deepEqual(cli(doc, 'unreleased'), {status: 0, out: '', err: ''});    // just released: empty
+    assert.deepEqual(cli(null, 'unreleased'), {status: 0, out: '', err: ''});
+    assert.equal(cli(DOC, 'unreleased', '0.3.4').status, 2);
     const bad = cli(doc, 'frob');
     assert.equal(bad.status, 2);
     assert.match(bad.err, /usage/);

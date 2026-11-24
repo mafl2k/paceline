@@ -17,7 +17,9 @@
 Work happens on branches off `next`; `main` is production and `next` is the beta channel. A push
 to either builds and deploys what changed. Every change a rider or a team captain can notice gets
 one plain line in `CHANGES.md`, under `## Unreleased`, `### Mod` or `### Server` (see the header of
-that file). Those lines become the release notes of GitHub, GitLab and the Sauce mod store.
+that file). Those lines become the release notes of GitHub, GitLab and the Sauce mod store. A
+GitHub beta (a new beta version pushed to `next`) gets the `## Unreleased` lines as its notes:
+everything since the last release.
 
 To promote `next` to production, run the manual job `promote` (the play button) on a branch pipeline
 of `next`. It does the release with git only:
