@@ -20,6 +20,7 @@ import {uploadSession} from './logupload.mjs';
 import {loadCommon, selfAthleteId, selfWeight} from './sauce.mjs';
 import {S, fmt} from './strings.mjs';
 import {youText} from './youline.mjs';
+import {fieldKind} from './engine/display.mjs';
 
 const $ = sel => document.querySelector(sel);
 const ERROR_KEYS = {'no-json': 'noJson', 'not-a-plan': 'notAPlan', 'unreadable': 'unreadable'};
@@ -1056,7 +1057,15 @@ export async function settingsMain() {
     if (Common) {
         Common.initInteractionListeners();
         // The Action window's options have their defaults in the HTML (midSmall checked, the slots
-        // off / now / off): the form keeps them while a key is unset, nothing is written here.
+        // off / power / off): the form keeps them while a key is unset. Only an earlier power choice
+        // (Power now, Power W, Power W/kg; one Power field since 0.3.6) is stored as 'power' first,
+        // so its select shows it (the Action window reads both, display.mjs fieldKind).
+        for (const k of ['recLeft', 'recMid', 'recRight']) {
+            const v = Common.settingsStore?.get(k);
+            if (v !== 'power' && fieldKind(v) === 'power') {
+                Common.settingsStore.set(k, 'power');
+            }
+        }
         await Common.initSettingsForm('#pl-appearance-form')();
     }
     $('#pl-done').addEventListener('click', () => window.close());

@@ -57,7 +57,7 @@ import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, initialMarker, mark
         pullOnlyModel, penModel, riderTarget, barTarget, pickWeight,
         shownModel, fieldsGapBand, fieldsShown, clockInFields, clockField, restClockOf, restTakes, restShowsOf, actionPhase, phaseStep,
         restHandBack, demoBadge, vanishes,
-        fieldSlots, recoveryFields, smooth5, labelParts, planParts, PART_MARK}
+        fieldSlots, recoveryFields, smooth5, powerNow, labelParts, planParts, PART_MARK}
     from './engine/display.mjs';
 import {serverBase, pollDue, pollEvery, retryAfterOf, backoffStep, pollLeaseStep, checkUrl, checkHeaders, inEventOf,
         rollStep, choosePlan, lockAtRollOff, lockAfterClubs, lockFor, serverDecision, chooseForLock, pendingFor,
@@ -2263,8 +2263,8 @@ function renderTriple(m, me, now) {
     setText(wnum, target ? target.value : S.noRotation);
     wnum.classList.toggle('pl-dim', !target);
     setText($('#pl-act-wunit'), target ? target.unit : '');
-    const nowW = markerPower(marker, now);
-    const nowText = nowValue(nowW, weight, target ? unit : 'W');
+    const nowW = myPowerNow(now);
+    const nowText = nowW === null ? null : nowValue(nowW, weight, target ? unit : 'W');
     const nowEl = $('#pl-act-now');
     setText(nowEl, nowText ?? S.noRotation);
     const zone = m.kind === 'pull' && nowText !== null ? m.marker?.zone ?? null : null;
@@ -2299,6 +2299,19 @@ function renderTriple(m, me, now) {
 }
 
 
+// My power for the number in the middle (pull, READY) and the Power field: as Zwift sends it, or
+// Sauce's 5 s power with "5 s smoothed power" on (display.mjs powerNow); the marker keeps its filter.
+function myPowerNow(now) {
+    return powerNow({raw: selfEntry(currentNearby(now))?.state?.power, smooth5W: mySmooth5(now)});
+}
+
+
+function mySmooth5(now) {
+    const entry = selfEntry(currentNearby(now));
+    return smooth5({on: winSettings.recSmooth5, sauce: entry?.stats?.power?.smooth?.['5'], hist, now});
+}
+
+
 // The unit of my power now: Paceline's target unit, watts without any weight (as the pull shows it).
 function nowUnit(weight) {
     return weight === null ? 'W' : prefs.targetUnit;
@@ -2324,8 +2337,7 @@ function renderFields(slots, me, now, reason, clockModel = null) {
     const fields = recoveryFields(slots, entry?.state, {
         unit: nowUnit(weight),
         weight,
-        nowW: markerPower(marker, now),
-        smooth5W: smooth5({on: winSettings.recSmooth5, sauce: entry?.stats?.power?.smooth?.['5'], hist, now}),
+        smooth5W: mySmooth5(now),
     });
     const g = gapNow();
     renderGapEarly(false, g);    // the middle unit line back to plain (it set "now" there)
@@ -2465,8 +2477,8 @@ function applyBackground() {
 
 // The Action window's own options (Sauce's per-window settings store, settings.html), each with its
 // default while unset (and in the plain-browser preview): "Smaller middle field" on, the recovery
-// fields off with the slots off / Power now / off, "5 s smoothed" off.
-const WIN_DEFAULTS = {midSmall: true, recFields: false, recLeft: 'off', recMid: 'now', recRight: 'off', recSmooth5: false};
+// fields off with the slots off / Power / off, "5 s smoothed" off.
+const WIN_DEFAULTS = {midSmall: true, recFields: false, recLeft: 'off', recMid: 'power', recRight: 'off', recSmooth5: false};
 let winSettings = {...WIN_DEFAULTS};
 
 function readWinSettings() {

@@ -43,21 +43,19 @@ export const S = {
     midSmallLabel: 'Smaller middle field',
     midSmallHelp: 'Off: all three numbers the same size',
     recFieldsLabel: 'Fields while resting',
-    recFieldsHelp: 'This window shows the fields you pick until READY. With a Rest window open, the Rest window has the countdown; without one, the right field here is the countdown with your place under it. While the order does not hold (≠) it shows them always, your power now in the middle when this is off.',
+    recFieldsHelp: 'This window shows the fields you pick until READY. With a Rest window open, the Rest window has the countdown; without one, the right field here is the countdown with your place under it. While the order does not hold (≠) it shows them always, your power in the middle when this is off.',
     recLeftLabel: 'Left',
     recMidLabel: 'Middle',
     recRightLabel: 'Right (if Rest window active, otherwise countdown)',    // user, 23 Nov 2026
     recOff: 'Off',
-    recNow: 'Power now',
-    recPowerW: 'Power W',
-    recPowerWkg: 'Power W/kg',
+    recPower: 'Power',
     recDraft: 'Draft',
     recSpeed: 'Speed',
     recCadence: 'Cadence',
     recHeartrate: 'Heart rate',
     recGrade: 'Grade',
     recSmooth5Label: '5 s smoothed power',
-    recSmooth5Help: 'For Power W and Power W/kg. Power now is smoothed as in your pull.',
+    recSmooth5Help: 'For your power number in the pull and in the Power field. Off: your power as Zwift sends it. The bar\'s marker has its own filter either way.',
     saveFailed: 'Could not save the plan in this browser.',
 
     // plan section
@@ -228,8 +226,8 @@ export const S = {
     finishOff: 'Finish – rotation off',
     wattUnit: 'W',
     wkgUnit: 'W/kg',
-    // the recovery fields' unit lines (Action window, spec 2026-11-20 big numbers section 3); power
-    // now says "power" there (the pull's middle field keeps nowLabel), draft has no W (user, 22 Nov 2026)
+    // the recovery fields' unit lines (Action window, spec 2026-11-20 big numbers section 3); the
+    // Power field says "power" there (the pull's middle field keeps nowLabel), draft has no W (user, 22 Nov 2026)
     powerLabel: 'power',
     draftUnit: 'draft',
     kmhUnit: 'km/h',

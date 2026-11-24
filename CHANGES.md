@@ -20,6 +20,14 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 
 ### Server
 
+## 0.3.6 (2026-11-24)
+
+### Mod
+- Your power number in the Action window is your power as Zwift sends it (or 5 s smoothed with "5 s smoothed power"), like other live-data windows; only the bar's marker stays filtered.
+- The resting fields have one Power choice in your Pull target unit instead of Power now, Power W and Power W/kg; a field set to one of those shows Power.
+
+### Server
+
 ## 0.3.5 (2026-11-24)
 
 ### Mod
