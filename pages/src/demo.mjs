@@ -6,18 +6,24 @@
 // the back); each pull is a scripted segment, and the timeline shows every case of my own pull:
 //   A  the rider before me pulls 3 s over his plan (NEXT), I ramp up and take over (jump start,
 //      confirmed when my draft drops to 0), pull 30 s and drop to ~80 W for 2 s, still in front
-//      for a few seconds (drop end);
+//      for a few seconds (drop end); at the end of that round the rider two before me pulls
+//      OVER_STAND_S over his plan, so my countdown waits for the change (the standing clock, ≥);
 //   B  the rider before me pulls 9 s over; in his last 10 s I surge for 4 s but stay on his wheel
 //      (the pending start is never confirmed and is dropped unseen), then he swings aside and I
 //      lead without a jump (draft start: my draft is 0 before the positions show it);
 //   C  the two riders before me are dropped, the one in front of them is passed through early:
 //      I ramp while still on his wheel and pass him 5 s later (early start by sustained power);
-//      later a 30 s climb at 5 % (a roller without a route profile: the rotation goes on);
+//      later a climb at 5 %: without a route profile a roller for its first 45 s (the rotation
+//      goes on), then a real climb. There the rider before the climber jumps the queue to the
+//      front, which breaks the order: the windows show ▲ until the top. Over the top he leads on
+//      (regroup, quiet) until he is a clear puller and the rotation goes on from him;
 //      the last FINISH_LAST_S of the team ride are the final sprint (my entry's `remaining`
 //      counts down to the finish, and is within 500 m from then on).
 // Gaps in the line (gaps.mjs): in my first pull the whole group lets GAP_M open behind me, in my
-// second one the last rider drifts to EARLY_M (the early stage only), in my last one (in C) the
-// last rider drops GAP_M, and in the pull after my first one I (now last) do. Each gap opens within
+// second one the last rider drifts to EARLY_M (the early stage) and from LATE_AT_S on drops GAP_M:
+// with five still in front his drop is acceptable, so the band is amber (user, 24 Nov 2026); in my
+// last one (in C, four left) the last rider drops GAP_M (red), and in the pull after my first one
+// I (now last) do. Each gap opens within
 // GAP_RAMP_S and closes again over GAP_CLOSE_S, the rider behind faster by what it takes, so it
 // shows green while it closes (user, 17 Nov 2026).
 // After each of my pulls I drift back to the end of the line over DRIFT_S.
@@ -41,7 +47,10 @@ const RAMP_LEAD_S = 2;     // I ramp this long before the rider in front swings 
 const SOFT_LEAD_S = 4;     // B: he swings aside this long before the positions show me in front
 const CUT_S = 23;          // C: the passed-through pull, and when in it I ramp
 const CUT_RAMP_S = 18;
-const CLIMB_S = 30;
+const OVER_STAND_S = 24;    // the rider two before me pulls this much over his plan (standing clock)
+const CLIMB_S = 58;        // a roller for ROLLER_LIVE_MS (45 s) after 5 s at the grade, then real
+const BREAK_S = 20;        // on the real climb another rider leads this long (the order breaks: ▲)
+const REGROUP_S = 14;      // ... and over the top on, until he is a clear puller
 const CLIMB_GRADE = 0.05;  // Sauce gives the grade as a fraction
 const ALONE_S = 130;
 const FINISH_LAST_S = 30;
@@ -51,6 +60,8 @@ const DEFAULT_WATTS = 250;
 const DEFAULT_PULL_S = 30;
 const GAP_M = 14;          // a gap in the line opens to this ...
 const EARLY_M = 7;         // ... or only to this (the early stage; plus the 2 m spacing)
+const LATE_AT_S = 12;      // my second pull: the early stage first, from here on the full gap ...
+const LATE_PULL_S = 42;    // ... in a pull this long, so the band shows before it closes (my last one too)
 const GAP_EDGE_S = 4;      // ... from this long into the pull until this long before its end
 const GAP_RAMP_S = 3;
 const GAP_CLOSE_S = 10;    // ... and closes again over this long (the rider behind closes it)
@@ -87,6 +98,9 @@ function script(riders) {
     // A
     add(before, pullOf(before) + OVER_A_S, {ramp: true});
     round(0, n - 2);
+    if (n >= 3) {
+        segs.at(-1).dur += OVER_STAND_S;
+    }
     // B
     const overB = pullOf(before) + OVER_B_S;
     add(before, overB, {soft: true, surgeAt: Math.max(0, overB - OVER_B_S - 9)});
@@ -100,14 +114,20 @@ function script(riders) {
     add(n - 3, CUT_S, {out, cut: true});
     add(0, MY_PULL_S, {out});
     add(1, 10, {out});
-    add(Math.min(2, n - 3), CLIMB_S, {out, grade: CLIMB_GRADE});
-    round(Math.min(2, n - 3), n - 2);
+    const climber = Math.min(2, n - 3);
+    add(climber, CLIMB_S, {out, grade: CLIMB_GRADE});
+    if (n >= 5) {
+        // Rider 1 is neither the climber nor his plan's next (rider 3, or me with 5 riders).
+        add(1, BREAK_S, {out, grade: CLIMB_GRADE});
+        add(1, REGROUP_S, {out});
+    }
+    round(climber, n - 2);
     markGaps(segs);
     return segs;
 }
 
 
-// The gap segments: my first pull 'group', my second 'early' (the last rider), my last one 'last'
+// The gap segments: my first pull 'group', my second 'late' (the last rider), my last one 'last'
 // (one rider), the first pull of rider 1 'last' (that is me; at least MY_PULL_S long).
 function markGaps(segs) {
     const mine = segs.filter(sg => sg.lead === 0);
@@ -115,8 +135,10 @@ function markGaps(segs) {
         mine[0].gap = 'group';
     }
     if (mine.length > 2) {
-        mine[1].gap = 'early';
+        mine[1].gap = 'late';
+        mine[1].dur = LATE_PULL_S;
         mine.at(-1).gap = 'last';
+        mine.at(-1).dur = LATE_PULL_S;    // the red band (four left) stays before it closes
     }
     const after = segs.find(sg => sg.lead === 1 && !sg.out.size);
     if (after) {
@@ -179,7 +201,9 @@ export function startDemo(plan, onNearby) {
             return 0;
         }
         const f = Math.min((at.u - GAP_EDGE_S) / GAP_RAMP_S, (at.sg.dur - GAP_EDGE_S - at.u) / GAP_CLOSE_S);
-        return (at.sg.gap === 'early' ? EARLY_M : GAP_M) * Math.max(0, Math.min(1, f));
+        const late = Math.max(0, Math.min(1, (at.u - LATE_AT_S) / GAP_RAMP_S));
+        const m = at.sg.gap === 'late' ? EARLY_M + (GAP_M - EARLY_M) * late : GAP_M;
+        return m * Math.max(0, Math.min(1, f));
     };
     const distAt = (i, s) => {
         const at = segAt(s);

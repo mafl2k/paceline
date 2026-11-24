@@ -214,7 +214,8 @@
 //        a version has no date or time field (it takes its plan's race); Add a team hides the weekly fields while
 //        special is checked.
 // Each check prints `ok …` or `FAIL …`; any FAIL exits 1. With --shots it saves
-// captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen),
+// captain-teams-390-{light,dark}.png, captain-team-390-{light,dark}.png (the first screen, taken
+// before the run changes anything: Rollers' live plan is the mod's demo plan),
 // captain-team-settings-390-{light,dark}.png, captain-team-cogs-390-light.png (Cogs, no start
 // time), a special team's settings (captain-team-settings-special-{390,1280}-light.png) and Add a
 // team with special checked (captain-new-team-special-390-light.png), and every captain page at
@@ -237,11 +238,20 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {startServer, fakeMailer, planJson, T, CODE_SECRET} from './helpers.mjs';
+import {startServer, fakeMailer, planJson, T, CODE_SECRET, RIDERS} from './helpers.mjs';
+import {sampleJson, samplePlan} from '../../pages/src/engine/demoplan.mjs';
 import {CID, makeClub, secondClub, upload} from './manage-helpers.mjs';
 import {uploadSheet, makeLive, addTeam, addEntry, discardEntry, deleteTeam, deleteSheet, receiveEntry, setRace, setRaceEvent} from '../club.mjs';
 import {randomId} from '../ids.mjs';
 import {racesOf} from '../races.mjs';
+
+// The riders of the mod's demo (pages/src/engine/demoplan.mjs), so the README's pictures of the mod and
+// of the plan server show the same team (user, 24 Nov 2026). Only in this run: the unit tests keep
+// their short names, and no check here reads a name.
+Object.assign(RIDERS, {
+    '1001': 'Alma Keller', '1002': 'Ben Richter', '1003': 'Cleo Maier', '1004': 'Dana Lorenz',
+    '1005': 'Eli Sommer', '1006': 'Finn Weber', '1007': 'Gina Hoff', '1008': 'Hugo Brandt', '1009': 'Ida Wolf',
+});
 
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const NOW = T('2026-11-19T18:12:00Z');
@@ -265,7 +275,9 @@ if (!fs.existsSync(CHROME)) {
 
 // ---- the club: three teams; Rollers with two plans of its race, Sprockets with one; riders seen ----
 const c = makeClub({teams: [['Rollers', '19:30'], ['Sprockets', '19:30'], ['Cogs', null]]});
-const rollersLive = upload(c.club, 'rollers', {type: 'fast', riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:00:00Z')});
+// Rollers' live plan is the mod's demo plan (its pulls and watts, without its bench), so the plan
+// server's pictures show the plan code of the mod's demo pictures (user, 24 Nov 2026)
+const rollersLive = upload(c.club, 'rollers', {type: 'fast', json: {...sampleJson(), team: {name: 'Rollers fast'}, roster: {}}, at: T('2026-11-18T20:00:00Z')});
 const rollersSlow = upload(c.club, 'rollers', {type: 'slow', riders: ['1001', '1002', '1003', '1004', '1005', '1006'], at: T('2026-11-18T20:02:00Z'), live: false});
 const sprocketsLive = upload(c.club, 'sprockets', {riders: ['1007', '1008', '1009'], at: T('2026-11-18T20:05:00Z')});
 const fastPlan = c.club.sheets[rollersLive].plan;
@@ -296,6 +308,7 @@ const see = (aid, at, entry) => {
     clock.now = NOW;
 };
 const rSig = c.club.sheets[rollersLive].sig;
+report(rSig === samplePlan().sig, 'Rollers\' live plan has the plan code of the mod\'s demo plan', `${rSig} / ${samplePlan().sig}`);
 for (const aid of ['1001', '1002', '1003', '1004']) {
     see(aid, '2026-11-19T18:05:00Z', {sig: rSig, mod: '0.3.0', sheet: rollersLive, inEvent: true, event: 4567001});
 }
@@ -616,7 +629,32 @@ async function cleanPublic(p, status = 200) {
     report(!f.small.length, `${p} tap targets >= 44 px`, f.small.join(' | '));
 }
 
+// A screenshot of page p at width w into shotsDir (full: the whole page)
+const shoot = async (name, p, w, scheme, full) => {
+    await open(p, {w, scheme});
+    let h = 844;
+    if (full) {
+        h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
+        await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
+        await sleep(300);
+    }
+    const r = await tab.send('Page.captureScreenshot', {format: 'png'});
+    fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
+    console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
+};
+
+
 try {
+    // ---- the first screens, before anything changes: Rollers' live plan is still v1, the mod's
+    // demo plan, so its plan code is the one on the mod's pictures (user, 24 Nov 2026) ----
+    if (shotsDir) {
+        for (const scheme of ['light', 'dark']) {
+            await shoot(`captain-teams-390-${scheme}.png`, '/manage', 390, scheme, false);
+            await shoot(`captain-team-390-${scheme}.png`, '/manage/team/rollers', 390, scheme, false);
+            await shoot(`captain-team-settings-390-${scheme}.png`, '/manage/team/rollers/settings', 390, scheme, true);
+        }
+    }
+
     // ---- 1 and 2: the pages load clean, run the script, fit 390 px ----
     for (const p of ['/manage', '/manage/team/rollers', '/manage/team/cogs', '/manage/settings', '/manage/upload?team=rollers',
         `/manage/team/rollers?v=${rollersSlow}`]) {
@@ -1307,23 +1345,6 @@ try {
 
     // ---- shots for a look next to the prototype's ----
     if (shotsDir) {
-        const shoot = async (name, p, w, scheme, full) => {
-            await open(p, {w, scheme});
-            let h = 844;
-            if (full) {
-                h = await tab.evaluate('Math.ceil(document.documentElement.scrollHeight)');
-                await tab.send('Emulation.setDeviceMetricsOverride', {width: w, height: h, deviceScaleFactor: Math.min(2, 7990 / h), mobile: w < 600});
-                await sleep(300);
-            }
-            const r = await tab.send('Page.captureScreenshot', {format: 'png'});
-            fs.writeFileSync(path.join(shotsDir, name), Buffer.from(r.result.data, 'base64'));
-            console.log(`wrote ${path.join(shotsDir, name)} ${w}x${h}`);
-        };
-        for (const scheme of ['light', 'dark']) {
-            await shoot(`captain-teams-390-${scheme}.png`, '/manage', 390, scheme, false);
-            await shoot(`captain-team-390-${scheme}.png`, '/manage/team/rollers', 390, scheme, false);
-            await shoot(`captain-team-settings-390-${scheme}.png`, '/manage/team/rollers/settings', 390, scheme, true);
-        }
         await shoot('captain-team-cogs-390-light.png', '/manage/team/cogs', 390, 'light', true);
         // the team page with its switcher open (phones: the teams, All teams)
         await open('/manage/team/rollers');

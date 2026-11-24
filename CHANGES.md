@@ -38,6 +38,7 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 - A rider who takes the front while the start is still settling gets his pull clock from when he came to the front, not from the end of the start; he takes over only after his usual 3 or 20 seconds once the start has settled.
 - Without route data a rise counts as a real climb only after 45 seconds; a shorter rise keeps the rotation going.
 - When you start your pull ahead of riders who were due before you, they sit out until they pull and your countdown leaves them out; if the last puller takes the front back, they are back in the line.
+- The demo also shows a rider pulling well over his plan (your countdown waits with ≥), a rider dropping whose drop is acceptable (the amber gap band) and the 4th rider dropping (the red one, now long enough to see) and a real climb where a rider jumps the queue (▲ until the top), so you can see them before a race. Its sample plan is called "Rollers · fast demo", like a plan from the plan server.
 
 ### Server
 - The privacy page says that recordings also hold anonymous rows of other riders near the team (no name or Zwift ID).
