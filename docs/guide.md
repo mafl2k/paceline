@@ -259,28 +259,38 @@ or wider and they grow.
   is pulling (`#1`). `#2` means you are next.
 - **READY:** in the last 10 seconds before your pull the window shows your target, your power now
   and `READY` in amber; [the pictures](../README.md) on the front page show how it looks. The power
-  bar is there already, with a white marker. It shows where you are against the target, so you come
-  up to it before the handover instead of surging. Being below the target in the draft is right, so
-  nothing turns red yet. The middle number is drawn smaller than the two at the sides (see **Smaller
-  middle field** below).
+  bar is there already with its band and the shadow of your power now (see your pull, below), but
+  without a marker. It shows where you are against the target, so you come up to it before the
+  handover instead of surging. Being below the target in the draft is right: the band only shows
+  how far below you are. The middle number is drawn smaller than the two at the sides (see
+  **Smaller middle field** below).
 - During your pull the window shows three numbers: your target on the left, your power now in the
   middle, and the time left of your pull in seconds on the right (`110`, `s`). The time turns
   amber in the last 10 seconds and, over time, runs on below zero in amber (`−4`). Below is the
-  power bar. Its middle line is your target. Green is within 5 % of it, amber within 10 %, red
-  beyond. The marker is your filtered power. Single spikes in Zwift's power are thrown out, the rest
-  is smoothed over a few seconds, and the marker only moves once that is more than 2 % (about 5 W)
-  away from where it stands. So it keeps still while you ride on target, and a real drop of 10 %
-  shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
-  while you ramp up, the marker stays white. The number in the middle is your power as Zwift sends
-  it, once a second, like other live-data windows, in the marker's colour. Tick **5 s smoothed
-  power** to see the average of the last 5 seconds instead. The number moves more than the marker:
-  ride by the bar, the number only tells you what you push. It is kept small on purpose. Without pull watts in
-  the plan, neither in the JSON nor from a text export, there is no target. You then see `–` as the
+  power bar. Its green field is your target: green is within 5 % of it, amber within 10 %, red
+  beyond. The red ends reach out to 30 % off the target, squeezed towards the ends, so a surge or a
+  soft spell still shows how far out you are. A soft white band on the bar shows where your power
+  has been in the last 10 seconds, from the lowest second to the highest, with a soft shadow inside
+  it at your power now. Single spikes in Zwift's power, like the dip of a gear change, are left
+  out, and the band glides over about a second instead of jumping. 5 seconds into your pull the
+  big marker appears: your average of the seconds of your pull so far, up to the last 10, in the
+  colour of its zone. The ramp-up counts, so after a slow start the marker can show amber for a
+  few seconds. After that the marker keeps still while you ride on target,
+  and the band and its shadow show quickly when you move away.
+  The number in the middle is your power as Zwift sends it, once a second, like other live-data
+  windows, in the marker's colour once the marker shows. Tick **5 s smoothed power** to see the
+  average of the last 5 seconds instead. The number moves more than the marker: ride by the bar,
+  the number only tells you what you push. It is kept small on purpose. Without pull watts in the
+  plan, neither in the JSON nor from a text export, there is no target. You then see `–` as the
   target, your power now, the time and a plain grey bar.
 - **Smaller middle field**: the middle number is drawn a little smaller than the two at the sides.
   That is your power now in READY and during your pull, and the middle field while resting (see
   "Fields while resting"). So the target and the time stand out, and the bar stays what you ride by.
   It is on by default. To have all three numbers the same size, untick **Smaller middle field** in
+  the Action window's settings (under "This window").
+- **Numbers on the power bar** (off by default): each amber and red field shows where it begins,
+  on its side towards the middle, in your **Pull target** unit: watts rounded to 10, W/kg to 0.1.
+  At a 200 W target that is `180` and `190` on the left, `210` and `220` on the right. Tick it in
   the Action window's settings (under "This window").
 - **Fields while resting** (off by default): three fields of your choice in the Action window while
   you rest. See "Fields while resting" below.
@@ -339,7 +349,7 @@ until READY, the last 10 seconds before your pull. From then on the window shows
 as always. A climb or descent (the Rest window shows `▲` or `▼`) does not change them, and they keep
 showing live values.
 
-<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, the 5 s smoothed power box, Fields while resting ticked with Heart rate on the left, Power in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown)">
+<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, the 5 s smoothed power box and the Numbers on the power bar box (both unticked), Fields while resting ticked with Heart rate on the left, Power in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown)">
 
 Without a Rest window, or with one that has no countdown yet, the countdown is the right field. The
 number is on top and your place under it (`13` over `#2`, `3:59` over `#6`). While the clock stands
@@ -613,8 +623,8 @@ transparency. With a **Transparent** theme such as Dark, the background disappea
 when you move the mouse over the window. For your own colour or opacity, open the settings from that
 window, tick **Solid background** under Appearance and set the opacity with the slider (100 =
 opaque). Each Paceline window keeps its own, as in Sauce's windows. The Action window has its own
-settings window for that, with its own options below the appearance: **Smaller middle field** and
-**Fields while resting**.
+settings window for that, with its own options below the appearance: **Smaller middle field**,
+**5 s smoothed power**, **Numbers on the power bar** and **Fields while resting**.
 
 ### Recorder
 

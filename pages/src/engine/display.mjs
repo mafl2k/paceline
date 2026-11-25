@@ -1,6 +1,6 @@
 // Pure logic (no DOM, no Sauce imports): what the action window shows for a rotation view, the
-// m:ss clock, the pull target in W or W/kg, and the filter of my own power for the power-bar
-// marker.
+// m:ss clock, the pull target in W or W/kg, and the power bar's marker and band (their filter is
+// powerband.mjs).
 import {WARN_S, SMOOTH_S, powerBar} from './rotation.mjs';
 import {S, fmt} from '../strings.mjs';
 
@@ -31,8 +31,9 @@ export function restClock(s) {
 
 // My power now for the Action window: watts in the target's unit and with the same weight (W/kg
 // with one decimal, else whole watts), null without power. The number is my power as Zwift sends it,
-// or 5 s smoothed (powerNow); only the marker is filtered (user, 24 Nov 2026: "bar marker needs
-// filter, but the number should be raw or 5 s", as O101's live data shows it).
+// or 5 s smoothed (powerNow); only the bar is filtered (user, 24 Nov 2026: "bar marker needs
+// filter, but the number should be raw or 5 s", as O101's live data shows it; the bar's band and
+// marker are powerband.mjs).
 export function nowValue(watts, weight, unit) {
     if (!Number.isFinite(watts)) {
         return null;
@@ -100,76 +101,24 @@ export function barTarget(rider, weight, unit) {
 }
 
 
-// ---------- the power marker's filter ----------
-// User, 12 Nov 2026: within about 10 W of the target the marker should keep still, a real drop of
-// 10 % should show. Zwift's 1 Hz power has single spikes, so a median first throws them out, then
-// a short exponential smoothing, then a deadband: the marker only moves when the smoothed power is
-// more than DEADBAND_PCT of the target away from where it stands. Compared with 20 other filters
-// (16 real pulls, simulated -5/-10 % steps with their noise): 1.2 W/s marker movement (3 s mean:
-// 7.4), the wrong colour 1.2 % of the time at target power, a 10 % drop coloured after about 4 s.
-export const MEDIAN_N = 5;         // median over the last 5 samples (1 Hz)
-export const POWER_TAU_S = 4;      // then exponential smoothing over about this many samples
-export const DEADBAND_PCT = 2;     // the marker moves only beyond this (percent of the target)
-export const PULL_SETTLE_S = 5;    // the first seconds of my pull: a neutral marker (ramping up)
-
-
-export function initialMarker() {
-    return {w: null, ema: null, buf: [], at: null, pullSince: null, zone: null};
-}
-
-
-function median(xs) {
-    const s = [...xs].sort((a, b) => a - b);
-    const m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
-
-// One power sample {at, w}. pull: {since, target} while I pull, else null. The filter starts over
-// after a gap (POWER_KEEP_MS) and at the start of each pull. `w` is the marker's power (the
-// deadband only applies with a target); `zone` its colour: the bar zone of `w`, null (neutral)
-// outside a pull, without a target and in the first PULL_SETTLE_S of a pull.
-export function markerStep(st, {at, w, pull}) {
-    if (!Number.isFinite(w) || !Number.isFinite(at)) {
-        return st;
-    }
-    const s = {...initialMarker(), ...st};
-    const since = pull ? pull.since : null;
-    const fresh = s.w !== null && s.at !== null && at - s.at <= POWER_KEEP_MS;
-    const restart = !fresh || (!!pull && since !== s.pullSince);
-    const buf = [...(restart ? [] : s.buf), w].slice(-MEDIAN_N);
-    const med = median(buf);
-    const ema = restart ? med : s.ema + (med - s.ema) / POWER_TAU_S;
-    const target = pull && Number.isFinite(pull.target) && pull.target > 0 ? pull.target : null;
-    const band = target === null ? 0 : DEADBAND_PCT / 100 * target;
-    const shown = restart || Math.abs(ema - s.w) > band ? ema : s.w;
-    const settled = !!pull && at - since >= PULL_SETTLE_S * 1000;
-    return {w: shown, ema, buf, at, pullSince: since,
-            zone: settled && target !== null ? powerBar(shown, target).zone : null};
-}
-
-
-// My smoothed power if its last sample is at most POWER_KEEP_MS old, else null.
-export function markerPower(st, now) {
-    return st && st.w !== null && st.at !== null && now - st.at <= POWER_KEEP_MS ? st.w : null;
-}
-
-
-// meanW: my filtered power (markerPower); zone: the marker's colour from markerStep (null:
-// neutral; left out: the bar zone of meanW).
+// meanW: the bar marker's power (powerband.mjs bandStep's `marker`: my 10 s average from 5 s into my
+// pull, null before and in READY); zone: its colour from bandStep (null: neutral, white; left out:
+// the bar zone of meanW). band: {lo, hi, w} in watts, the band of my last 10 s and my de-spiked power
+// now (its shadow), or null.
 // kind 'none': nothing to show (no view). 'rest': timeS = seconds to my pull; `next` in the last
 // WARN_S of it, when the window shows a steady amber NEXT instead of the seconds (the countdown is
 // only good to about 10 s, the handover is called by voice; user, 12 Nov 2026). 'pull': watts =
 // my target (the plan's watts, from pull_power or the text export; null without both), timeS =
 // seconds left (or over, when `over`),
-// marker = powerBar of my smoothed power (null without target or power) against barW (barTarget:
-// pull_wkg × my weight in W/kg mode) when it is a number, else against the plan's watts; `watts`
-// stays the plan's watts either way (the window's target and the recorder's `w`).
+// marker = barMarker of meanW (null without target or power) against barW (barTarget: pull_wkg × my
+// weight in W/kg mode) when it is a number, else against the plan's watts, band = barBand of band
+// against the same (null without target or band; it shows without a marker too); `watts` stays the
+// plan's watts either way (the window's target and the recorder's `w`).
 // chaos (the rotation's reason 'chaos', 20 Nov 2026, spec 2026-11-20-paceline-chaos-counter section
 // 4): the team does not ride the plan's order, so the countdown by plan is wrong. Resting is then
 // 'none' (the Rest window's dash, no countdown, never READY); my pull shows as always (my plan and
 // my pull are real whatever the order).
-export function actionModel(view, meanW, zone, {barW = null, chaos = false} = {}) {
+export function actionModel(view, meanW, zone, {barW = null, chaos = false, band = null} = {}) {
     if (!view) {
         return {kind: 'none'};
     }
@@ -183,11 +132,13 @@ export function actionModel(view, meanW, zone, {barW = null, chaos = false} = {}
             // The standing clock: waiting for the change (overS: the puller over his plan).
             return view.standing ? {...rest, standing: true, overS: view.overS} : rest;
         }
-        // READY: my target and where my power is, the marker neutral (below target is right in the
-        // draft), so I can come up to the target before the handover instead of surging.
+        // READY: my target and where my power is, as the band and its shadow, no marker (user, 25 Nov
+        // 2026: its white marker "pops up shortly at the beginning"; below target is right in the
+        // draft), so I can come up to the target before the handover instead of surging. Never a
+        // marker here, whatever meanW comes in (a stale sample from my pull, say).
         const watts = Number.isFinite(view.me?.watts) ? view.me.watts : null;
         const bar = Number.isFinite(barW) ? barW : watts;
-        return {...rest, watts, marker: watts === null ? null : withZone(powerBar(meanW, bar), null)};
+        return {...rest, watts, marker: null, band: watts === null ? null : barBand(band, bar)};
     }
     const over = view.remainingS < 0;
     const watts = Number.isFinite(view.me?.watts) ? view.me.watts : null;
@@ -198,7 +149,8 @@ export function actionModel(view, meanW, zone, {barW = null, chaos = false} = {}
         timeS: Math.abs(view.remainingS),
         over,
         warn: view.remainingS <= WARN_S,    // also when over time
-        marker: watts === null ? null : withZone(powerBar(meanW, bar), zone),
+        marker: watts === null ? null : barMarker(meanW, bar, zone),
+        band: watts === null ? null : barBand(band, bar),
     };
 }
 
@@ -230,8 +182,32 @@ export function fieldsGapBand(g, reason) {
 }
 
 
-function withZone(bar, zone) {
-    return bar && zone !== undefined ? {...bar, zone} : bar;
+// The bar's marker: powerBar of meanW against the bar target `barW` with `zone` (null: white; left
+// out: the bar zone of meanW). null without power (no average shown yet) or target.
+export function barMarker(meanW, barW, zone) {
+    const bar = powerBar(meanW, barW);
+    return bar ? {...bar, ...(zone !== undefined ? {zone} : {})} : null;
+}
+
+
+// A band narrower than this (bar positions) has its shadow in the middle.
+const SHADOW_MIN_SPAN = 0.004;
+
+// The bar's band, apart from the marker (user, 25 Nov 2026: READY and my pull's first 5 s show the
+// band and its shadow without a marker): `band` ({lo, hi, w} watts: its edges and my de-spiked power
+// now) against the bar target `barW` as bar positions {lo, hi, now}, `now` the shadow's place inside
+// the band (0 its left end, 1 its right end, kept inside; 0.5 without w or when the band is narrower
+// than SHADOW_MIN_SPAN). null without band or target.
+export function barBand(band, barW) {
+    const lo = band ? powerBar(band.lo, barW) : null;
+    const hi = band ? powerBar(band.hi, barW) : null;
+    if (!lo || !hi) {
+        return null;
+    }
+    const w = powerBar(band.w, barW);
+    const span = hi.pos - lo.pos;
+    const now = w && span > SHADOW_MIN_SPAN ? Math.min(1, Math.max(0, (w.pos - lo.pos) / span)) : 0.5;
+    return {lo: lo.pos, hi: hi.pos, now};
 }
 
 
@@ -259,7 +235,8 @@ export function pullOnlyModel(m, {watts = null} = {}) {
         return m;
     }
     if (m.kind === 'rest' && (m.next || m.timeS === 0)) {
-        return {kind: 'armed', watts: Number.isFinite(watts) ? watts : null, marker: m.marker ?? null};
+        return {kind: 'armed', watts: Number.isFinite(watts) ? watts : null, marker: m.marker ?? null,
+                band: m.band ?? null};
     }
     return {kind: 'blank'};
 }
@@ -272,7 +249,9 @@ export function pullOnlyModel(m, {watts = null} = {}) {
 //          clock.mjs: its kind and seconds) | {k: 'pull', t, over, w, pos}
 //          | {k: dash} with dash from dashKind ('none' = dim dash, 'unknown' = amber ?, 'climb', 'descent',
 //          'chaos' = dim ≠ while I rest and the order does not hold, 20 Nov 2026)
-//   meanW  my 3 s mean power (the bar marker's input), rounded
+//   meanW  the bar marker's power (my 10 s average, from 5 s into my pull), rounded; null without a
+//          marker: READY, my pull's first 5 s and outside my pull (since the band bar, 24 Nov 2026;
+//          before, the marker's filter ran all the time; nothing reads it but a server test fixture)
 //   wheel  info "Wheel": {planned, live} (live only while the planned rider is missing)
 //   next   captain's "Next" (recorded whether or not the option is on): {id, planned}, or {chaos: true}
 //          while it says "Order ≠ plan"

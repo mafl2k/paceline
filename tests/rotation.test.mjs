@@ -197,11 +197,30 @@ test('powerBar: zones and position in percent of the target', () => {
     assert.equal(R.powerBar(252, 280).zone, 'amber');        // -10 %
     assert.equal(R.powerBar(251, 280).zone, 'red');
     const b = R.powerBar(315, 280);                           // +12.5 %
-    assert.equal(b.zone, 'red'); assert.ok(Math.abs(b.pos - (0.5 + 12.5 / 30)) < 1e-9);
+    const red = (15 - 10) / 30, f = Math.log(1 + 2.5 / 5) / Math.log(1 + 20 / 5);
+    assert.equal(b.zone, 'red'); assert.ok(Math.abs(b.pos - (0.5 + 10 / 30 + red * f)) < 1e-9);
     assert.equal(R.powerBar(400, 280).pos, 1);
     assert.equal(R.powerBar(100, 280).pos, 0);
     assert.equal(R.powerBar(280, 280).pos, 0.5);
     assert.equal(R.powerBar(280, 0), null);                   // no usable target
+});
+
+test('powerBar: green and amber linear, the red ends logarithmic out to RED_MAX_PCT', () => {
+    assert.deepEqual([R.RED_MAX_PCT, R.RED_LOG_K], [30, 5]);
+    const pos = w => R.powerBar(w, 300).pos;
+    const near = (got, want) => assert.ok(Math.abs(got - want) < 0.0005, `${got} vs ${want}`);
+    assert.equal(pos(300), 0.5);
+    near(pos(315), 0.6667);                                   // +5 %
+    near(pos(330), 0.8333);                                   // +10 %: where the red end starts
+    near(pos(345), 0.9051);                                   // +15 %
+    near(pos(360), 0.9471);                                   // +20 %
+    assert.equal(pos(390), 1);                                // +30 %: the end
+    assert.equal(pos(450), 1);
+    near(pos(255), 0.0949);                                   // -15 %
+    assert.equal(pos(210), 0);                                // -30 %
+    assert.equal(R.powerBar(345, 300).zone, 'red');
+    assert.equal(R.powerBar(325, 300).zone, 'amber');
+    assert.ok(pos(345) > pos(330) && pos(360) > pos(345) && pos(380) > pos(360));   // still rising
 });
 
 

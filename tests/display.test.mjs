@@ -27,66 +27,6 @@ function view(now, front, selfId = '5100002') {
     return R.rotationView(plan, {selfId, chainIds: all, wheelId: null, front, now});
 }
 
-test('markerStep: median, smoothing, restart after a gap and at a pull start', () => {
-    assert.deepEqual([D.MEDIAN_N, D.POWER_TAU_S, D.DEADBAND_PCT], [5, 4, 2]);
-    let m = D.markerStep(D.initialMarker(), {at: 0, w: 200, pull: null});
-    assert.equal(m.w, 200); assert.equal(m.zone, null);
-    m = D.markerStep(m, {at: 1000, w: 300, pull: null});
-    assert.equal(m.w, 212.5);                                 // median 250, 200 + (250 - 200) / 4
-    assert.equal(D.markerStep(m, {at: 2000, w: NaN, pull: null}), m);
-    assert.equal(D.markerPower(m, 1000 + D.POWER_KEEP_MS), 212.5);
-    assert.equal(D.markerPower(m, 1001 + D.POWER_KEEP_MS), null);
-    // After a gap it starts over.
-    assert.equal(D.markerStep(m, {at: 7000, w: 250, pull: null}).w, 250);
-    // My pull starts: it starts over with the pull's first sample.
-    m = D.markerStep(m, {at: 2000, w: 280, pull: {since: 1500, target: 280}});
-    assert.equal(m.w, 280); assert.equal(m.pullSince, 1500);
-});
-
-
-test('markerStep: a single spike does not move the marker, a few watts either way neither', () => {
-    const pull = {since: 0, target: 280};
-    let m = D.initialMarker();
-    for (let t = 0; t < 20; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 280, pull});
-    }
-    assert.equal(m.w, 280); assert.equal(m.zone, 'green');
-    m = D.markerStep(m, {at: 20000, w: 520, pull});              // one Zwift spike
-    assert.equal(m.w, 280);
-    for (let t = 21; t < 60; t++) {                               // +-5 W: inside the 2 % deadband
-        m = D.markerStep(m, {at: t * 1000, w: t % 2 ? 285 : 275, pull});
-        assert.equal(m.w, 280, `still at ${t}`);
-    }
-});
-
-
-test('markerStep: neutral at the start of a pull; a 10 % drop is coloured within a few seconds', () => {
-    assert.equal(D.PULL_SETTLE_S, 5);
-    const pull = {since: 0, target: 280};
-    let m = D.initialMarker();
-    for (let t = 0; t < 5; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 350, pull});
-        assert.equal(m.zone, null, `settling at ${t}`);          // the ramp-up shows no colour
-    }
-    for (let t = 5; t < 40; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 280, pull});
-    }
-    assert.equal(m.zone, 'green');
-    // 12 % short from 40 on: amber after a few seconds, then red.
-    const zones = [];
-    for (let t = 40; t < 60; t++) {
-        m = D.markerStep(m, {at: t * 1000, w: 246, pull});
-        zones.push(m.zone[0]);
-    }
-    assert.match(zones.join(''), /^g{2,4}a+r+$/);
-    assert.ok(zones.indexOf('a') <= 5, zones.join(''));
-    // Without a target or outside a pull: neutral, and no deadband.
-    assert.equal(D.markerStep(m, {at: 61000, w: 280, pull: {since: 0, target: null}}).zone, null);
-    const off = D.markerStep(m, {at: 61000, w: 250, pull: null});
-    assert.equal(off.zone, null); assert.notEqual(off.w, m.w);
-});
-
-
 test('actionModel: the marker takes the filtered zone (null: neutral)', () => {
     const front = {puller: '5100002', since: 0};            // Dario, 60 s at 266 W
     assert.equal(D.actionModel(view(20000, front), 314, 'amber').marker.zone, 'amber');
@@ -95,22 +35,97 @@ test('actionModel: the marker takes the filtered zone (null: neutral)', () => {
 });
 
 
+test('actionModel: the band\'s edges as bar positions beside the marker (null without a band)', () => {
+    const front = {puller: '5100002', since: 0};            // Dario, 60 s at 266 W
+    const m = D.actionModel(view(20000, front), 290, 'green', {barW: 300, band: {lo: 270, hi: 300, w: 285}});
+    assert.equal(m.kind, 'pull');
+    assert.equal(m.band.lo.toFixed(4), '0.1667');    // -10 %
+    assert.equal(m.band.hi.toFixed(4), '0.5000');    // on target
+    assert.ok(Math.abs(m.marker.pos - R.powerBar(290, 300).pos) < 1e-9);
+    assert.equal(m.marker.zone, 'green');
+    assert.equal(D.actionModel(view(20000, front), 290, 'green', {barW: 300}).band, null);
+    assert.equal(D.actionModel(view(20000, front), 290, 'green', {barW: 300, band: null}).band, null);
+    // No average yet (the pull's first 5 s): no marker, the band and its shadow show all the same.
+    const early = D.actionModel(view(20000, front), null, null, {barW: 300, band: {lo: 270, hi: 300, w: 285}});
+    assert.equal(early.marker, null);
+    assert.equal(early.band.lo.toFixed(4), '0.1667');
+    assert.equal(early.band.hi.toFixed(4), '0.5000');
+    // No target watts: neither.
+    const bare = {...view(20000, front), me: {...view(20000, front).me, watts: null}};
+    assert.equal(D.actionModel(bare, 290, null, {band: {lo: 270, hi: 300, w: 285}}).band, null);
+    // READY: the band too, no marker (user, 25 Nov 2026: READY has the band and the shadow only), and
+    // one that came in anyway is dropped.
+    const ready = D.actionModel(view(55000, {puller: '5100003', since: 0}), null, null,
+                                {barW: 300, band: {lo: 270, hi: 300, w: 285}});
+    assert.equal(ready.next, true);
+    assert.equal(ready.marker, null);
+    assert.equal(ready.band.lo.toFixed(4), '0.1667');
+    assert.equal(ready.band.hi.toFixed(4), '0.5000');
+    // Never a marker in READY, even when a power and zone come in (a stale sample from my pull, say).
+    const stale = D.actionModel(view(55000, {puller: '5100003', since: 0}), 290, 'green',
+                                {barW: 300, band: {lo: 270, hi: 300, w: 285}});
+    assert.equal(stale.next, true);
+    assert.equal(stale.marker, null);
+    assert.equal(stale.band.lo.toFixed(4), '0.1667');
+});
+
+
+test('barMarker: the marker against a bar target', () => {
+    assert.deepEqual(D.barMarker(290, 300, null), {...R.powerBar(290, 300), zone: null});
+    assert.equal(D.barMarker(null, 300, null), null);
+    assert.equal(D.barMarker(290, null, null), null);
+    // zone left out: the bar zone of the power (unfiltered).
+    assert.equal(D.barMarker(290, 300, undefined).zone, 'green');
+});
+
+
+test('barBand: the band\'s edges and the shadow\'s place inside it, as bar positions', () => {
+    const lo = R.powerBar(270, 300).pos;
+    // w on target: the shadow at the band's right end; half way between the edges' positions.
+    assert.deepEqual(D.barBand({lo: 270, hi: 300, w: 300}, 300), {lo, hi: 0.5, now: 1});
+    assert.deepEqual(D.barBand({lo: 270, hi: 300, w: 270}, 300), {lo, hi: 0.5, now: 0});
+    const mid = D.barBand({lo: 270, hi: 300, w: 285}, 300);
+    assert.equal(mid.now, (R.powerBar(285, 300).pos - lo) / (0.5 - lo));
+    // w outside the band (its edges glide behind): kept at the band's ends.
+    assert.equal(D.barBand({lo: 270, hi: 300, w: 330}, 300).now, 1);
+    assert.equal(D.barBand({lo: 270, hi: 300, w: 200}, 300).now, 0);
+    // A band narrower than 0.4 % of the bar, or no w: the shadow in the middle.
+    assert.equal(D.barBand({lo: 300, hi: 300, w: 300}, 300).now, 0.5);
+    assert.equal(D.barBand({lo: 299.9, hi: 300, w: 300}, 300).now, 0.5);
+    assert.equal(D.barBand({lo: 270, hi: 300}, 300).now, 0.5);
+    assert.equal(D.barBand({lo: 270, hi: 300, w: null}, 300).now, 0.5);
+    // No band or no target: null.
+    assert.equal(D.barBand(null, 300), null);
+    assert.equal(D.barBand({lo: 270, hi: 300, w: 285}, null), null);
+    assert.equal(D.barBand({lo: null, hi: 300, w: 285}, 300), null);
+});
+
+
+test('the old marker filter is gone', () => {
+    for (const k of ['markerStep', 'initialMarker', 'markerPower', 'MEDIAN_N', 'POWER_TAU_S', 'DEADBAND_PCT',
+                     'PULL_SETTLE_S']) {
+        assert.equal(k in D, false, k);
+    }
+});
+
+
 test('actionModel: none without a view', () => {
     assert.deepEqual(D.actionModel(null, 250), {kind: 'none'});
     assert.deepEqual(D.actionModel({mine: false, toMyPullS: null}, 250), {kind: 'none'});
 });
 
-test('actionModel: resting counts down to my pull, READY (amber) from WARN_S with my target and a neutral marker', () => {
+test('actionModel: resting counts down to my pull, READY (amber) from WARN_S with my target, band and shadow, no marker', () => {
     // Kim (60 s) pulling, me Dario (266 W) next.
     const front = {puller: '5100003', since: 0};
     let m = D.actionModel(view(49000, front), null);
     assert.deepEqual(m, {kind: 'rest', timeS: 11, warn: false, next: false, place: 2});    // next in line
     m = D.actionModel(view(50000, front), null);
-    assert.deepEqual(m, {kind: 'rest', timeS: 10, warn: true, next: true, place: 2, watts: 266, marker: null});
-    // With my power: the marker shows where I am, without a zone (neutral: below target is right here).
-    m = D.actionModel(view(50000, front), 200, 'red');
-    assert.equal(m.marker.zone, null);
-    assert.ok(m.marker.pos < 0.5);
+    assert.deepEqual(m, {kind: 'rest', timeS: 10, warn: true, next: true, place: 2, watts: 266, marker: null,
+                         band: null});
+    // With my power: no marker (user, 25 Nov 2026), the band and its shadow show where I am.
+    m = D.actionModel(view(50000, front), 200, 'red', {band: {lo: 190, hi: 210, w: 200}});
+    assert.equal(m.marker, null);
+    assert.ok(m.band.lo < m.band.hi && m.band.hi < 0.5);
 });
 
 test('actionModel: my pull with target, time, warning and overdue', () => {
@@ -121,7 +136,7 @@ test('actionModel: my pull with target, time, warning and overdue', () => {
     assert.equal(m.marker.zone, 'green');
     m = D.actionModel(view(50000, front), 314);
     assert.equal(m.timeS, 10); assert.equal(m.warn, true); assert.equal(m.over, false);
-    assert.equal(m.marker.zone, 'red'); assert.equal(m.marker.pos, 1);    // +18 %: beyond the bar's 15 %
+    assert.equal(m.marker.zone, 'red'); assert.ok(Math.abs(m.marker.pos - 0.9326) < 0.0005);   // +18 %: on the log red end, short of 1
     m = D.actionModel(view(65000, front), null);
     assert.equal(m.timeS, 5); assert.equal(m.over, true); assert.equal(m.warn, true);
     assert.equal(m.watts, 266); assert.equal(m.marker, null);   // target known, no power yet
@@ -215,12 +230,14 @@ test('pullOnlyModel: blank while resting, armed with NEXT in the last WARN_S, th
     assert.deepEqual(D.pullOnlyModel({kind: 'rest', timeS: 42, warn: false, next: false, place: 3}, {watts: 273}),
                      {kind: 'blank'});
     assert.deepEqual(D.pullOnlyModel({kind: 'rest', timeS: 9, warn: true, next: true, place: 2}, {watts: 273}),
-                     {kind: 'armed', watts: 273, marker: null});
+                     {kind: 'armed', watts: 273, marker: null, band: null});
     const mk = {pos: 0.4, zone: null};
-    assert.deepEqual(D.pullOnlyModel({kind: 'rest', timeS: 9, next: true, place: 2, watts: 273, marker: mk}, {watts: 273}),
-                     {kind: 'armed', watts: 273, marker: mk});    // the live marker goes along
+    const bd = {lo: 0.3, hi: 0.45, now: 0.5};
+    assert.deepEqual(D.pullOnlyModel({kind: 'rest', timeS: 9, next: true, place: 2, watts: 273, marker: mk, band: bd},
+                                     {watts: 273}),
+                     {kind: 'armed', watts: 273, marker: mk, band: bd});    // the live marker and band go along
     assert.deepEqual(D.pullOnlyModel({kind: 'rest', timeS: 0, place: 2}, {watts: undefined}),
-                     {kind: 'armed', watts: null, marker: null});    // no target watts: a big READY
+                     {kind: 'armed', watts: null, marker: null, band: null});    // no target watts: a big READY
     assert.deepEqual(D.pullOnlyModel({kind: 'none'}), {kind: 'blank'});    // no dash either
 });
 
@@ -253,7 +270,7 @@ test('penModel: plan #1 is armed in the start pen while no start runs (startAt n
     assert.equal(D.penModel({plan, selfId: 'a', reason: 'start', started: false}), null);
     assert.equal(D.penModel({plan: null, selfId: 'a', reason: 'still', started: false}), null);
     // The pull-only Action window shows him armed with his target.
-    assert.deepEqual(D.pullOnlyModel(armed, {watts: 300}), {kind: 'armed', watts: 300, marker: null});
+    assert.deepEqual(D.pullOnlyModel(armed, {watts: 300}), {kind: 'armed', watts: 300, marker: null, band: null});
 });
 
 
@@ -346,13 +363,15 @@ test('actionModel: barW moves the bar, not the target', () => {
     assert.equal(m.marker.zone, 'red');             // −13.4 %
     assert.equal(D.actionModel(view(20000, front), 272, undefined).marker.zone, 'green');
     assert.equal(D.actionModel(view(20000, front), 272, undefined, {barW: null}).marker.zone, 'green');
-    // READY: the same bar target
-    const ready = D.actionModel(view(55000, {puller: '5100003', since: 0}), 272, undefined, {barW: 314});   // 5 s to my pull
+    // READY: the same bar target, for the band (READY has no marker)
+    const ready = D.actionModel(view(55000, {puller: '5100003', since: 0}), 272, undefined,
+                                {barW: 314, band: {lo: 260, hi: 280, w: 272}});   // 5 s to my pull
     assert.equal(ready.kind, 'rest');
     assert.equal(ready.next, true);
     assert.equal(ready.watts, 266);
-    assert.ok(Math.abs(ready.marker.pos - R.powerBar(272, 314).pos) < 1e-9);
-    assert.equal(ready.marker.zone, null);          // READY stays neutral
+    assert.ok(Math.abs(ready.band.lo - R.powerBar(260, 314).pos) < 1e-9);
+    assert.ok(Math.abs(ready.band.hi - R.powerBar(280, 314).pos) < 1e-9);
+    assert.equal(ready.marker, null);
 });
 
 test('riderPull and riderPullParts with pull_wkg', async () => {

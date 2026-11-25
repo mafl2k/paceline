@@ -73,11 +73,15 @@ export function expectedPullS(pullS, beforeMe, planS = pullS, eff = null) {
 export const CHAIN_GAP_M = 20;
 export const WARN_S = 10;
 // The power bar in percent of the target (user, 12 Nov 2026: 5 W either way does not matter, 10 %
-// short does; the planner rounds targets to 10 W): the bar spans BAR_RANGE_PCT either side, green
-// up to GREEN_PCT off, amber up to AMBER_PCT, red beyond.
+// short does; the planner rounds targets to 10 W): green up to GREEN_PCT off, amber up to AMBER_PCT, red
+// beyond; BAR_RANGE_PCT only scales the zones' widths (the bar itself covers +-RED_MAX_PCT, see powerBar).
 export const BAR_RANGE_PCT = 15;
 export const GREEN_PCT = 5;
 export const AMBER_PCT = 10;
+// The red ends reach out to RED_MAX_PCT off the target on a log scale (see powerBar); RED_LOG_K
+// sets the bend: the bigger, the closer to linear.
+export const RED_MAX_PCT = 30;
+export const RED_LOG_K = 5;
 export const SMOOTH_S = 3;
 // Teammates' samples older than this are not extrapolated: a laggy sample would be pushed far ahead.
 export const ROT_MAX_AGE_MS = 5000;
@@ -1812,15 +1816,26 @@ export function tableShown({plan, always, pullerId, reason}) {
 }
 
 
-// pos: 0..1 with 0.5 = on target, BAR_RANGE_PCT of the target either side fills the bar; zone by
-// how far off the target, in percent.
+// pos: 0..1 with 0.5 = on target; zone by how far off the target, in percent. Green and amber are
+// linear, 0..AMBER_PCT off filling the bar up to where the red end starts. The red ends keep
+// their width (BAR_RANGE_PCT - AMBER_PCT of the bar's full range, 2 x BAR_RANGE_PCT) but cover AMBER_PCT..RED_MAX_PCT
+// off on a log scale, so a surge or the draft in READY shows how far out it is instead of
+// sitting at the end. The user, 24 Nov 2026: "should we make the bar logarithmic? I meant the
+// ends." The numbers on the bar stay at +-5 / +-10 %, in the linear part.
 export function powerBar(watts, target) {
     if (!Number.isFinite(watts) || !Number.isFinite(target) || !(target > 0)) {
         return null;
     }
     const pct = (watts - target) / target * 100;
-    const pos = Math.min(1, Math.max(0, 0.5 + pct / (2 * BAR_RANGE_PCT)));
     const a = Math.abs(pct);
+    const span = 2 * BAR_RANGE_PCT;    // the bar's full range in the zones' units, the target in the middle
+    const red = (BAR_RANGE_PCT - AMBER_PCT) / span;
+    let off = a / span;
+    if (a > AMBER_PCT) {
+        const f = Math.min(1, Math.log(1 + (a - AMBER_PCT) / RED_LOG_K) / Math.log(1 + (RED_MAX_PCT - AMBER_PCT) / RED_LOG_K));
+        off = AMBER_PCT / span + red * f;
+    }
+    const pos = Math.min(1, Math.max(0, 0.5 + Math.sign(pct) * off));
     const zone = a <= GREEN_PCT ? 'green' : a <= AMBER_PCT ? 'amber' : 'red';
     return {pos, zone};
 }

@@ -17,6 +17,9 @@ store and both parts for the GitHub and GitLab releases (`node scripts/changes.m
 ## Unreleased
 
 ### Mod
+- The power bar shows a soft band with the range of your last 10 seconds and a shadow at your power now; 5 seconds into your pull its marker appears at your average (of up to the last 10 seconds of your pull), so it keeps still on target. In READY the bar shows the band and its shadow only, no marker. The middle line is gone: the green field is your target.
+- The red ends of the power bar reach out to 30 % off your target, so a surge or the draft in READY shows how far out you are.
+- New option "Numbers on the power bar" (Action window, off by default): each amber and red field shows where it begins, in your Pull target unit.
 
 ### Server
 
