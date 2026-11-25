@@ -19,7 +19,9 @@ to either builds and deploys what changed. Every change a rider or a team captai
 one plain line in `CHANGES.md`, under `## Unreleased`, `### Mod` or `### Server` (see the header of
 that file). Those lines become the release notes of GitHub, GitLab and the Sauce mod store. A
 GitHub beta (a new beta version pushed to `next`) gets the `## Unreleased` lines as its notes:
-everything since the last release.
+everything since the last release. When a final release reaches GitHub, the betas it replaces go: the
+GitHub pre-releases of that version and older, with their zips (their git tags stay, so a beta can
+still be found). Newer betas stay.
 
 To promote `next` to production, run the manual job `promote` (the play button) on a branch pipeline
 of `next`. It does the release with git only:
