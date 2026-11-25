@@ -252,6 +252,13 @@ Object.assign(RIDERS, {
     '1001': 'Alma Keller', '1002': 'Ben Richter', '1003': 'Cleo Maier', '1004': 'Dana Lorenz',
     '1005': 'Eli Sommer', '1006': 'Finn Weber', '1007': 'Gina Hoff', '1008': 'Hugo Brandt', '1009': 'Ida Wolf',
 });
+// Made-up pull targets (W/kg; the test riders weigh 70 kg) for the plans the pictures show beside the
+// demo's: 'Rollers · easy' (v1, and v2 in group 12), so its tables read "60 s @ 3.6", not a bare
+// "60 s" (user, 25 Nov 2026). Only in this run. The plan pushed in group 12 has them only for its
+// Store shots: 12h's Store result needs its "no pull watts" warning.
+const PULL_WKG = {'1001': 3.4, '1002': 3.6, '1003': 3.3, '1004': 3.5, '1005': 3.6, '1006': 3.2, '1007': 3.4, '1008': 3.5, '1009': 3.3};
+const withTargets = json => ({...json, riders: Object.fromEntries(Object.entries(json.riders).map(([id, r]) =>
+    [id, {...r, pull_power: Math.round(PULL_WKG[id] * r.weight)}]))});
 
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const NOW = T('2026-11-19T18:12:00Z');
@@ -1692,7 +1699,7 @@ try {
     const liveRiders = Object.keys(club().sheets[liveOf('rollers')].json.riders);
     for (const type of ['spare', 'easy']) {
         srv.store.change(CID, cl => uploadSheet(cl, {
-            slug: 'rollers', json: planJson(`Rollers ${type}`, liveRiders), text: null, date: '2026-11-19', as: 'new', type, live: false,
+            slug: 'rollers', json: type === 'easy' ? withTargets(planJson(`Rollers ${type}`, liveRiders)) : planJson(`Rollers ${type}`, liveRiders), text: null, date: '2026-11-19', as: 'new', type, live: false,
             base: cl.teams.rollers.version, pinnedEventId: null, via: 'file',
         }, {now: NOW, newId: () => randomId(6)}));
     }
@@ -2141,7 +2148,7 @@ try {
         // pushed for Rollers; both go again at the group's end
         const livePlan = club().sheets[liveOf('rollers')].plan;
         const extra = srv.store.change(CID, cl => uploadSheet(cl, {
-            slug: 'rollers', json: planJson('Rollers', ['1001', '1002', '1003', '1004', '1005']), text: null, as: livePlan, live: false,
+            slug: 'rollers', json: withTargets(planJson('Rollers', ['1001', '1002', '1003', '1004', '1005'])), text: null, as: livePlan, live: false,
             base: cl.teams.rollers.version, pinnedEventId: null, via: 'file',
         }, {now: NOW, newId: () => randomId(6)}).id);
         const pushedCp = srv.store.change(CID, cl => receiveEntry(cl, {team: 'rollers', via: 'zwiftgopher', json: planJson('Rollers', ['1001', '1002', '1003']), text: null},
@@ -2792,13 +2799,20 @@ try {
             await open(cp, {w: 390, scheme: 'dark'});
             await front();
             await shootNow('captain-cockpit-390-dark.png');
+            // the plan pushed carries pull targets for its Store shots only (as 'easy' does, so its table
+            // shows no targets dropped), then its own json again: 12h needs its "no pull watts" warning
+            const pushedJson = club().inbox.find(e => e.id === pushedCp).json;
             for (const [name, q] of [['version', `v=${extra}`], ['store', `e=${pushedCp}`]]) {
+                if (name === 'store') {
+                    srv.store.change(CID, cl => { cl.inbox.find(e => e.id === pushedCp).json = withTargets(pushedJson); });
+                }
                 for (const w of [390, 1280]) {
                     await open(`${cp}?${q}`, {w});
                     await front();
                     await shootNow(`captain-cockpit-${name}-${w}-light.png`, w);
                 }
             }
+            srv.store.change(CID, cl => { cl.inbox.find(e => e.id === pushedCp).json = pushedJson; });
             await open(`${cp}?v=${extra}`, {w: 390});
             await front();
             const armed = await openConfirm(panelForm);

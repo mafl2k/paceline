@@ -44,16 +44,17 @@ import {MAX_AGE_MS, LEASE_STALE_MS, planIds, selfEntry, planRidersPresent, initi
 import {BAR_RANGE_PCT, GREEN_PCT, AMBER_PCT, DRAFT_N, selfLive, draftMean, dashKind, wheelOf, placeOf,
         pushPower as pushHist, initialRotation, rotationStep, carryRotation, shadowDet,
         alignedPositions,
-        wheelToFollow, plannedWheel, captainNext, tableShown, powerBar}
+        wheelToFollow, plannedWheel, captainNext, tableShown}
     from './engine/rotation.mjs';
 import {initialTurns, turnsStep, turnsStatus, carryTurns, turnTable, turnDet} from './engine/turns.mjs';
 import {hillAt, buildClimbIndex} from './engine/terrain.mjs';
 import {GAP_FINISHERS, initialGaps, gapStep, gapView, cutBehind} from './engine/gaps.mjs';
 import {initialCue, cueStep, cueView, dropWheel, linePlace, freshIds} from './engine/wheelcue.mjs';
 import {initialClock, clockStep, deltaText} from './engine/clock.mjs';
+import {bandStep, bandFresh, bandNumbers} from './engine/powerband.mjs';
 import {ALIVE_PREFIX, aliveKey, parseAlive, aliveModes, restClockShown, restShows, staleKeys, aliveDue}
     from './engine/presence.mjs';
-import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, initialMarker, markerStep, markerPower, actionModel,
+import {POWER_KEEP_MS, clock, restClock, pullSecs, nowValue, actionModel, barBand,
         pullOnlyModel, penModel, riderTarget, barTarget, pickWeight,
         shownModel, fieldsGapBand, fieldsShown, clockInFields, clockField, restClockOf, restTakes, restShowsOf, actionPhase, phaseStep,
         restHandBack, demoBadge, vanishes,
@@ -150,7 +151,9 @@ let rot = initialTurns();
 let shadow = initialRotation();
 let shadowOk = true;       // the shadow's last step ran (det.old is null after a failed one)
 let shadowFailed = false;  // the shadow failed once (logged once; the windows go on)
-let marker = initialMarker();    // my smoothed power and the marker's colour (power bar)
+// The power bar (powerband.mjs): its band all the time (shown with its shadow in READY and my pull),
+// its marker from 5 s into my pull.
+let band = null;
 let gaps = initialGaps();  // gaps in the team line (gaps.mjs): a rider or the group losing the wheel
 let cue = initialCue();    // the wheel to drop in behind, in the rest line (wheelcue.mjs)
 let restClk = initialClock();    // the rest countdown as shown: corrections absorbed or explained (clock.mjs)
@@ -271,7 +274,7 @@ function syncDemo(now) {
     rot = initialTurns();
     shadow = initialRotation();
     shadowOk = true;
-    marker = initialMarker();
+    band = null;
     gaps = initialGaps();
     cue = initialCue();
     powerWt = null;
@@ -484,11 +487,28 @@ function muted() {
 }
 
 
-// While I pull (by the engine's last step): {since, target} for the power marker, else null. The
-// target is the bar's (barTarget: pull_wkg × my weight in W/kg mode, else the plan's watts).
-function myPull(now) {
+// The power bar's phase for a sample (powerband.mjs bandStep): my pull (by the engine's last step)
+// with the marker from 5 s in and its zone colour; else null (READY, rest, chaos: the band runs on
+// and the windows show it with its shadow, but there is no marker, below target is right in the
+// draft). The goal is the bar's (barTarget: pull_wkg × my weight in W/kg mode, else the plan's watts).
+function bandPhase(now) {
     const {view} = turnsStatus(rot, {now, plan, selfId, live: true});
-    return view && view.mine ? {since: rot.front.since, target: barTarget(view.me, liveWeight(), prefs.targetUnit)} : null;
+    if (view && view.mine) {
+        return {since: rot.front.since, goal: barTarget(view.me, liveWeight(), prefs.targetUnit)};
+    }
+    return null;
+}
+
+
+// The bar's power, colour and band from the band state while it is fresh: {meanW, zone, band}, meanW
+// and zone null without a marker (READY, my pull's first 5 s), band {lo, hi, w} (w: the shadow).
+function barPower(now) {
+    const b = bandFresh(band, now);
+    return {
+        meanW: b ? b.marker : null,
+        zone: b ? b.zone : null,
+        band: b ? {lo: b.lo, hi: b.hi, w: b.w} : null,
+    };
 }
 
 
@@ -503,7 +523,10 @@ function samplePower(list, now) {
         return;
     }
     powerWt = wt;
-    marker = markerStep(marker, {at: now, w: me.state.power, pull: myPull(now)});
+    // Once per new sample (powerband.mjs): the band runs all the time (it is there at once when READY
+    // or my pull begins); the marker only in those phases (no phase: since null).
+    const phase = bandPhase(now) ?? {since: null, goal: null};
+    band = bandStep(band, {at: now, w: me.state.power, ...phase});
     // After a gap in my data the old samples are no rest power to compare a jump with.
     const last = hist[hist.length - 1];
     if (last && now - last.t > POWER_KEEP_MS) {
@@ -788,15 +811,15 @@ function eventOf(list, now) {
 // What this step saw and decided, for tuning after the ride.
 // What the windows showed in this step (both windows' content, whichever window records).
 // What the Action and Rest windows show: the rotation, or plan #1 armed in the start pen (with
-// his target and a neutral marker, like READY).
+// his target, the band and its shadow, no marker, like READY).
 function windowModel(view, reason, now) {
-    const meanW = markerPower(marker, now);
+    const {meanW, zone, band: bandW} = barPower(now);
     const pen = penModel({plan, selfId, reason, started: rot.startAt != null});
     if (pen) {
         const watts = myRider(view)?.watts;
         const ok = Number.isFinite(watts);
-        const bar = ok ? powerBar(meanW, barTarget(myRider(view), liveWeight(), prefs.targetUnit)) : null;
-        return {...pen, watts: ok ? watts : null, marker: bar ? {...bar, zone: null} : null};
+        const barW = ok ? barTarget(myRider(view), liveWeight(), prefs.targetUnit) : null;
+        return {...pen, watts: ok ? watts : null, marker: null, band: ok ? barBand(bandW, barW) : null};
     }
     // The countdown as shown (clock.mjs): the rotation's clock with its corrections absorbed, or
     // snapped and explained on the line under it (expert panel, 18 Nov 2026). Its riders are the
@@ -808,8 +831,8 @@ function windowModel(view, reason, now) {
     restClk = clockStep(restClk, {now, trueS: resting ? view.toMyPullS : null, standing: !!view?.standing,
                                   present: resting ? rot.line.filter(id => id !== selfId) : null});
     const shown = resting ? {...view, toMyPullS: Math.floor(restClk.shownS)} : view;
-    const m = actionModel(shown, meanW, marker.zone,
-                          {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit), chaos});
+    const m = actionModel(shown, meanW, zone,
+                          {barW: barTarget(view?.me ?? null, liveWeight(), prefs.targetUnit), chaos, band: bandW});
     return m.kind === 'rest' ? {...m, correction: restClk.label, fadeAt: restClk.fadeAt} : m;
 }
 
@@ -819,7 +842,7 @@ function shownOf(now) {
     return shownModel({
         m: windowModel(view, reason, now),
         dash: dashKind(reason, {started: rot.front.puller != null}),
-        meanW: markerPower(marker, now),
+        meanW: barPower(now).meanW,
         wheel: wheelToFollow(plan, selfId, view && {wheel: myWheel(view)}),
         next: captainNext({plan, view, reason, pullerId: rot.front.puller}),
     });
@@ -2245,8 +2268,8 @@ const KEEP = '\u00a0';
 
 
 // READY and the pull: three fixed points with their units under them, and the bar. The target
-// left, my power now in the middle (the marker's value, in its zone colour once the pull has
-// settled; neutral in READY), the time right (READY, the pull's seconds, over time "−4" amber).
+// left, my power now in the middle (in the marker's zone colour once the marker shows, 5 s into the
+// pull; neutral before and in READY), the time right (READY, the pull's seconds, over time "−4" amber).
 function renderTriple(m, me, now) {
     $('#pl-act').classList.remove('pl-fields-clock');
     show($('#pl-act-row'), false);
@@ -2281,8 +2304,10 @@ function renderTriple(m, me, now) {
         setText($('#pl-act-tunit'), S.secUnit);
         timeEl.classList.toggle('pl-warn', !!m.warn);
     }
-    // The bar: with a target always (READY too, the marker neutral); a pull without target watts
-    // gets a neutral track, so it never looks like rest.
+    // The bar: with a target always (READY too); a pull without target watts gets a neutral track,
+    // so it never looks like rest. The band of my last 10 s with its shadow at my power now from the
+    // first sample (READY too); the marker (my 10 s average, in its zone colour) from 5 s into my
+    // pull over it (user, 25 Nov 2026).
     const bar = $('#pl-act-bar');
     bar.classList.toggle('pl-off', !hasTarget && m.kind !== 'pull');
     bar.classList.toggle('pl-neutral', !hasTarget);
@@ -2290,8 +2315,17 @@ function renderTriple(m, me, now) {
     show(markerEl, hasTarget && !!m.marker);
     if (hasTarget && m.marker) {
         markerEl.style.setProperty('--pos', String(m.marker.pos));
-        markerEl.dataset.zone = m.marker.zone ?? '';    // no zone (READY, start of a pull): white
+        markerEl.dataset.zone = m.marker.zone ?? '';    // no zone (no goal): white
     }
+    const bandEl = $('#pl-bar-band');
+    const b = hasTarget ? m.band ?? null : null;
+    show(bandEl, !!b);
+    if (b) {
+        bandEl.style.setProperty('--lo', String(b.lo));
+        bandEl.style.setProperty('--hi', String(b.hi));
+        bandEl.style.setProperty('--now', `${(b.now * 100).toFixed(1)}%`);    // the shadow, gliding (CSS)
+    }
+    renderBarNums(hasTarget ? barTarget(me, liveWeight(), prefs.targetUnit) : null, weight, unit);
     const g = m.kind === 'pull' ? gapNow() : null;
     const mine = !!g && !g.behind;    // a gap behind me while I pull: mine to deal with
     renderGapBand(mine && g.level === 'full', g);
@@ -2299,8 +2333,26 @@ function renderTriple(m, me, now) {
 }
 
 
+// The optional numbers in the bar (Action window option "Numbers on the power bar", spec 2026-11-24
+// band bar): where amber and red begin, inside their fields against the edge they name, in the
+// window's target unit by the weight the bar uses. barW: the bar's target in watts; null (no target,
+// the neutral bar) or the option off: all four hidden, never blank text.
+function renderBarNums(barW, weight, unit) {
+    const els = document.querySelectorAll('#pl-act-bar .pl-bar-num');
+    const on = !!winSettings.barNums && Number.isFinite(barW);
+    $('#pl-act-bar').classList.toggle('pl-bar-nums', on);
+    const texts = on ? bandNumbers(barW, {kg: weight, unit}) : [];
+    els.forEach((el, i) => {
+        show(el, on);
+        if (on) {
+            setText(el, texts[i]);
+        }
+    });
+}
+
+
 // My power for the number in the middle (pull, READY) and the Power field: as Zwift sends it, or
-// Sauce's 5 s power with "5 s smoothed power" on (display.mjs powerNow); the marker keeps its filter.
+// Sauce's 5 s power with "5 s smoothed power" on (display.mjs powerNow); the bar keeps its filter.
 function myPowerNow(now) {
     return powerNow({raw: selfEntry(currentNearby(now))?.state?.power, smooth5W: mySmooth5(now)});
 }
@@ -2354,6 +2406,8 @@ function renderFields(slots, me, now, reason, clockModel = null) {
     const bar = $('#pl-act-bar');
     bar.classList.add('pl-off', 'pl-neutral');
     show($('#pl-bar-marker'), false);
+    show($('#pl-bar-band'), false);
+    renderBarNums(null, null, 'W');
     if (clockModel) {
         renderClockField(clockModel, reason);
         return;
@@ -2477,8 +2531,8 @@ function applyBackground() {
 
 // The Action window's own options (Sauce's per-window settings store, settings.html), each with its
 // default while unset (and in the plain-browser preview): "Smaller middle field" on, the recovery
-// fields off with the slots off / Power / off, "5 s smoothed" off.
-const WIN_DEFAULTS = {midSmall: true, recFields: false, recLeft: 'off', recMid: 'power', recRight: 'off', recSmooth5: false};
+// fields off with the slots off / Power / off, "5 s smoothed" off, "Numbers on the power bar" off.
+const WIN_DEFAULTS = {midSmall: true, recFields: false, recLeft: 'off', recMid: 'power', recRight: 'off', recSmooth5: false, barNums: false};
 let winSettings = {...WIN_DEFAULTS};
 
 function readWinSettings() {
@@ -2528,6 +2582,10 @@ function initBar() {
     const at = pct => `${(pct / (2 * BAR_RANGE_PCT)) * 100}%`;
     bar.style.setProperty('--pl-z-amber', at(BAR_RANGE_PCT - AMBER_PCT));
     bar.style.setProperty('--pl-z-green', at(BAR_RANGE_PCT - GREEN_PCT));
+    // The four numbers sit at the field edges (linear, whatever scale the marker uses beyond them).
+    [-AMBER_PCT, -GREEN_PCT, GREEN_PCT, AMBER_PCT].forEach((edge, i) => {
+        bar.querySelectorAll('.pl-bar-num')[i]?.style.setProperty('--pos', String(0.5 + edge / (2 * BAR_RANGE_PCT)));
+    });
 }
 
 

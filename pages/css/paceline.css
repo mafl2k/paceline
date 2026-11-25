@@ -684,8 +684,9 @@ html.pl-mid-same .pl-tri-now .pl-tri-num { font-weight: 800; }
 /* The dash: amber "?" when alone or without data (the dim dash and triangle keep --pl-dim). */
 .pl-act-row .pl-act-dash.pl-warn { color: var(--pl-amber); }
 
-/* Power bar: target in the middle, BAR_RANGE_PCT of it either side; zone edges come from the
-   engine constants via --pl-z-amber / --pl-z-green (set by paceline.mjs). */
+/* Power bar: target in the middle, RED_MAX_PCT of it either side (the red ends on a log scale, see
+   powerBar); zone edges come from the engine constants via --pl-z-amber / --pl-z-green (set by
+   paceline.mjs). */
 .pl-bar {
     --pl-z-amber: 20%;
     --pl-z-green: 40%;
@@ -705,33 +706,71 @@ html.pl-mid-same .pl-tri-now .pl-tri-num { font-weight: 800; }
 .pl-bar.pl-gap-early { box-shadow: 0 0 0 2px hsl(0 0% 0% / 0.55), 0 0 0 5px var(--pl-amber); }    /* the gap's early stage, outside the dark edge */
 .pl-tri-unit.pl-gap-warn { color: var(--pl-amber); }
 .pl-tri-unit.pl-gap-warn.pl-gap-closing { color: var(--pl-ok); }    /* closing: only the label, the bar stays plain */
-/* A pull without target watts: a neutral grey track, no zones, no marker. */
+/* A pull without target watts: a neutral grey track, no zones, no marker, no band. No target tick
+   either way: the green field is the target. */
 .pl-bar.pl-neutral { background: hsl(0 0% 60% / 0.55); }
-.pl-bar.pl-neutral .pl-bar-tick { display: none; }
-.pl-bar-tick {
+.pl-bar.pl-neutral .pl-bar-band,
+.pl-bar.pl-off .pl-bar-band { display: none; }
+/* The band (design 2026-11-24-band-bar): the range of my last 10 s (min and max of my de-spiked
+   power, its edges through a 1 s lowpass), soft white, under the marker, with a soft shadow at my
+   de-spiked power now (--now: its place inside the band, 0..100 %; user, 25 Nov 2026: "the shadow
+   band replaces it perfectly"). --now is a registered property so it glides like the edges. */
+@property --now { syntax: '<percentage>'; inherits: false; initial-value: 50%; }
+.pl-bar-band {
+    --lo: 0.5;
+    --hi: 0.5;
+    --now: 50%;
     position: absolute;
-    left: calc(50% - 1px);
-    top: -3px;
-    bottom: -3px;
-    width: 2px;
-    background: hsl(0 0% 0% / 0.75);
+    top: 15%;
+    bottom: 15%;
+    left: min(calc(var(--lo) * 100%), calc(100% - 4px));    /* the 4 px sliver stays inside the bar */
+    width: max(4px, calc((var(--hi) - var(--lo)) * 100%));
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: radial-gradient(ellipse 26px 150% at var(--now) 50%, hsl(0 0% 0% / .42), hsl(0 0% 0% / 0) 100%),
+                hsl(0 0% 100% / .55);
+    box-shadow: 0 0 0 1px hsl(0 0% 0% / 0.6);
+    transition: left 1s linear, width 1s linear, --now 1s linear;
 }
+/* The optional numbers (barNums): where amber and red begin, each inside its own field against the
+   edge it names (the one towards the centre), over the band and under the marker. */
+.pl-bar.pl-bar-nums { container-type: inline-size; }
+.pl-bar-num {
+    --pos: 0.5;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--pos) * 100%);
+    display: flex;
+    align-items: center;
+    font-weight: 700;
+    font-size: max(10px, min(calc(var(--pl-bar-h) * 0.55), 3.4cqw));    /* fits in its field */
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    color: hsl(0 0% 0% / 0.75);
+    pointer-events: none;
+}
+.pl-bar-num[hidden] { display: none; }
+.pl-bar-num.pl-num-lo { transform: translateX(calc(-100% - 0.3em)); }
+.pl-bar-num.pl-num-hi { transform: translateX(0.3em); }
+/* The marker: my 10 s average, from 5 s into my pull (none in READY), centred on its value and kept
+   inside the bar at the ends. */
 .pl-bar-marker {
     --pos: 0.5;
     --w: 12px;
     position: absolute;
     top: -5px;
     bottom: -5px;
-    left: calc(var(--pos) * (100% - var(--w)));
+    left: clamp(0px, calc(var(--pos) * 100% - var(--w) / 2), calc(100% - var(--w)));
     width: var(--w);
     box-sizing: border-box;
     border: 3px solid #111;
     border-radius: 4px;
     background: #fff;
-    transition: left 0.4s linear, background-color 0.3s;
+    transition: left 1s linear, background-color 0.3s;    /* glides from one 1 Hz sample to the next */
 }
-/* The marker's colour: the zone of the filtered power (median, smoothing, 2 % deadband), white at
-   the start of a pull. The dark border keeps it visible on the bar's zone of the same colour. */
+/* The marker's colour: the zone of my 10 s average in the pull (held 1 % past an edge), white
+   without a goal. The dark border keeps it visible on the bar's zone of the same colour. */
 .pl-bar-marker[data-zone="green"] { background: var(--pl-ok); }
 .pl-bar-marker[data-zone="amber"] { background: var(--pl-amber); }
 .pl-bar-marker[data-zone="red"] { background: var(--pl-bad); }

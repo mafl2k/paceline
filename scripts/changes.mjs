@@ -11,6 +11,8 @@
 //
 // CLI: node scripts/changes.mjs notes <version>   prints that version's notes text, or nothing
 // (exit 0) when CHANGES.md or the version's section is missing.
+//      node scripts/changes.mjs unreleased        prints the Unreleased lines as notes text (a
+// beta's notes: everything since the last release), or nothing.
 import {readFileSync, realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
@@ -113,8 +115,8 @@ function isMain() {
 
 if (isMain()) {
     const [cmd, version] = process.argv.slice(2);
-    if (cmd !== 'notes' || !version) {
-        console.error('usage: node scripts/changes.mjs notes <version>');
+    if (!(cmd === 'notes' && version) && !(cmd === 'unreleased' && !version)) {
+        console.error('usage: node scripts/changes.mjs notes <version> | unreleased');
         process.exit(2);
     }
     let doc = '';
@@ -125,7 +127,7 @@ if (isMain()) {
             throw e;
         }
     }
-    const notes = notesFor(doc, version);
+    const notes = cmd === 'unreleased' ? unreleased(doc) : notesFor(doc, version);
     const body = notes ? notesText(notes) : '';
     if (body) {
         console.log(body);

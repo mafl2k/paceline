@@ -4,7 +4,17 @@
 // is created on that snapshot commit.
 //
 // If the release v<version> exists with the zip, nothing happens. If it exists without the zip
-// (an earlier run stopped after creating it), only the zip is uploaded.
+// (an earlier run stopped after creating it), only the zip is uploaded. A beta without its zip
+// (a push to next that changed no mod file, so the mod-zip job did not run, e.g. scripts only right
+// after a promote) is no error: nothing is created, the next push that changes the mod releases it.
+// A stable release without its zip still fails.
+//
+// After a final release (not a beta) the betas it replaces are removed from GitHub's releases
+// (user, 25 Nov 2026: "should a promote kill the corresponding beta?" — yes, the releases with
+// their zips, not the tags): every pre-release whose version is that release's or older
+// (v0.3.7-beta.2 and v0.3.5-beta.0 go with 0.3.7; v0.3.8-beta.0 stays). Their git tags stay, so
+// what a beta held can still be found. This also runs when the release existed already, so a
+// re-run cleans up; a failed clean-up is only a warning, the release itself is done.
 //
 // Environment (node 22, global fetch, no npm packages):
 //   GITHUB_REPO         owner/name of the public repository (required)
@@ -16,8 +26,10 @@
 //                       release is a pre-release that never becomes "latest" (the README's
 //                       .../releases/latest link stays on the stable release), and its text starts
 //                       with "Paceline <version> (beta)". Without it the version must be plain (0.2.33).
-//   DRY_RUN=1           look up the release (read-only, without the token if there is none), say
-//                       what would be done, change nothing
+//                       A beta never removes other betas.
+//   DRY_RUN=1           look up the release and, for a final one, list the betas it would remove
+//                       (read-only, without the token if there is none), say what would be done,
+//                       change nothing
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
@@ -52,6 +64,36 @@ export function createRequest(repo, version, sha, notes, {prerelease = false} = 
 export function uploadRequest(uploadUrl, version) {
     const base = String(uploadUrl).replace(/\{.*$/, '');
     return {url: `${base}?name=${encodeURIComponent(releaseFile(version))}`, method: 'POST', contentType: 'application/zip'};
+}
+
+export function listRequest(repo, page) {
+    return {url: `${API}/repos/${repo}/releases?per_page=100&page=${page}`, method: 'GET'};
+}
+
+export function deleteRequest(repo, id) {
+    return {url: `${API}/repos/${repo}/releases/${id}`, method: 'DELETE'};
+}
+
+// [major, minor, patch] of 'X.Y.Z' (or of 'vX.Y.Z-suffix'), null if it is none.
+function versionParts(v) {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || ''));
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function notAbove(a, b) {
+    for (let i = 0; i < 3; i++) {
+        if (a[i] !== b[i]) {
+            return a[i] < b[i];
+        }
+    }
+    return true;
+}
+
+// The pre-releases a final `version` replaces: betas (a tag with a suffix) of that version or older.
+export function staleBetas(releases, version) {
+    const top = versionParts(version);
+    return (releases || []).filter(r => r && r.prerelease && /^v\d+\.\d+\.\d+-/.test(r.tag_name || '')
+        && top && notAbove(versionParts(r.tag_name), top));
 }
 
 export async function run({env = process.env, fetchFn = fetch, readFile = readFileSync, log = console.log} = {}) {
@@ -117,8 +159,57 @@ export async function run({env = process.env, fetchFn = fetch, readFile = readFi
     } else if (found.status !== 404) {
         await fail(`Looking up release ${tag}`, found);
     }
+    // After a final release: remove the betas it replaces (a warning only if that fails).
+    const cleanBetas = async () => {
+        if (prerelease) {
+            return;
+        }
+        try {
+            const all = [];
+            let complete = false;
+            for (let page = 1; page <= 20 && !complete; page++) {
+                const resp = await call(listRequest(repo, page));
+                if (!resp.ok) {
+                    await fail('Listing releases', resp);
+                }
+                const got = await resp.json();
+                all.push(...got);
+                complete = got.length < 100;
+            }
+            if (!complete) {
+                log('Warning: more than 2000 releases, only the first 2000 were checked for old betas.');
+            }
+            const stale = staleBetas(all, version);
+            if (!stale.length) {
+                return;
+            }
+            if (dry) {
+                log(`Dry run: would remove the betas ${stale.map(r => r.tag_name).join(', ')} (their tags stay).`);
+                return;
+            }
+            // One that fails does not stop the others (the next run on main tries it again).
+            for (const r of stale) {
+                try {
+                    const resp = await call(deleteRequest(repo, r.id));
+                    if (resp.status === 404) {
+                        log(`The beta ${r.tag_name} was gone already.`);
+                    } else if (!resp.ok) {
+                        await fail(`Removing ${r.tag_name}`, resp);
+                    } else {
+                        log(`Removed the beta ${r.tag_name} (its tag stays).`);
+                    }
+                } catch (e) {
+                    log(`Warning: the old betas were not all removed: ${clean(e.message)}`);
+                }
+            }
+        } catch (e) {
+            log(`Warning: the old betas were not all removed: ${clean(e.message)}`);
+        }
+    };
+
     if (rel && (rel.assets || []).some(a => a.name === file)) {
         log(`Release ${tag} exists already, nothing to do.`);
+        await cleanBetas();
         return 'exists';
     }
 
@@ -130,11 +221,22 @@ export async function run({env = process.env, fetchFn = fetch, readFile = readFi
         log(rel
             ? `Dry run: release ${tag} exists without ${file}; would upload it (dist/${file}: ${size}).`
             : `Dry run: would create ${kind} ${tag} on ${sha || 'the new snapshot commit'} with ${file} (dist/${file}: ${size}).`);
+        await cleanBetas();
         return 'dry-run';
     }
 
     // Read the zip first: no release without the file it is about.
-    const zip = readFile(`dist/${file}`);
+    let zip;
+    try {
+        zip = readFile(`dist/${file}`);
+    } catch (e) {
+        if (!prerelease || !(e?.code === 'ENOENT' || /ENOENT/.test(String(e?.message)))) {
+            throw e;
+        }
+        log(`No dist/${file} (the mod did not change in this push): no ${kind} ${tag} yet, ` +
+            'the next push that changes the mod makes it.');
+        return 'no-zip';
+    }
     let status = 'repaired';
     if (!rel) {
         const made = await call(createRequest(repo, version, sha, env.RELEASE_NOTES, {prerelease}));
@@ -150,6 +252,7 @@ export async function run({env = process.env, fetchFn = fetch, readFile = readFi
         await fail(`Uploading ${file} to release ${tag}`, up);
     }
     log(`Uploaded ${file} (${zip.length} bytes) to release ${tag}.`);
+    await cleanBetas();
     return status;
 }
 

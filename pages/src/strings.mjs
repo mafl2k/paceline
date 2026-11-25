@@ -55,7 +55,9 @@ export const S = {
     recHeartrate: 'Heart rate',
     recGrade: 'Grade',
     recSmooth5Label: '5 s smoothed power',
-    recSmooth5Help: 'For your power number in the pull and in the Power field. Off: your power as Zwift sends it. The bar\'s marker has its own filter either way.',
+    recSmooth5Help: 'For your power number in the pull and in the Power field. Off: your power as Zwift sends it. The bar has its own filter either way.',
+    barNumsLabel: 'Numbers on the power bar',
+    barNumsHelp: 'Where amber and red begin, in your Pull target unit: watts rounded to 10, W/kg to 0.1.',
     saveFailed: 'Could not save the plan in this browser.',
 
     // plan section

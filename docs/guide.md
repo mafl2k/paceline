@@ -259,28 +259,38 @@ or wider and they grow.
   is pulling (`#1`). `#2` means you are next.
 - **READY:** in the last 10 seconds before your pull the window shows your target, your power now
   and `READY` in amber; [the pictures](../README.md) on the front page show how it looks. The power
-  bar is there already, with a white marker. It shows where you are against the target, so you come
-  up to it before the handover instead of surging. Being below the target in the draft is right, so
-  nothing turns red yet. The middle number is drawn smaller than the two at the sides (see **Smaller
-  middle field** below).
+  bar is there already with its band and the shadow of your power now (see your pull, below), but
+  without a marker. It shows where you are against the target, so you come up to it before the
+  handover instead of surging. Being below the target in the draft is right: the band only shows
+  how far below you are. The middle number is drawn smaller than the two at the sides (see
+  **Smaller middle field** below).
 - During your pull the window shows three numbers: your target on the left, your power now in the
   middle, and the time left of your pull in seconds on the right (`110`, `s`). The time turns
   amber in the last 10 seconds and, over time, runs on below zero in amber (`−4`). Below is the
-  power bar. Its middle line is your target. Green is within 5 % of it, amber within 10 %, red
-  beyond. The marker is your filtered power. Single spikes in Zwift's power are thrown out, the rest
-  is smoothed over a few seconds, and the marker only moves once that is more than 2 % (about 5 W)
-  away from where it stands. So it keeps still while you ride on target, and a real drop of 10 %
-  shows after about 4 seconds. Its colour is the zone it is in. In the first seconds of your pull,
-  while you ramp up, the marker stays white. The number in the middle is your power as Zwift sends
-  it, once a second, like other live-data windows, in the marker's colour. Tick **5 s smoothed
-  power** to see the average of the last 5 seconds instead. The number moves more than the marker:
-  ride by the bar, the number only tells you what you push. It is kept small on purpose. Without pull watts in
-  the plan, neither in the JSON nor from a text export, there is no target. You then see `–` as the
+  power bar. Its green field is your target: green is within 5 % of it, amber within 10 %, red
+  beyond. The red ends reach out to 30 % off the target, squeezed towards the ends, so a surge or a
+  soft spell still shows how far out you are. A soft white band on the bar shows where your power
+  has been in the last 10 seconds, from the lowest second to the highest, with a soft shadow inside
+  it at your power now. Single spikes in Zwift's power, like the dip of a gear change, are left
+  out, and the band glides over about a second instead of jumping. 5 seconds into your pull the
+  big marker appears: your average of the seconds of your pull so far, up to the last 10, in the
+  colour of its zone. The ramp-up counts, so after a slow start the marker can show amber for a
+  few seconds. After that the marker keeps still while you ride on target,
+  and the band and its shadow show quickly when you move away.
+  The number in the middle is your power as Zwift sends it, once a second, like other live-data
+  windows, in the marker's colour once the marker shows. Tick **5 s smoothed power** to see the
+  average of the last 5 seconds instead. The number moves more than the marker: ride by the bar,
+  the number only tells you what you push. It is kept small on purpose. Without pull watts in the
+  plan, neither in the JSON nor from a text export, there is no target. You then see `–` as the
   target, your power now, the time and a plain grey bar.
 - **Smaller middle field**: the middle number is drawn a little smaller than the two at the sides.
   That is your power now in READY and during your pull, and the middle field while resting (see
   "Fields while resting"). So the target and the time stand out, and the bar stays what you ride by.
   It is on by default. To have all three numbers the same size, untick **Smaller middle field** in
+  the Action window's settings (under "This window").
+- **Numbers on the power bar** (off by default): each amber and red field shows where it begins,
+  on its side towards the middle, in your **Pull target** unit: watts rounded to 10, W/kg to 0.1.
+  At a 200 W target that is `180` and `190` on the left, `210` and `220` on the right. Tick it in
   the Action window's settings (under "This window").
 - **Fields while resting** (off by default): three fields of your choice in the Action window while
   you rest. See "Fields while resting" below.
@@ -339,7 +349,7 @@ until READY, the last 10 seconds before your pull. From then on the window shows
 as always. A climb or descent (the Rest window shows `▲` or `▼`) does not change them, and they keep
 showing live values.
 
-<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, the 5 s smoothed power box, Fields while resting ticked with Heart rate on the left, Power in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown)">
+<img src="images/settings-action.png" width="420" alt="The Action window's settings: Smaller middle field ticked, the 5 s smoothed power box and the Numbers on the power bar box (both unticked), Fields while resting ticked with Heart rate on the left, Power in the middle and Draft on the right (labelled: if Rest window active, otherwise countdown)">
 
 Without a Rest window, or with one that has no countdown yet, the countdown is the right field. The
 number is on top and your place under it (`13` over `#2`, `3:59` over `#6`). While the clock stands
@@ -613,8 +623,8 @@ transparency. With a **Transparent** theme such as Dark, the background disappea
 when you move the mouse over the window. For your own colour or opacity, open the settings from that
 window, tick **Solid background** under Appearance and set the opacity with the slider (100 =
 opaque). Each Paceline window keeps its own, as in Sauce's windows. The Action window has its own
-settings window for that, with its own options below the appearance: **Smaller middle field** and
-**Fields while resting**.
+settings window for that, with its own options below the appearance: **Smaller middle field**,
+**5 s smoothed power**, **Numbers on the power bar** and **Fields while resting**.
 
 ### Recorder
 
@@ -862,7 +872,7 @@ and its code ("'Rollers · fast' v3 is live for Thu 19 Nov 19:30. Plan code RE5C
 to your riders, so they can check it. A plan stored but not live says so in red: "Not live: riders
 get nothing until you press Make live."
 
-<img src="images/captain-cockpit-store-390-light.png" width="260" alt="A plan not stored yet picked on a phone, the Store sheet: the title Received 19:12 · 'Rollers' · 3 riders with ✕ and the caption Against live 'easy' v1; the rider table with Alma Keller marked NEW, Ben Richter and Cleo Maier, and Dana Lorenz, Eli Sommer and Gina Hoff crossed out; under it the form: the fold Other team; Store as with New version of 'Rollers · easy' (live · v1 · 2 of 3 riders the same), of 'Rollers · fast' and of 'Rollers · spare', and New plan, none chosen yet; the red line Pick a plan.; then the action bar with Discard, Store and Make live in that order at its right end; last the line Not updating while the Store form is open · Refresh">
+<img src="images/captain-cockpit-store-390-light.png" width="260" alt="A plan not stored yet picked on a phone, the Store sheet: the title Received 19:12 · 'Rollers' · 3 riders with ✕ and the caption Against live 'easy' v1; the rider table, every pull 60 s at its target (60 s @ 3.3 to 60 s @ 3.6), with Alma Keller marked NEW, Ben Richter and Cleo Maier, and Dana Lorenz, Eli Sommer and Gina Hoff crossed out; under it the form: the fold Other team; Store as with New version of 'Rollers · easy' (live · v1 · 2 of 3 riders the same), of 'Rollers · fast' and of 'Rollers · spare', and New plan, none chosen yet; the red line Pick a plan.; then the action bar with Discard, Store and Make live in that order at its right end; last the line Not updating while the Store form is open · Refresh">
 
 Every Store of a plan is a new version (v1, v2, …), and up to 20 are kept per plan. A race can have
 several plans ("Rollers · fast", "Rollers · slow"), and any version of any of them can be made live.
@@ -878,7 +888,7 @@ A race's ⋯ has "Date and time" with **Save date and time…**, which moves the
 plans, and its event link with **Save event link** and **Remove event link**. A plan's ⋯ has
 **Rename**, **Edit on ZwiftGopher** and **Delete plan…**.
 
-<img src="images/captain-cockpit-version-1280-light.png" width="780" alt="The Rollers team page at 1280 px with a version picked: the sidebar with Rollers (1 new plan, 0 of 5 riders have the plan), Sprockets and Cogs; the title line Rollers with Updated 19:12 raised beside it and Team settings at its right end; under it Plan on ZwiftGopher and Upload a file at the left and, above the card at the right, Make live; in the left column two boxes, the first starting on the card's top line: Not stored yet (headed like a race's line, with Received 19:12 · 'Rollers' · 3 riders), then the race's box with its line Thu 19 Nov · 19:30 · in 18 min, the plans fast (v2 · Other details only, v1 · Alma Keller and Finn Weber in, Gina Hoff out · 1 pull time · 4 targets), spare, and easy with the picked row v2 · not live and v1 · 0/5 have it tagged LIVE and SENDING; under them How races work; in the right column one framed card: 'easy' v2 · stored Thu 19 Nov 19:12, its Plan code and Against live v1, the rider table with Alma Keller NEW and Gina Hoff crossed out, the warning lines Alma Keller moves from Sprockets to Rollers. and Still to do: Sprockets., and no button bar in the card (its Make live is in the row above)">
+<img src="images/captain-cockpit-version-1280-light.png" width="780" alt="The Rollers team page at 1280 px with a version picked: the sidebar with Rollers (1 new plan, 0 of 5 riders have the plan), Sprockets and Cogs; the title line Rollers with Updated 19:12 raised beside it and Team settings at its right end; under it Plan on ZwiftGopher and Upload a file at the left and, above the card at the right, Make live; in the left column two boxes, the first starting on the card's top line: Not stored yet (headed like a race's line, with Received 19:12 · 'Rollers' · 3 riders), then the race's box with its line Thu 19 Nov · 19:30 · in 18 min, the plans fast (v2 · 5 targets, v1 · Alma Keller and Finn Weber in, Gina Hoff out · 1 pull time · 4 targets), spare (v1 · 5 targets), and easy with the picked row v2 · not live and v1 · 0/5 have it tagged LIVE and SENDING; under them How races work; in the right column one framed card: 'easy' v2 · stored Thu 19 Nov 19:12, its Plan code and Against live v1, the rider table (every pull 60 s at its target, 60 s @ 3.3 to 60 s @ 3.6) with Alma Keller NEW and Gina Hoff crossed out, the warning lines Alma Keller moves from Sprockets to Rollers. and Still to do: Sprockets., and no button bar in the card (its Make live is in the row above)">
 
 The rider table shows the plan as riders get it: number, rider, and pull @ target ("60 s @ 4.2"). It
 is marked against the race's live version: a changed rider is followed by his old row, dimmed; a
