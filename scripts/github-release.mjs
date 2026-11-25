@@ -4,7 +4,10 @@
 // is created on that snapshot commit.
 //
 // If the release v<version> exists with the zip, nothing happens. If it exists without the zip
-// (an earlier run stopped after creating it), only the zip is uploaded.
+// (an earlier run stopped after creating it), only the zip is uploaded. A beta without its zip
+// (a push to next that changed no mod file, so the mod-zip job did not run, e.g. scripts only right
+// after a promote) is no error: nothing is created, the next push that changes the mod releases it.
+// A stable release without its zip still fails.
 //
 // After a final release (not a beta) the betas it replaces are removed from GitHub's releases
 // (user, 25 Nov 2026: "should a promote kill the corresponding beta?" — yes, the releases with
@@ -223,7 +226,17 @@ export async function run({env = process.env, fetchFn = fetch, readFile = readFi
     }
 
     // Read the zip first: no release without the file it is about.
-    const zip = readFile(`dist/${file}`);
+    let zip;
+    try {
+        zip = readFile(`dist/${file}`);
+    } catch (e) {
+        if (!prerelease || !(e?.code === 'ENOENT' || /ENOENT/.test(String(e?.message)))) {
+            throw e;
+        }
+        log(`No dist/${file} (the mod did not change in this push): no ${kind} ${tag} yet, ` +
+            'the next push that changes the mod makes it.');
+        return 'no-zip';
+    }
     let status = 'repaired';
     if (!rel) {
         const made = await call(createRequest(repo, version, sha, env.RELEASE_NOTES, {prerelease}));

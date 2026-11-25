@@ -225,6 +225,22 @@ test('GITHUB_PRERELEASE=1: an existing pre-release with the zip means nothing ha
     assert.equal(calls.length, 1);
 });
 
+test('GITHUB_PRERELEASE=1 without the zip (no mod change in the push): nothing created, no error', async () => {
+    const {fn, calls} = stub([[isBetaLookup, reply(404, {message: 'Not Found'})]]);
+    const noZip = (path, enc) => path === 'manifest.json' ? betaFile(path, enc) : (() => {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {code: 'ENOENT'});
+    })();
+    const logs = [];
+    assert.equal(await run({env: env({GITHUB_PRERELEASE: '1'}), fetchFn: fn, readFile: noZip, log: m => logs.push(m)}), 'no-zip');
+    assert.deepEqual(calls.map(c => c.method), ['GET']);
+    assert.match(logs.join('\n'), /No dist\/paceline-1\.3\.0-beta\.2\.zip .*next push that changes the mod/);
+    // Any other read error still fails, and a stable release without its zip too (test above).
+    const broken = (path, enc) => path === 'manifest.json' ? betaFile(path, enc) : (() => { throw new Error('EACCES'); })();
+    await assert.rejects(run({env: env({GITHUB_PRERELEASE: '1'}), fetchFn: stub([[isBetaLookup, reply(404, {})]]).fn,
+        readFile: broken, log() {}}), /EACCES/);
+});
+
+
 test('a beta never becomes a normal release, a plain version never a pre-release', async () => {
     const {fn, calls} = stub([]);
     await assert.rejects(run({env: env(), fetchFn: fn, readFile: betaFile, log() {}}),
