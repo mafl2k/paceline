@@ -13,7 +13,7 @@ export const RUN_HOLE_MS = 3000;       // a longer hole between ticks ends a run
 // 'pause' (older versions det.climb). Since the turn clocks (23 Nov 2026; the key `old` or det.turn)
 // the rotation runs normally on a real hill and det.hill says 'pause' on every one of them: the
 // pause is then only the seconds the climb display was on (det.turn.disp, reason 'climb'/'descent';
-// after the hill 'regroup', det.turn.disp.quiet).
+// after the hill 'regroup', or the provisional countdown while det.prov is true: det.turn.disp.quiet).
 export function pausedAt(det) {
     if (!det) {
         return false;

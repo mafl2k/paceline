@@ -23,9 +23,10 @@ const names = ids => (ids || []).map(id => NAME[id]);
 // Synthetic 1 Hz rides. script(s) -> {order: idx[] front first, 2 m apart; extra: [{idx, dx}] (metres
 // from me, negative = behind); me: {power, draft, grade, speed, top, state}; power: {idx: W}}. After each
 // turnsStep the real gapStep runs and its state goes into the next step, as paceline.mjs will do.
-// Rows: {s, owner (name), since (s), change (kind), reason, v (view), st, self, gaps}.
+// Rows: {s, owner (name), since (s), change (kind), reason, v (view), st, self, gaps}. `provisional` is
+// passed to turnsStatus only when given (else the engine's default: on); false shows today's quiet 'regroup'.
 function ride(script, {plan = mkPlan(), selfIdx = 5, dur = 60, from = 0, terrain = () => undefined, filter = false,
-                       init = T.initialTurns} = {}) {
+                       init = T.initialTurns, provisional} = {}) {
     const riderIds = new Set(plan.riders.map(r => r.id));
     const selfId = plan.riders[selfIdx].id;
     let st = init(T0), gaps = null, hist = [], drafts = [];
@@ -57,7 +58,8 @@ function ride(script, {plan = mkPlan(), selfIdx = 5, dur = 60, from = 0, terrain
             {speed: e.state.speed, power: e.state.power, age: e.age}]));
         gaps = gapStep(gaps ?? initialGaps(), {now, selfId, active: true, hill: st.hill.mode === 'pause', riders,
                                                positions: alignedPositions(nearby, riderIds).filter(p => riderIds.has(p.id))});
-        const {view, reason} = T.turnsStatus(st, {now, plan, selfId, live: true});
+        const {view, reason} = T.turnsStatus(st, {now, plan, selfId, live: true,
+                                                  ...(provisional === undefined ? {} : {provisional})});
         rows.push({s, owner: NAME[st.front.puller] ?? null,
                    since: st.front.since === null ? null : (st.front.since - T0) / 1000,
                    change: st.change?.kind ?? null, reason, v: view, st, self: r.self, gaps});
@@ -803,7 +805,7 @@ test('display end: not before the hill is over; before the end phase a long solo
     // back from 720 (a return), Ann from 730 (a back change).
     const rows = ride(line([[0, 0], [3, 40], [0, 120], [1, 250], [0, 270], [3, 400], [0, 410], [1, 697], [2, 710],
                             [1, 720], [0, 730]]),
-                      {dur: 760, terrain: CLIMB});
+                      {dur: 760, terrain: CLIMB, provisional: false});
     assert.equal(at(rows, 60).change, 'skip');
     assert.deepEqual(at(rows, 123).st.disp, {at: T0 + 123000, why: 'front', pend: null});
     for (const r of rows.filter(r => r.s >= 123 && r.s < 700)) {
@@ -892,7 +894,7 @@ const REGROUP = line([[0, 0], [3, 120], [0, 290], [1, 340]]);
 
 test('after the hill: ▲ (▼) only on the hill, then the quiet \'regroup\' with no view until the end rule ends the display as before', () => {
     for (const kind of ['climb', 'descent']) {
-        const rows = ride(REGROUP, {dur: 360, terrain: hills([[100, 300]], kind)});
+        const rows = ride(REGROUP, {dur: 360, terrain: hills([[100, 300]], kind), provisional: false});
         assert.equal(at(rows, 123).st.disp.why, 'front', kind);
         for (const r of rows.filter(r => r.s >= 123 && r.s < 300)) {
             assert.equal(r.reason, kind, `${kind} s ${r.s}`);
@@ -959,7 +961,7 @@ test('display end: the expected next of the clear puller leaves out the riders s
     assert.equal(r.st.disp, null);
 });
 
-test('provisional (off by default): after the hill with a clear puller, a view as if he were the owner; none before him, none on the hill', () => {
+test('provisional (on by default): after the hill with a clear puller, a view as if he were the owner; none before him, none on the hill', () => {
     const plan = mkPlan();
     const rows = ride(REGROUP, {plan, dur: 360, terrain: CLIMB});
     const status = (r, opts = {}) => T.turnsStatus(r.st, {now: T0 + r.s * 1000, plan, selfId: ID.Finn, live: true, ...opts});
@@ -975,14 +977,21 @@ test('provisional (off by default): after the hill with a clear puller, a view a
             assert.equal(on.view.puller.id, ID.Ann, `s ${r.s}`);
             assert.equal(on.view.elapsedS, r.s - 290, `Ann's clock from when she came to the front, s ${r.s}`);
             assert.equal(on.view.mine, false, `s ${r.s}`);
+            // What the Info table relies on: its front row names st.front.puller (turnTable), next to the
+            // provisional view's clock (the pending puller's), so wherever the view is provisional they
+            // are the same rider. (Not front.since: it can be reset once he holds the front again.)
+            assert.equal(r.st.front.puller, r.st.disp.pend.id, `front puller is the pending puller, s ${r.s}`);
             // The same view rotationView gives for Ann as the owner from 290, only marked.
             const owned = T.turnsStatus({...r.st, disp: null, front: {...r.st.front, puller: ID.Ann, since: T0 + 290000}},
                                         {now: T0 + r.s * 1000, plan, selfId: ID.Finn, live: true});
             assert.deepEqual(on.view, {...owned.view, provisional: true}, `s ${r.s}`);
         }
-        // Off (the default and the mod): no view while the display is on.
-        assert.equal(status(r).view, null, `s ${r.s}`);
-        assert.deepEqual(status(r, {provisional: false}), status(r), `s ${r.s}`);
+        // On is the default (the mod's choice since 26 Nov 2026): the same as asking for it.
+        assert.deepEqual(status(r, {provisional: true}), status(r), `s ${r.s}`);
+        // Off: today's quiet display, no view while the display is on (after the hill: 'regroup').
+        const off = status(r, {provisional: false});
+        assert.equal(off.view, null, `s ${r.s}`);
+        assert.equal(off.reason, r.s < 300 ? 'climb' : 'regroup', `s ${r.s}`);
     }
     // After the end: the real view, not provisional.
     assert.equal(status(at(rows, 343), {provisional: true}).view.provisional, undefined);

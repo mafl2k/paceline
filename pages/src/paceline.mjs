@@ -494,7 +494,10 @@ function muted() {
 function bandPhase(now) {
     const {view} = turnsStatus(rot, {now, plan, selfId, live: true});
     if (view && view.mine) {
-        return {since: rot.front.since, goal: barTarget(view.me, liveWeight(), prefs.targetUnit)};
+        // A provisional pull (after a climb, the order not confirmed yet) counts from the clear
+        // puller's front run, the same start his clock has (26 Nov 2026).
+        const since = view.provisional ? rot.disp.pend.since : rot.front.since;
+        return {since, goal: barTarget(view.me, liveWeight(), prefs.targetUnit)};
     }
     return null;
 }
@@ -864,6 +867,7 @@ function detOf(now) {
         finish: rot.finish,
         view: kind,
         reason,
+        prov: !!view?.provisional,    // the view shown is the provisional one after a climb (26 Nov 2026)
         wheel: view && view.wheel ? view.wheel.id : null,    // from the plan (shown)
         wheelObs: selfId === null ? null : wheelOf(rot.chain, selfId),    // observed in my chain
         wheelCue: cueView(cue, now)?.id ?? null,    // the wheel shown in the rest line (wheelcue.mjs)
@@ -1547,13 +1551,19 @@ function renderRotation(now) {
         textLine(nextEl, S.noRotation, true);
     }
     nextEl.classList.toggle('pl-planned', !!cn?.planned);
+    // A provisional countdown after a climb (the order is not confirmed yet) shows dim here, in
+    // the Info window only; Action and Rest show it as a normal one (user, 26 Nov 2026: "Dim in
+    // Info only"). Set before every return below, so the dim never sticks to a text line.
+    frontEl.classList.toggle('pl-planned', !!view?.provisional);
     if (reason === 'finish' || reason === 'climb' || reason === 'descent') {
         textLine(frontEl, reason === 'finish' ? S.finishOff : reason === 'climb' ? S.climbPaused : S.descentPaused,
                  false);
         return;
     }
     if (reason === 'regroup') {
-        // After the hill, until the order is back (23 Nov 2026): no ▲, a quiet dim line.
+        // After the hill, until one rider clearly leads (23 Nov 2026): no ▲, a quiet dim line. From then on
+        // the provisional countdown shows (dim in Info) until the order is confirmed, unless someone who is
+        // neither the clear puller nor his plan's next leads for 3 s (then this quiet line again).
         textLine(frontEl, S.regroupPaused, true);
         return;
     }
@@ -1735,6 +1745,7 @@ function renderTable(now) {
         el.classList.toggle('pl-dropped-first', i === droppedAt && i > 0);
         el.classList.toggle('pl-top', front && (i === 0 || i === nextAt));    // the two to call out, larger
         el.classList.toggle('pl-trow-slot', !!row.slot);    // the empty slot keeps its height (CSS)
+        el.classList.remove('pl-planned');    // only the front row below gets it, for a provisional view
         if (!row.rider) {
             el.classList.remove('pl-me', 'pl-pulling', 'pl-absent', 'pl-hang', 'pl-offplan');
             textLine(el, row.text, true);
@@ -1755,6 +1766,9 @@ function renderTable(now) {
         if (front && i === 0) {
             value = reason === 'climb' ? {clock: S.dashClimb} : reason === 'descent' ? {clock: S.dashDescent} :
                 reason === 'finish' || reason === 'regroup' ? {clock: S.noRotation} : view && row.pulling ? frontClock(view) : value;
+            // The provisional clock (after a climb, order not confirmed) is dim, like the Front line
+            // (user, 26 Nov 2026: "Dim in Info only"); it is the clear puller's, so only on his row.
+            el.classList.toggle('pl-planned', !!view?.provisional && row.pulling);
         }
         setValue(c, value);
     });

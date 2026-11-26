@@ -86,7 +86,7 @@ versions, so one reference judges them all:
 ```
 node tools/race-ref/score.mjs . <reference.json> <recording.jsonl[.gz]> [--plan <SIG>=<plan.json> ...]
         [--core rotation|turns] [--filter] [--route <getRoute.json>] [--segments <getSegments.json>]
-        [--provisional]
+        [--provisional | --no-provisional]
 ```
 
 - `--core`: which adapter runs. Without it the checkout decides: one that has
@@ -95,10 +95,13 @@ node tools/race-ref/score.mjs . <reference.json> <recording.jsonl[.gz]> [--plan 
   forces the old adapter, which scores the shadow `rotation.mjs` of a new checkout; `turns` forces
   the new one.
 - `--filter`: turns the power filter on (off in the mod; only the new core has it).
-- `--provisional`: measuring only (off in the mod; only the new core has it). After a climb, while
-  the display waits for the order (the windows' quiet `regroup`), the new core shows a provisional
-  countdown as soon as it has a clear puller, as if he were the owner. The usual figures then count
-  that view as shown (puller, countdown, my turn). The old adapter ignores the flag.
+- `--provisional` / `--no-provisional`: only the new core has the view. After a climb, while the
+  display waits for the order (the windows' quiet `regroup`), the new core shows a provisional
+  countdown as soon as it has a clear puller, as if he were the owner (on in the mod since 26 Nov
+  2026). The usual figures then count that view as shown (puller, countdown, my turn). Without a
+  flag a checkout runs its own default (this repository's: on; older checkouts have no such view or
+  had it off); `--provisional` forces it on, `--no-provisional` off, which gives today's quiet
+  display for comparison. The old adapter ignores both flags.
 - `--route`: the climb index for the new core, as the live mod builds it (the route's own segments
   over climbs count). The file is the JSON of Sauce's `Common.getRoute(id)` for the race's route,
   fetched read-only once and kept outside the repository (route data is not part of it). Without
@@ -117,7 +120,7 @@ Three figures are new, for the turn clocks:
 - `belowLong`: how many runs, per rider, of more than 30 s (`BELOW_LONG_S`) of being shown below the
   line while in the reference group, with me in it. Seconds up to 2 s apart are one run (as `flick`).
 
-And three for the provisional countdown (0 / null without `--provisional`; null for the old adapter):
+And three for the provisional countdown (0 / null where the view is off, e.g. with `--no-provisional`; null for the old adapter):
 
 - `provS`: the seconds with a provisional view.
 - `provRight`: the percent of those seconds, from 5 s into a reference turn, in which the

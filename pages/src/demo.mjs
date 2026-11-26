@@ -16,7 +16,8 @@
 //      later a climb at 5 %: without a route profile a roller for its first 45 s (the rotation
 //      goes on), then a real climb. There the rider before the climber jumps the queue to the
 //      front, which breaks the order: the windows show ▲ until the top. Over the top he leads on
-//      (regroup, quiet) until he is a clear puller and the rotation goes on from him;
+//      (regroup) until he is a clear puller: then his countdown shows again, provisional (dim in Info),
+//      until the rotation goes on from him;
 //      the last FINISH_LAST_S of the team ride are the final sprint (my entry's `remaining`
 //      counts down to the finish, and is within 500 m from then on).
 // Gaps in the line (gaps.mjs): in my first pull the whole group lets GAP_M open behind me, in my

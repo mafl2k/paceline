@@ -1503,7 +1503,8 @@ test('runEngine: --provisional reaches turnsStatus; prov and the shown puller, c
     resetTurnsStubs(stubs);
     Object.assign(stubs.turns, {puller: 0, prov: {puller: 2, toMy: 40}});
     const off = await runEngine(STUB_TURNS, ride, opts);
-    assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === false), 'off by default');
+    assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => !('provisional' in o)),
+              'not passed by default: the checkout runs its own default');
     assert.equal(off.prov.length, opts.N);
     assert.ok(off.prov.every(x => x === 0));
     assert.deepEqual([off.pul[50], off.toMy[50], off.mine[50]], [1, null, 0], 'the owner, no view');
@@ -1511,11 +1512,15 @@ test('runEngine: --provisional reaches turnsStatus; prov and the shown puller, c
     const on = await runEngine(STUB_TURNS, ride, {...opts, provisional: true});
     assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === true));
     assert.deepEqual([on.prov[50], on.pul[50], on.toMy[50], on.mine[50]], [1, 3, 40, 0], 'the provisional view as shown');
+    stubs.turns.status.length = 0;
+    const forcedOff = await runEngine(STUB_TURNS, ride, {...opts, provisional: false});
+    assert.ok(stubs.turns.status.length > 100 && stubs.turns.status.every(o => o.provisional === false), 'forced off reaches it');
+    assert.ok(forcedOff.prov.every(x => x === 0));
     resetTurnsStubs(stubs);
 });
 
 
-test('runEngine: --provisional changes nothing for the old adapter; off it changes nothing for the new one', async () => {
+test('runEngine: --provisional changes nothing for the old adapter; for the new one on is the repo default, off is a run of its own', async () => {
     const {ride, opts} = engineInput();
     const {stub} = await import('./fixtures/race-ref/stub-engine/pages/src/engine/rotation.mjs');
     Object.assign(stub, STUB_QUIET);
@@ -1524,11 +1529,37 @@ test('runEngine: --provisional changes nothing for the old adapter; off it chang
     assert.deepEqual(await runEngine(REPO, ride, {...opts, core: 'rotation', provisional: true}), rot);
     assert.equal(rot.prov, undefined, 'the old adapter has no prov');
     const turns = await runEngine(REPO, ride, {...opts, core: 'turns'});
-    assert.deepEqual(await runEngine(REPO, ride, {...opts, core: 'turns', provisional: false}), turns);
-    assert.ok(turns.prov.every(x => x === 0));
-    // On, the real core runs over the fixture (no hill there: nothing provisional).
-    const prov = await runEngine(REPO, ride, {...opts, core: 'turns', provisional: true});
-    assert.equal(prov.prov.length, opts.N);
+    // The repository's turnsStatus has the view on by default: asking for it changes nothing.
+    assert.deepEqual(await runEngine(REPO, ride, {...opts, core: 'turns', provisional: true}), turns);
+    assert.equal(turns.prov.length, opts.N);
+    // Off is a run of its own (the real core runs over the fixture: no hill there, nothing provisional).
+    const off = await runEngine(REPO, ride, {...opts, core: 'turns', provisional: false});
+    assert.equal(off.prov.length, opts.N);
+    assert.ok(off.prov.every(x => x === 0));
+});
+
+
+test('score CLI: --provisional forces the view on, --no-provisional off, neither leaves the checkout its own default', async () => {
+    const stubs = await stubsOfTurns();
+    const root = raceFolder();
+    try {
+        const dir = path.join(root, 'race');
+        const {outDir} = run([dir], {log: quiet});
+        const argv = [STUB_TURNS, path.join(outDir, 'reference.json'), path.join(dir, 'a.jsonl'),
+                      '--plan', `P2TEST=${path.join(dir, 'plans', 'P2TEST.json')}`];
+        const optsFor = async (...flags) => {
+            resetTurnsStubs(stubs);
+            assert.equal(await scoreRun([...argv, ...flags], {log: quiet}), 0);
+            assert.ok(stubs.turns.status.length > 0, 'turnsStatus was called');
+            return stubs.turns.status;
+        };
+        assert.ok((await optsFor()).every(o => !('provisional' in o)), 'neither flag: no key at all');
+        assert.ok((await optsFor('--provisional')).every(o => o.provisional === true));
+        assert.ok((await optsFor('--no-provisional')).every(o => o.provisional === false));
+    } finally {
+        resetTurnsStubs(stubs);
+        fs.rmSync(root, {recursive: true, force: true});
+    }
 });
 
 
@@ -1720,7 +1751,7 @@ test('run: --core, --filter, --route parsed; unknown options still fail', async 
         const plain = await go([]);
         assert.equal(plain.code, 0);
         assert.ok(stubs.turns.calls.every(c => c.filter === false), 'by default no filter');
-        assert.ok(stubs.turns.status.every(o => o.provisional === false), 'by default no provisional view');
+        assert.ok(stubs.turns.status.every(o => !('provisional' in o)), 'by default the checkout runs its own provisional default');
         assert.equal(stubs.terrain.builds.length, 0);
         assert.ok(Array.isArray(plain.json.hillDisp), 'the new figures are printed');
         resetTurnsStubs(stubs);
@@ -1741,7 +1772,7 @@ test('run: --core, --filter, --route parsed; unknown options still fail', async 
         const usage = await go(['--core', 'turns', 'extra']);
         assert.equal(usage.code, 2);
         assert.match(usage.lines.join('\n'), /--core rotation\|turns\] \[--filter\] \[--route/);
-        assert.match(usage.lines.join('\n'), /\[--provisional\]/);
+        assert.match(usage.lines.join('\n'), /\[--provisional \| --no-provisional\]/);
     } finally {
         fs.rmSync(root, {recursive: true, force: true});
         resetTurnsStubs(stubs);

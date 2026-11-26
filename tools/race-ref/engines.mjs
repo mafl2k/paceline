@@ -87,7 +87,8 @@ const quiet = N => ({pul: new Array(N).fill(0), toMy: new Array(N).fill(null), m
 // new one reads the rest: filter (the power filter, off in the live mod), route (Sauce's getRoute
 // answer: the climb index when the recording holds none) and segments (Sauce's getSegments answer,
 // passed through to buildClimbIndex, which does not read it: the index takes route.segments) and
-// provisional (turnsStatus's provisional view after a climb, off in the mod; measuring only).
+// provisional (turnsStatus's provisional view after a climb: true/false force it, undefined leaves the
+// checkout its own default, as its mod ran it).
 // Returns {pul, toMy, mine, el, disp, below, chaos, seen}, plain arrays of N (the new adapter adds
 // hang and prov): seen 1 for a second in which the engine saw at least one tick (0: nothing is known there,
 // the other arrays hold their quiet values), pul the shown puller's position (0 none), toMy the seconds to my turn (null),
@@ -101,7 +102,7 @@ const quiet = N => ({pul: new Array(N).fill(0), toMy: new Array(N).fill(null), m
 // present list, take the last tick's value; mine, toMy and el take the last tick that has a view (a
 // tick without one leaves them); disp and chaos are on when any tick turned them on.
 export async function runEngine(dir, ride, {N, t0, pos, plan: given = null, core = 'auto', filter = false,
-                                             route = null, segments = null, provisional = false}) {
+                                             route = null, segments = null, provisional = undefined}) {
     if (!CORES.includes(core)) {
         throw new Error(`unknown core ${JSON.stringify(core)} (auto, rotation or turns)`);
     }
@@ -214,7 +215,9 @@ async function runTurns(dir, ride, {N, t0, pos, plan: given, filter, route, segm
         gaps = G.gapStep(gaps, {now, selfId: ride.selfId, positions: R.alignedPositions(nearby, riderIds).filter(p => riderIds.has(p.id)),
                                 active: live && !st.locked && !st.finish && !st.still?.still, hill: st.hill?.mode === 'pause',
                                 needed, riders: rows});
-        const view = T.turnsStatus(st, {now, plan, selfId: ride.selfId, live, provisional}).view;
+        // The key only when the caller forces it: else the checkout's own default (an old one has no such option).
+        const view = T.turnsStatus(st, {now, plan, selfId: ride.selfId, live,
+                                        ...(typeof provisional === 'boolean' ? {provisional} : {})}).view;
         const s = Math.round((now - t0) / 1000);
         if (s < 0 || s >= N) {
             continue;

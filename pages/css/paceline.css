@@ -380,6 +380,9 @@ html.pl-info.pl-vanish #pl-box > * { visibility: hidden; }
 .pl-trow.pl-hang, .pl-trow.pl-hang .pl-rot-num { color: var(--pl-dim); }
 /* Chaos (20 Nov 2026): the riders below "Order ≠ plan" are the plan's order, not the real one. */
 .pl-trow.pl-offplan, .pl-trow.pl-offplan .pl-rot-num { color: var(--pl-dim); }
+/* The front row's provisional clock after a climb (the order is not confirmed yet; user, 26 Nov 2026:
+   "Dim in Info only"): the place number too, also when it is me (green) or the pulling rule (inherit). */
+.pl-trow.pl-pulling.pl-planned .pl-rot-num { color: var(--pl-dim); }
 /* Captain table: the slot for the "Order ≠ plan" row, empty at the bottom outside chaos, so the
    table keeps its height when chaos starts or ends. */
 .pl-trow.pl-trow-slot { visibility: hidden; }

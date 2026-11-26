@@ -350,9 +350,11 @@ const viewOf = (st, front, {now, plan, selfId}) => rotationView(plan, {selfId, c
 // The view and why there is none (dashReason; 'nofront' before an owner). Never 'chaos'. The
 // countdown is the fixed rule (eff null) on the owner, his clock and the line. The climb display
 // is 'climb'/'descent' (▲/▼) only on the hill; after it, until its end, the quiet 'regroup' (user,
-// 23 Nov 2026: "▲ goes at the end of the climb"). `provisional` (measuring only, off in the mod):
-// in 'regroup' with a clear puller, his view as if he were the owner, marked provisional.
-export function turnsStatus(st, {now, plan, selfId, live, quietStart = false, provisional = false}) {
+// 23 Nov 2026: "▲ goes at the end of the climb"). `provisional` (on in the mod since 26 Nov 2026,
+// user: "5min Stille bei 30min Rennen ist viel"; goal: back to normal fast after a climb): in 'regroup'
+// with a clear puller, his view as if he were the owner, marked provisional. Off: the quiet display
+// until the order is confirmed (replays measure that with --no-provisional).
+export function turnsStatus(st, {now, plan, selfId, live, quietStart = false, provisional = true}) {
     let reason = dashReason({plan, selfId, live, finish: st.finish, climbing: !!st.disp,
                              descent: !!st.hill?.descent, chain: st.chain, still: !!st.still?.still,
                              starting: quietStart && startQuiet(st, now) && st.front?.puller !== selfId});
@@ -424,7 +426,8 @@ export function turnTable(plan, {st, started, selfId = null}) {
 
 
 // What the recording keeps of a step (det.turn): this step's change only, the climb display with its
-// trigger (quiet: after the hill, the windows' 'regroup'), who hangs and who sits out.
+// trigger (quiet: after the hill; the windows' 'regroup', or the provisional countdown when det.prov
+// is true), who hangs and who sits out.
 export function turnDet(st) {
     const c = st.change;
     return {change: c ? {kind: c.kind, ...(c.class ? {class: c.class} : {}), from: c.from, to: c.to} : null,

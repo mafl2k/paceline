@@ -3,7 +3,7 @@
     "name": "Paceline",
     "description": "TTT rotation helper and team recorder.",
     "author": "Matthew Butcher",
-    "version": "0.3.7-beta.0",
+    "version": "0.3.8-beta.0",
     "web_root": "pages",
     "windows": [
         {

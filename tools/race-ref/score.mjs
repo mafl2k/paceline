@@ -3,7 +3,7 @@
 // countdown jumps, chaos while the reference was in order, the figures split by cause and how each
 // display episode ended. Works on a reference that went through JSON (plain arrays).
 //   node tools/race-ref/score.mjs <engine dir> <reference.json> <recording.jsonl[.gz]> [--plan SIG=file ...]
-//                                 [--core rotation|turns] [--filter] [--route file] [--segments file] [--provisional]
+//                                 [--core rotation|turns] [--filter] [--route file] [--segments file] [--provisional | --no-provisional]
 import fs from 'node:fs';
 import {analyse} from '../ride-report/analyse.mjs';
 import {parsePlanArg} from '../ride-report/load.mjs';
@@ -148,7 +148,8 @@ function provFigures(ref, out) {
 // outside every hill window), belowLong (per rider, runs of more than BELOW_LONG_S seconds shown
 // below the line while in the reference group, seconds up to 2 s apart one run, as flick; counted
 // while I am in the group), provS (seconds with a provisional view: the new core's view after a
-// climb, --provisional), provRight (percent of those seconds, from 5 s into a reference turn, with
+// climb; the checkout's own default (on in this repository since 26 Nov 2026) unless --provisional /
+// --no-provisional force it), provRight (percent of those seconds, from 5 s into a reference turn, with
 // that turn's rider as the provisional puller), provJump {med, n} (my countdown steps of CD_JUMP_S
 // or more at the second a provisional view ends, i.e. when the order was confirmed or replaced:
 // their median and count; a second without a countdown or with my pull is not counted)}. A figure
@@ -314,7 +315,7 @@ export function score(ref, out, {me}) {
 
 
 const USAGE = 'usage: node tools/race-ref/score.mjs <engine dir> <reference.json> <recording.jsonl[.gz]> [--plan SIG=file ...] ' +
-    '[--core rotation|turns] [--filter] [--route <getRoute.json>] [--segments <getSegments.json>] [--provisional]';
+    '[--core rotation|turns] [--filter] [--route <getRoute.json>] [--segments <getSegments.json>] [--provisional | --no-provisional]';
 
 // The CLI: reads the reference, replays the recording through the engine at <engine dir> and prints
 // the score as JSON. The positions come from the plan the reference was built on (reference.json's
@@ -323,11 +324,12 @@ const USAGE = 'usage: node tools/race-ref/score.mjs <engine dir> <reference.json
 // engine adapter (default: by the checkout, see runEngine), --filter turns the new core's power
 // filter on, --route is a JSON file with Sauce's getRoute answer (the climb index when the recording
 // holds none; the route's own segments count); --segments is accepted and not used for the index;
-// --provisional shows the new core's provisional view after a climb (measuring only).
+// --provisional / --no-provisional force the new core's provisional view after a climb on / off; neither:
+// the checkout's own default.
 export async function run(argv, {log = console.log} = {}) {
     const files = [];
     const plans = [];
-    const opts = {core: 'auto', filter: false, route: null, segments: null, provisional: false};
+    const opts = {core: 'auto', filter: false, route: null, segments: null, provisional: undefined};
     const json = (flag, file) => {
         if (!file) {
             throw new Error(`${flag} needs a JSON file`);
@@ -344,6 +346,8 @@ export async function run(argv, {log = console.log} = {}) {
             opts.filter = true;
         } else if (argv[i] === '--provisional') {
             opts.provisional = true;
+        } else if (argv[i] === '--no-provisional') {
+            opts.provisional = false;
         } else if (argv[i] === '--route') {
             opts.route = json('--route', argv[++i]);
         } else if (argv[i] === '--segments') {

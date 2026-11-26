@@ -365,8 +365,8 @@ and your place.
 
 When there is no countdown at all, the left and middle fields still show. That is the case with no
 plan yet, in the start pen, at the finish, when riding alone, on a climb or descent and in the quiet
-after it. The right field then stays empty, or shows the dim `▲` / `▼` or the amber `?` that the big
-countdown would show.
+after it, until one rider clearly leads and the countdown is back. The right field then stays empty,
+or shows the dim `▲` / `▼` or the amber `?` that the big countdown would show.
 
 [The pictures](../README.md) on the front page show the Action window with fields and the countdown
 as its right field.
@@ -381,7 +381,8 @@ The Rest window shows the countdown only, never the fields.
   then. Without one it shows `READY` itself. The Paceline windows notice each other: each one leaves
   a sign of life every 2 seconds, and one not heard for 6 seconds counts as closed. In place of the
   countdown the Rest window shows a dim `▲` or `▼` while the order on a real climb or descent is
-  broken, and nothing after the hill until the order is back (see "Rollers and real climbs").
+  broken, and nothing after the hill until one rider clearly leads, when the countdown is back (see
+  "Rollers and real climbs").
 - While a Rest window shows the countdown, the Action window leaves it to it. While you rest the
   Action window stays empty, not even the dash, or shows the fields you picked (see "Fields while
   resting" above). It wakes up with READY in the last 10 seconds before your pull (target, power
@@ -479,16 +480,23 @@ The puller's power does not count: on a climb teams ride level W/kg, so a puller
 planned pull power is normal climbing.
 
 The triangle shows while the climb, and the descent after it, lasts. After the hill the windows go
-quiet until the order is back, with a dim `–` in the Info window's table and no symbol in the
-Action and Rest windows. Meanwhile Paceline still follows who leads (anyone in front for 3
-seconds), but counts no turns. The order is back only once the climb, and the descent after it, is
-over and there is a clear puller. A clear puller is a rider in front for at least half his planned
-pull and at least 20 seconds. Before the last 20 minutes of the race, the plan's next rider after
-him must then also take over (3 seconds in front). The countdown goes on from that rider, with his
-pull time counted from when he came to the front. In the last 20 minutes the clear puller alone
-ends the pause. An end can turn out wrong, when the rider before the puller takes the front back
-within the next two changes. After a wrong end, the next end waits for the plan's next rider
-again. After a right end, the clear puller alone ends it again.
+quiet, with a dim `–` in the Info window's table and no symbol in the Action and Rest windows.
+Meanwhile Paceline still follows who leads (anyone in front for 3 seconds), but counts no turns.
+As soon as one rider has clearly led (the clear puller below), the countdown comes back from him,
+before the order is confirmed: the Action and Rest windows show it as usual, the Info window shows
+his Front line and the table's first row dim until the order is confirmed (unless a rider who is neither
+the clear puller nor his plan's next leads for 3 seconds, see below). The order is back only
+once the climb, and the descent after it, is over and there is a clear puller. A clear puller is a
+rider in front for at least half his planned pull and at least 20 seconds. Before the last 20
+minutes of the race, the plan's next rider after him must then also take over (3 seconds in
+front). The countdown goes on from that rider, with his pull time counted from when he came to the
+front. In the last 20 minutes the clear puller alone ends the pause. An end can turn out wrong,
+when the rider before the puller takes the front back within the next two changes. After a wrong
+end, the next end waits for the plan's next rider again. After a right end, the clear puller alone
+ends it again.
+The countdown goes away again, back to the quiet line, when a rider who is neither the clear puller
+nor his plan's next leads for 3 seconds. It can also show briefly between a climb and its
+descent.
 
 Without the route data, because Sauce has no profile for the route or it could not be loaded yet,
 Paceline goes by the grade under your wheels. A hill then counts once the grade has held for 5
@@ -496,7 +504,9 @@ seconds, and every hill counts as a real climb or descent, since without the pro
 telling a roller.
 
 The Info window shows `Front: –` in these cases, or "Climb – rotation paused", "Descent – rotation
-paused", after the hill a dim "Regrouping – rotation paused", or "Finish – rotation off".
+paused", after the hill a dim "Regrouping – rotation paused" (until one rider clearly leads, then his
+dim countdown until the order is confirmed, unless someone else takes over for 3 seconds), or
+"Finish – rotation off".
 
 ### When the order breaks
 
@@ -577,7 +587,8 @@ the pull time comes first, then the target without its unit, which **Pull target
   the group again. The first two rows take the place of the Front and Next lines, in a larger text
   and set apart from the rest by a small gap. The first row is the rider pulling: bold, with the
   time left, with `▲`/`▼` while the order on a real climb or descent is broken, or with a dim `–`
-  after the hill until the order is back. The second row is the next rider in the line.
+  after the hill until one rider clearly leads (then his time left, dim, until the order is
+  confirmed). The second row is the next rider in the line.
 - The recorder line.
 
 Make the Info window a little taller for the Next line, and taller still for the whole rotation.
